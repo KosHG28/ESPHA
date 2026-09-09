@@ -21,6 +21,14 @@ substitutions:
   # Как часто содержимое сдвигается на пару пикселей против выгорания AMOLED
   pixel_shift_interval: 3min
 
+  # Как часто опрашивается акселерометр и проверяется движение
+  imu_poll_interval: 250ms
+
+  # Насколько должен сдвинуться вектор ускорения (в g), чтобы экран проснулся.
+  # Значение по умолчанию; на месте подбирается сущностью
+  # «Чувствительность к движению» без перепрошивки.
+  motion_wake_threshold: "0.12"
+
   # Длительность анимации листания. Держим короткой: перерисовка кадра на
   # этой плате не бесплатна. 0ms полностью отключает анимацию.
   page_anim_time: 120ms
@@ -106,6 +114,7 @@ packages:
   entities: !include packages/entities.yaml
   printer: !include packages/printer.yaml
   ui: !include packages/ui.yaml
+  imu: !include packages/imu.yaml
   behaviour: !include packages/behaviour.yaml
 
 logger:

@@ -1,0 +1,120 @@
+# ---------------------------------------------------------------------------
+# Акселерометр QMI8658 (I2C, адрес 0x6B) — пробуждение экрана движением.
+#
+# Готового триггера «движение» в компоненте motion нет: он отдаёт только сырые
+# оси в g. Поэтому раз в imu_poll_interval сравнивается текущий вектор
+# ускорения с предыдущим, и если он сдвинулся сильнее порога — экран будится.
+#
+# Порог вынесен в сущность Home Assistant: подобрать его без живой платы
+# нельзя, а так это делается на месте, без перепрошивки.
+# ---------------------------------------------------------------------------
+
+motion:
+  - platform: qmi8658
+    id: imu
+    i2c_id: bus_i2c
+    address: 0x6B
+    update_interval: ${imu_poll_interval}
+    accelerometer_range: 4G
+
+sensor:
+  # Оси нужны только внутри устройства — в Home Assistant их не публикуем,
+  # иначе они засоряли бы историю несколькими значениями в секунду
+  - platform: motion
+    type: acceleration_x
+    motion_id: imu
+    id: imu_ax
+    internal: true
+  - platform: motion
+    type: acceleration_y
+    motion_id: imu
+    id: imu_ay
+    internal: true
+  - platform: motion
+    type: acceleration_z
+    motion_id: imu
+    id: imu_az
+    internal: true
+
+globals:
+  - id: imu_prev_x
+    type: float
+    restore_value: false
+    initial_value: 'NAN'
+  - id: imu_prev_y
+    type: float
+    restore_value: false
+    initial_value: 'NAN'
+  - id: imu_prev_z
+    type: float
+    restore_value: false
+    initial_value: 'NAN'
+  # Насколько сдвинулся вектор ускорения с прошлой проверки, в g
+  - id: imu_delta
+    type: float
+    restore_value: false
+    initial_value: '0'
+
+switch:
+  - platform: template
+    id: motion_wake_enabled
+    name: Пробуждение движением
+    icon: mdi:motion-sensor
+    entity_category: config
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+
+number:
+  - platform: template
+    id: motion_threshold
+    name: Чувствительность к движению
+    icon: mdi:tune
+    entity_category: config
+    unit_of_measurement: g
+    min_value: 0.02
+    max_value: 1.0
+    step: 0.02
+    initial_value: ${motion_wake_threshold}
+    optimistic: true
+    restore_value: true
+
+  # Диагностика: сюда попадает последний измеренный сдвиг. Пошевелите плату и
+  # посмотрите, какие значения набегают — по ним и выставляйте порог выше.
+  - platform: template
+    id: motion_last_delta
+    name: Последний сдвиг
+    icon: mdi:vibrate
+    entity_category: diagnostic
+    unit_of_measurement: g
+    min_value: 0
+    max_value: 10
+    step: 0.01
+    optimistic: true
+    disabled_by_default: true
+
+interval:
+  - interval: ${imu_poll_interval}
+    then:
+      - lambda: |-
+          float ax = id(imu_ax).state, ay = id(imu_ay).state, az = id(imu_az).state;
+          if (std::isnan(ax) || std::isnan(ay) || std::isnan(az))
+            return;
+          float px = id(imu_prev_x), py = id(imu_prev_y), pz = id(imu_prev_z);
+          id(imu_prev_x) = ax;
+          id(imu_prev_y) = ay;
+          id(imu_prev_z) = az;
+          if (std::isnan(px)) {
+            // Первое измерение: сравнивать не с чем
+            return;
+          }
+          float dx = ax - px, dy = ay - py, dz = az - pz;
+          id(imu_delta) = sqrtf(dx * dx + dy * dy + dz * dz);
+      - if:
+          condition:
+            lambda: |-
+              return id(motion_wake_enabled).state &&
+                     id(imu_delta) > id(motion_threshold).state;
+          then:
+            # mode: restart у wake_screen — пока плату держат в руках,
+            # таймер гашения просто продлевается
+            - script.execute: wake_screen
