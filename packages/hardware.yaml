@@ -5,8 +5,10 @@
 # Распиновка (проверена по демо-коду Waveshare и сообществу ESPHome):
 #   Дисплей QSPI : CS=GPIO9  CLK=GPIO10  D0=GPIO11  D1=GPIO12  D2=GPIO13
 #                  D3=GPIO14  RESET=GPIO21
+#   Питание LCD : GPIO42 (LCD EN, активно в 1)
 #   I2C (тач,    : SDA=GPIO47  SCL=GPIO48
 #   IMU, RTC)
+#   Тач FT3168  : 0x38, без линий RST и INT
 #   Кнопка BOOT  : GPIO0 (активна в 0)
 # ---------------------------------------------------------------------------
 
@@ -45,6 +47,8 @@ display:
     spi_id: bus_qspi
     cs_pin: GPIO9
     reset_pin: GPIO21
+    # LCD EN — по схеме панель питается только при высоком уровне на GPIO42
+    enable_pin: GPIO42
     data_rate: 40MHz
     spi_mode: MODE0
     color_order: rgb
@@ -60,31 +64,21 @@ display:
     auto_clear_enabled: false
     update_interval: never
 
-# Плата выпускается в двух ревизиях с разными тачскринами, и по внешнему виду
-# они не отличаются. Поэтому объявлены оба драйвера — рабочим окажется тот,
-# чей контроллер реально стоит на плате.
+# Тачскрин FT3168, I2C-адрес 0x38. Линии RST и INT на этой плате не разведены —
+# чип опрашивается только по I2C (проверено по схеме Waveshare, см. README).
 #
-#   старая ревизия: дисплей SH8601 + тач FT3168, адрес 0x38
-#   новая ревизия:  дисплей CO5300  + тач CST820, адрес 0x15
-#
-# Тот драйвер, чей чип не отвечает по I2C, помечается как failed и просто
-# молчит. Чтобы убрать ошибку из логов, посмотрите результат сканирования шины
-# (строки «Found i2c device at address ...» при загрузке) и удалите лишний блок.
+# Используется драйвер cst816, а не ft5x06, хотя чип из семейства FT. Причина:
+# ft5x06 в ESPHome читает vendor ID из регистра 0xA8 и принимает лишь значения
+# 0x51/0x11/0xCD, а на всё остальное вызывает mark_failed() и больше не
+# опрашивает панель — FT3168 в этот список не входит. У cst816 карта регистров
+# совпадает с FT3168 (0x02 — число касаний, 0x03..0x06 — координаты), а опция
+# skip_probe отключает проверку chip id.
 touchscreen:
-  - platform: ft5x06
-    id: touch_ft
-    i2c_id: bus_i2c
-    # FT3168 совместим с регистровой картой FT5x06
-    address: 0x38
-    display: amoled
-    on_touch:
-      - script.execute: wake_screen
-
   - platform: cst816
-    id: touch_cst
+    id: touch
     i2c_id: bus_i2c
-    # CST820 определяется драйвером cst816 по chip id 0xB7
-    address: 0x15
+    address: 0x38
+    skip_probe: true
     display: amoled
     on_touch:
       - script.execute: wake_screen
