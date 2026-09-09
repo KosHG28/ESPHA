@@ -117,8 +117,6 @@ touchscreen:
               return dx <= -${swipe_threshold} && adx > ady;
           then:
             - lvgl.page.next:
-                animation: OUT_LEFT
-                time: 250ms
       - if:
           condition:
             lambda: |-
@@ -128,8 +126,6 @@ touchscreen:
               return dx >= ${swipe_threshold} && adx > ady;
           then:
             - lvgl.page.previous:
-                animation: OUT_RIGHT
-                time: 250ms
       - lambda: |-
           id(swipe_dx) = 0;
           id(swipe_dy) = 0;
@@ -160,5 +156,3 @@ binary_sensor:
     on_click:
       - script.execute: wake_screen
       - lvgl.page.next:
-          animation: OUT_LEFT
-          time: 250ms

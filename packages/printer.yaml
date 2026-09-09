@@ -116,8 +116,6 @@ text_sensor:
             - script.execute: wake_screen
             - lvgl.page.show:
                 id: page_printer
-                animation: FADE_IN
-                time: 300ms
       # Зелёное кольцо при печати, серое во всех остальных состояниях
       - lvgl.arc.update:
           id: arc_print
