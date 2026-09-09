@@ -1,16 +1,32 @@
 # ---------------------------------------------------------------------------
 # Интерфейс на LVGL для круглого экрана 466x466.
-# Четыре страницы; листаются свайпом влево/вправо, кнопкой BOOT или действием
-# lvgl.page.next из Home Assistant.
+#
+# Четыре страницы; листаются свайпом (считается в packages/hardware.yaml, а не
+# жестами LVGL), кнопкой BOOT или действием lvgl.page.next из Home Assistant.
+#
+# Изображение повёрнуто на 90° по часовой стрелке — разъём USB-C оказывается
+# внизу. Координаты тача поворачиваются отдельно, преобразованием в
+# packages/hardware.yaml: LVGL входные данные не разворачивает.
+#
+# Вся геометрия ниже — в логических координатах уже повёрнутого экрана,
+# центр 233,233, радиус 233. Виджет с центром (x, y) от центра экрана влезает
+# в круг, если sqrt(x² + y²) + половина его диагонали < 233.
 # ---------------------------------------------------------------------------
 
 font:
-  # Только цифры и двоеточие — большой шрифт не раздувает прошивку
+  # Часы: только цифры, двоеточие и пробел (для мигания двоеточия)
   - file: "gfonts://Roboto@700"
     id: font_time
     size: 96
     bpp: 4
-    glyphs: "0123456789:-"
+    glyphs: "0123456789: -"
+
+  # Крупный процент на странице принтера
+  - file: "gfonts://Roboto@700"
+    id: font_pct
+    size: 58
+    bpp: 4
+    glyphs: "0123456789%-"
 
   - file: "gfonts://Roboto@500"
     id: font_l
@@ -22,7 +38,7 @@ font:
 
   - file: "gfonts://Roboto@400"
     id: font_m
-    size: 24
+    size: 26
     bpp: 4
     glyphsets: [GF_Latin_Kernel, GF_Cyrillic_Core]
     glyphs: ["°"]
@@ -30,18 +46,11 @@ font:
 
   - file: "gfonts://Roboto@400"
     id: font_s
-    size: 18
+    size: 22
     bpp: 4
     glyphsets: [GF_Latin_Kernel, GF_Cyrillic_Core]
     glyphs: ["°"]
     ignore_missing_glyphs: true
-
-  # Крупный процент на странице принтера
-  - file: "gfonts://Roboto@700"
-    id: font_pct
-    size: 58
-    bpp: 4
-    glyphs: "0123456789%-"
 
   # Текст вперемешку с иконками Material Design Icons
   - file: "gfonts://Roboto@400"
@@ -75,13 +84,16 @@ lvgl:
   id: lvgl_main
   displays: [amoled]
   touchscreens: [touch]
-  buffer_size: 25%
+  buffer_size: 100%
   default_font: font_m
   bg_color: 0x000000
   text_color: 0xFFFFFF
   border_width: 0
   pad_all: 0
   page_wrap: true
+  # Поворот изображения на 90° по часовой стрелке. Задавать его в display
+  # нельзя — ESPHome это запрещает при использовании LVGL.
+  rotation: 90
 
   style_definitions:
     - id: style_page
@@ -103,12 +115,55 @@ lvgl:
       text_font: font_s
       text_color: 0x8A9199
 
+    - id: style_value
+      text_font: font_m
+      text_color: 0xFFFFFF
+
     - id: style_dot
       width: 10
       height: 10
       radius: 5
       border_width: 0
       bg_opa: COVER
+
+    # Прозрачный контейнер во весь экран: к нему крепится содержимое страницы,
+    # и он же сдвигается на пару пикселей для защиты AMOLED от выгорания
+    - id: style_root
+      width: 466
+      height: 466
+      align: CENTER
+      bg_opa: TRANSP
+      border_width: 0
+      pad_all: 0
+
+    # Строка «подпись — значение» на странице устройства
+    - id: style_row
+      width: 330
+      height: 34
+      align: CENTER
+      bg_opa: TRANSP
+      border_width: 0
+      pad_all: 0
+
+  # Индикатор страниц один на все страницы: раньше он был скопирован
+  # в каждую из них, и точки приходилось править в четырёх местах
+  top_layer:
+    widgets:
+      - obj:
+          align: CENTER
+          y: 196
+          width: 76
+          height: 14
+          bg_opa: TRANSP
+          border_width: 0
+          pad_all: 0
+          scrollable: false
+          clickable: false
+          widgets:
+            - obj: { id: dot_1, styles: style_dot, bg_color: 0x03A9F4, align: CENTER, x: -33 }
+            - obj: { id: dot_2, styles: style_dot, bg_color: 0x33383E, align: CENTER, x: -11 }
+            - obj: { id: dot_3, styles: style_dot, bg_color: 0x33383E, align: CENTER, x: 11 }
+            - obj: { id: dot_4, styles: style_dot, bg_color: 0x33383E, align: CENTER, x: 33 }
 
   pages:
     # =====================================================================
@@ -117,26 +172,21 @@ lvgl:
     - id: page_clock
       styles: style_page
       scrollable: false
+      on_load:
+        - script.execute:
+            id: mark_page
+            idx: 0
       widgets:
         - obj:
             id: root_clock
-            width: 466
-            height: 466
-            align: CENTER
-            bg_opa: TRANSP
-            border_width: 0
-            pad_all: 0
+            styles: style_root
             scrollable: false
-            on_swipe_left:
-              - lvgl.page.next:
-            on_swipe_right:
-              - lvgl.page.previous:
             widgets:
               # Кольцо-индикатор: доля прошедших минут в сутках
               - arc:
                   id: arc_day
-                  width: 450
-                  height: 450
+                  width: 436
+                  height: 436
                   align: CENTER
                   clickable: false
                   adjustable: false
@@ -145,7 +195,6 @@ lvgl:
                   value: 0
                   start_angle: 270
                   end_angle: 270
-                  rotation: 0
                   arc_width: 6
                   arc_color: 0x1B1F24
                   arc_rounded: true
@@ -158,11 +207,10 @@ lvgl:
                     pad_all: 0
 
               - label:
-                  id: lbl_slot1_title
                   text: "${slot1_title}"
                   styles: style_caption
                   align: CENTER
-                  y: -132
+                  y: -134
 
               - label:
                   id: lbl_slot1
@@ -188,7 +236,6 @@ lvgl:
                   y: 62
 
               - label:
-                  id: lbl_slot2_title
                   text: "${slot2_title}"
                   styles: style_caption
                   align: CENTER
@@ -202,43 +249,21 @@ lvgl:
                   align: CENTER
                   y: 148
 
-              - obj:
-                  id: dots_1
-                  align: CENTER
-                  y: 196
-                  width: 76
-                  height: 14
-                  bg_opa: TRANSP
-                  border_width: 0
-                  pad_all: 0
-                  scrollable: false
-                  clickable: false
-                  widgets:
-                    - obj: { styles: style_dot, bg_color: 0x03A9F4, align: CENTER, x: -33 }
-                    - obj: { styles: style_dot, bg_color: 0x33383E, align: CENTER, x: -11 }
-                    - obj: { styles: style_dot, bg_color: 0x33383E, align: CENTER, x: 11 }
-                    - obj: { styles: style_dot, bg_color: 0x33383E, align: CENTER, x: 33 }
-
     # =====================================================================
     # Страница 2 — четыре значения из Home Assistant
     # =====================================================================
     - id: page_home
       styles: style_page
       scrollable: false
+      on_load:
+        - script.execute:
+            id: mark_page
+            idx: 1
       widgets:
         - obj:
             id: root_home
-            width: 466
-            height: 466
-            align: CENTER
-            bg_opa: TRANSP
-            border_width: 0
-            pad_all: 0
+            styles: style_root
             scrollable: false
-            on_swipe_left:
-              - lvgl.page.next:
-            on_swipe_right:
-              - lvgl.page.previous:
             widgets:
               - label:
                   text: "Дом"
@@ -331,48 +356,27 @@ lvgl:
                         align: CENTER
                         y: 10
 
-              - obj:
-                  align: CENTER
-                  y: 196
-                  width: 76
-                  height: 14
-                  bg_opa: TRANSP
-                  border_width: 0
-                  pad_all: 0
-                  scrollable: false
-                  clickable: false
-                  widgets:
-                    - obj: { styles: style_dot, bg_color: 0x33383E, align: CENTER, x: -33 }
-                    - obj: { styles: style_dot, bg_color: 0x03A9F4, align: CENTER, x: -11 }
-                    - obj: { styles: style_dot, bg_color: 0x33383E, align: CENTER, x: 11 }
-                    - obj: { styles: style_dot, bg_color: 0x33383E, align: CENTER, x: 33 }
-
     # =====================================================================
     # Страница 3 — 3D-принтер Bambu Lab
     # =====================================================================
     - id: page_printer
       styles: style_page
       scrollable: false
+      on_load:
+        - script.execute:
+            id: mark_page
+            idx: 2
       widgets:
         - obj:
             id: root_printer
-            width: 466
-            height: 466
-            align: CENTER
-            bg_opa: TRANSP
-            border_width: 0
-            pad_all: 0
+            styles: style_root
             scrollable: false
-            on_swipe_left:
-              - lvgl.page.next:
-            on_swipe_right:
-              - lvgl.page.previous:
             widgets:
               # Кольцо прогресса с разрывом сверху
               - arc:
                   id: arc_print
-                  width: 440
-                  height: 440
+                  width: 436
+                  height: 436
                   align: CENTER
                   clickable: false
                   adjustable: false
@@ -449,42 +453,21 @@ lvgl:
                   align: CENTER
                   y: 146
 
-              - obj:
-                  align: CENTER
-                  y: 196
-                  width: 76
-                  height: 14
-                  bg_opa: TRANSP
-                  border_width: 0
-                  pad_all: 0
-                  scrollable: false
-                  clickable: false
-                  widgets:
-                    - obj: { styles: style_dot, bg_color: 0x33383E, align: CENTER, x: -33 }
-                    - obj: { styles: style_dot, bg_color: 0x33383E, align: CENTER, x: -11 }
-                    - obj: { styles: style_dot, bg_color: 0x03A9F4, align: CENTER, x: 11 }
-                    - obj: { styles: style_dot, bg_color: 0x33383E, align: CENTER, x: 33 }
-
     # =====================================================================
     # Страница 4 — состояние устройства и яркость
     # =====================================================================
     - id: page_system
       styles: style_page
       scrollable: false
+      on_load:
+        - script.execute:
+            id: mark_page
+            idx: 3
       widgets:
         - obj:
             id: root_system
-            width: 466
-            height: 466
-            align: CENTER
-            bg_opa: TRANSP
-            border_width: 0
-            pad_all: 0
+            styles: style_root
             scrollable: false
-            on_swipe_left:
-              - lvgl.page.next:
-            on_swipe_right:
-              - lvgl.page.previous:
             widgets:
               - label:
                   text: "Устройство"
@@ -492,55 +475,88 @@ lvgl:
                   align: CENTER
                   y: -186
 
-              - label: { text: "Сеть", styles: style_caption, align: CENTER, x: -140, y: -132 }
-              - label:
-                  id: lbl_sys_ssid
-                  text: "--"
-                  text_font: font_m
-                  align: CENTER
-                  x: 40
-                  y: -132
+              # Подпись слева, значение справа: раньше обе были центрированы
+              # по фиксированному x, и колонки разъезжались от длины текста
+              - obj:
+                  styles: style_row
+                  scrollable: false
+                  clickable: false
+                  y: -122
+                  widgets:
+                    - label: { text: "Сеть", styles: style_caption, align: LEFT_MID }
+                    - label:
+                        id: lbl_sys_ssid
+                        text: "--"
+                        styles: style_value
+                        align: RIGHT_MID
+                        width: 210
+                        long_mode: DOT
+                        text_align: RIGHT
 
-              - label: { text: "Сигнал", styles: style_caption, align: CENTER, x: -140, y: -92 }
-              - label:
-                  id: lbl_sys_wifi
-                  text: "--"
-                  text_font: font_m
-                  align: CENTER
-                  x: 40
-                  y: -92
+              - obj:
+                  styles: style_row
+                  scrollable: false
+                  clickable: false
+                  y: -80
+                  widgets:
+                    - label: { text: "Сигнал", styles: style_caption, align: LEFT_MID }
+                    - label:
+                        id: lbl_sys_wifi
+                        text: "--"
+                        styles: style_value
+                        align: RIGHT_MID
+                        width: 210
+                        long_mode: DOT
+                        text_align: RIGHT
 
-              - label: { text: "IP", styles: style_caption, align: CENTER, x: -140, y: -52 }
-              - label:
-                  id: lbl_sys_ip
-                  text: "--"
-                  text_font: font_m
-                  align: CENTER
-                  x: 40
-                  y: -52
+              - obj:
+                  styles: style_row
+                  scrollable: false
+                  clickable: false
+                  y: -38
+                  widgets:
+                    - label: { text: "IP", styles: style_caption, align: LEFT_MID }
+                    - label:
+                        id: lbl_sys_ip
+                        text: "--"
+                        styles: style_value
+                        align: RIGHT_MID
+                        width: 210
+                        long_mode: DOT
+                        text_align: RIGHT
 
-              - label: { text: "Работает", styles: style_caption, align: CENTER, x: -140, y: -12 }
-              - label:
-                  id: lbl_sys_uptime
-                  text: "--"
-                  text_font: font_m
-                  align: CENTER
-                  x: 40
-                  y: -12
+              - obj:
+                  styles: style_row
+                  scrollable: false
+                  clickable: false
+                  y: 4
+                  widgets:
+                    - label: { text: "Работает", styles: style_caption, align: LEFT_MID }
+                    - label:
+                        id: lbl_sys_uptime
+                        text: "--"
+                        styles: style_value
+                        align: RIGHT_MID
+                        width: 210
+                        long_mode: DOT
+                        text_align: RIGHT
 
               - label:
                   id: lbl_sys_i2c
                   text: "I2C: —"
                   styles: style_caption
                   align: CENTER
-                  y: 32
+                  y: 46
+                  width: 360
+                  long_mode: DOT
+                  text_align: CENTER
 
               - arc:
                   id: arc_bright
                   width: 128
                   height: 128
                   align: CENTER
-                  y: 114
+                  y: 118
                   min_value: 5
                   max_value: 100
                   value: 70
@@ -569,20 +585,4 @@ lvgl:
                   text: "70%"
                   text_font: font_m
                   align: CENTER
-                  y: 114
-
-              - obj:
-                  align: CENTER
-                  y: 196
-                  width: 76
-                  height: 14
-                  bg_opa: TRANSP
-                  border_width: 0
-                  pad_all: 0
-                  scrollable: false
-                  clickable: false
-                  widgets:
-                    - obj: { styles: style_dot, bg_color: 0x33383E, align: CENTER, x: -33 }
-                    - obj: { styles: style_dot, bg_color: 0x33383E, align: CENTER, x: -11 }
-                    - obj: { styles: style_dot, bg_color: 0x33383E, align: CENTER, x: 11 }
-                    - obj: { styles: style_dot, bg_color: 0x03A9F4, align: CENTER, x: 33 }
+                  y: 118

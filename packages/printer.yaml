@@ -107,6 +107,17 @@ text_sensor:
             if (x == "failed")   return std::string("ошибка");
             if (x == "offline")  return std::string("нет связи");
             return x.empty() ? std::string("--") : x;
+      # Печать закончилась или упала — panel на столе полезнее всего именно
+      # в этот момент, поэтому показываем страницу принтера сразу
+      - if:
+          condition:
+            lambda: 'return x == "finish" || x == "failed";'
+          then:
+            - script.execute: wake_screen
+            - lvgl.page.show:
+                id: page_printer
+                animation: FADE_IN
+                time: 300ms
       # Зелёное кольцо при печати, серое во всех остальных состояниях
       - lvgl.arc.update:
           id: arc_print

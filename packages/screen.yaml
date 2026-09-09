@@ -61,5 +61,11 @@ script:
             lambda: 'return id(screen_timeout).state > 0;'
           then:
             - delay: !lambda 'return (uint32_t) (id(screen_timeout).state * 1000);'
+            # В простое возвращаемся на часы: на AMOLED это и меньше
+            # горящих пикселей, и понятнее, что панель просто спит
+            - lvgl.page.show:
+                id: page_clock
+                animation: FADE_IN
+                time: 300ms
             - lambda: |-
                 id(amoled)->set_brightness((uint8_t) (id(screen_dim).state * 2.55f + 0.5f));

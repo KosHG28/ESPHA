@@ -87,6 +87,14 @@ touchscreen:
       x_max: 465
       y_min: 0
       y_max: 465
+    # Изображение повёрнуто на 90° по часовой стрелке (lvgl: rotation), но
+    # входные координаты LVGL не разворачивает — это делается здесь.
+    # Панельная точка (px, py) -> логическая (py, 465 - px): сначала
+    # переставляются оси, затем зеркалится Y.
+    transform:
+      swap_xy: true
+      mirror_x: false
+      mirror_y: true
     on_touch:
       - script.execute: wake_screen
       - lambda: |-

@@ -6,3 +6,7 @@ secrets.yaml
 # Editors
 .DS_Store
 .vscode/
+
+# Python bytecode from the local ESPHome component
+__pycache__/
+*.pyc

@@ -1,0 +1,86 @@
+# ---------------------------------------------------------------------------
+# Поведение интерфейса: индикатор страниц, защита AMOLED от выгорания,
+# «живые» часы и индикация потери связи с Home Assistant.
+# ---------------------------------------------------------------------------
+
+globals:
+  # Фаза сдвига содержимого против выгорания: 0..3
+  - id: shift_idx
+    type: int
+    restore_value: false
+    initial_value: '0'
+
+script:
+  # Подсветить точку активной страницы. Индекс приходит из on_load страницы —
+  # сам по себе триггер не знает, какая страница загрузилась.
+  - id: mark_page
+    parameters:
+      idx: int
+    mode: restart
+    then:
+      - lvgl.widget.update:
+          id: [dot_1, dot_2, dot_3, dot_4]
+          bg_color: 0x33383E
+      - if:
+          condition:
+            lambda: 'return idx == 0;'
+          then:
+            - lvgl.widget.update: { id: dot_1, bg_color: 0x03A9F4 }
+      - if:
+          condition:
+            lambda: 'return idx == 1;'
+          then:
+            - lvgl.widget.update: { id: dot_2, bg_color: 0x03A9F4 }
+      - if:
+          condition:
+            lambda: 'return idx == 2;'
+          then:
+            - lvgl.widget.update: { id: dot_3, bg_color: 0x03A9F4 }
+      - if:
+          condition:
+            lambda: 'return idx == 3;'
+          then:
+            - lvgl.widget.update: { id: dot_4, bg_color: 0x03A9F4 }
+
+interval:
+  # Часы: двоеточие мигает раз в секунду, иначе на экране совсем ничего не
+  # движется и панель выглядит зависшей.
+  - interval: 1s
+    then:
+      - lvgl.label.update:
+          id: lbl_time
+          text: !lambda |-
+            auto now = id(ha_time).now();
+            if (!now.is_valid())
+              return std::string("--:--");
+            char buf[8];
+            snprintf(buf, sizeof(buf), "%02d%c%02d", now.hour, (now.second % 2) ? ' ' : ':', now.minute);
+            return std::string(buf);
+
+  # Защита AMOLED: содержимое каждые несколько минут сдвигается на два
+  # пикселя по кругу, чтобы статичные элементы не выжигали пиксели.
+  - interval: ${pixel_shift_interval}
+    then:
+      - lambda: 'id(shift_idx) = (id(shift_idx) + 1) % 4;'
+      - lvgl.widget.update:
+          id: [root_clock, root_home, root_printer, root_system]
+          translate_x: !lambda 'return (id(shift_idx) == 1 || id(shift_idx) == 2) ? 2 : -2;'
+          translate_y: !lambda 'return (id(shift_idx) >= 2) ? 2 : -2;'
+
+api:
+  # Значения на экране застывают при потере связи, и отличить свежие данные от
+  # вчерашних невозможно. Поэтому при отвале они приглушаются.
+  on_client_disconnected:
+    - lvgl.widget.update:
+        id: [lbl_slot1, lbl_slot1_card, lbl_slot2, lbl_slot2_card,
+             lbl_slot3, lbl_slot4, lbl_time, lbl_print_pct]
+        text_color: 0x555C63
+    - lvgl.label.update:
+        id: lbl_date
+        text: "нет связи с Home Assistant"
+  on_client_connected:
+    - lvgl.widget.update:
+        id: [lbl_slot1, lbl_slot1_card, lbl_slot2, lbl_slot2_card,
+             lbl_slot3, lbl_slot4, lbl_time, lbl_print_pct]
+        text_color: 0xFFFFFF
+    - script.execute: refresh_clock
