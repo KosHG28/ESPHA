@@ -1,5 +1,7 @@
 #pragma once
 
+#include <string>
+
 #include "esphome/components/i2c/i2c.h"
 #include "esphome/components/touchscreen/touchscreen.h"
 #include "esphome/core/component.h"
@@ -24,10 +26,22 @@ class FT3168Touchscreen : public touchscreen::Touchscreen, public i2c::I2CDevice
   void setup() override;
   void dump_config() override;
 
+  /// Состояние драйвера для диагностической сущности в Home Assistant.
+  std::string debug_state() const;
+
  protected:
   void update_touches() override;
 
+  /// Разбудить чип и прочитать его идентификатор. Возвращает true при успехе.
+  bool try_init_();
+
+  bool initialized_{false};
   uint8_t device_id_{0xFF};
+  uint8_t last_fingers_{0};
+  uint16_t last_x_{0};
+  uint16_t last_y_{0};
+  uint32_t touch_count_{0};
+  uint32_t read_errors_{0};
 };
 
 }  // namespace ft3168
