@@ -87,11 +87,14 @@ esphome:
               return std::string(buf);
 
 # Свой драйвер тачскрина FT3168 — штатные драйверы ESPHome с этим чипом
-# не работают, подробности в packages/hardware.yaml
+# не работают, подробности в packages/hardware.yaml.
+#
+# Источник именно git, а не local: путь у local считается от каталога
+# конфигурации ESPHome, а не от скачанного пакета, поэтому при импорте этого
+# репозитория в Home Assistant он искал бы /config/esphome/components.
 external_components:
-  - source:
-      type: local
-      path: components
+  - source: github://koshg28/ESPHA@main
+    components: [ft3168]
 
 packages:
   hardware: !include packages/hardware.yaml
