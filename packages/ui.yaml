@@ -74,7 +74,7 @@ font:
 lvgl:
   id: lvgl_main
   displays: [amoled]
-  touchscreens: [touch_ft, touch_cst]
+  touchscreens: [touch]
   buffer_size: 25%
   default_font: font_m
   bg_color: 0x000000

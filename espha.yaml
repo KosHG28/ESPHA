@@ -61,6 +61,15 @@ esphome:
     name: koshg28.espha
     version: "1.0.0"
   on_boot:
+    # Приоритет 800 — шина I2C уже поднята, но драйвер тача ещё не стартовал.
+    # FT3168 просыпается только после записи power mode: так делает родной
+    # драйвер Waveshare, а ESPHome этого не умеет.
+    - priority: 800
+      then:
+        - lambda: |-
+            uint8_t cmd[2] = {0xA5, 0x01};
+            id(bus_i2c)->write(0x38, cmd, 2);
+
     - priority: -100
       then:
         - script.execute: wake_screen
