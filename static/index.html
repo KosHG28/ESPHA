@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ESPHA — прошивка Waveshare AMOLED 1.43 для Home Assistant</title>
+  <meta name="description" content="Прошейте Waveshare ESP32-S3-Touch-AMOLED-1.43 прямо из браузера и подключите к Home Assistant.">
+  <style>
+    :root {
+      --bg: #0b0d10;
+      --card: #14181d;
+      --line: #232a31;
+      --text: #f2f5f7;
+      --muted: #8a9199;
+      --accent: #03a9f4;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 48px 20px 80px;
+      background: radial-gradient(900px 600px at 50% -10%, #16242e 0%, var(--bg) 60%);
+      color: var(--text);
+      font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+    main { max-width: 720px; margin: 0 auto; }
+    header { text-align: center; margin-bottom: 40px; }
+    .badge {
+      display: inline-block; padding: 4px 12px; border-radius: 999px;
+      border: 1px solid var(--line); color: var(--muted);
+      font-size: 13px; letter-spacing: .04em; text-transform: uppercase;
+    }
+    h1 { font-size: 34px; line-height: 1.2; margin: 18px 0 10px; }
+    .lead { color: var(--muted); margin: 0 auto; max-width: 34em; }
+    .install {
+      margin: 36px 0 12px; padding: 28px; text-align: center;
+      background: var(--card); border: 1px solid var(--line); border-radius: 18px;
+    }
+    .install .hint { color: var(--muted); font-size: 14px; margin-top: 14px; }
+    esp-web-install-button { --esp-tools-button-color: #fff; }
+    .unsupported, .not-allowed { color: #ff8a80; }
+    section { margin-top: 40px; }
+    h2 { font-size: 20px; margin: 0 0 14px; }
+    ol { padding-left: 22px; margin: 0; }
+    li { margin-bottom: 10px; }
+    li b { font-weight: 600; }
+    .grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }
+    .tile { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px; }
+    .tile h3 { margin: 0 0 6px; font-size: 15px; }
+    .tile p { margin: 0; color: var(--muted); font-size: 14px; }
+    code {
+      background: #10151a; border: 1px solid var(--line); border-radius: 6px;
+      padding: 1px 6px; font-size: 14px;
+    }
+    a { color: var(--accent); }
+    footer { margin-top: 56px; text-align: center; color: var(--muted); font-size: 14px; }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <span class="badge">ESPHome · Home Assistant</span>
+    <h1>ESPHA</h1>
+    <p class="lead">
+      Прошивка для круглого дисплея Waveshare&nbsp;ESP32-S3-Touch-AMOLED-1.43 (466×466).
+      Показывает часы и данные из Home&nbsp;Assistant. Устанавливается прямо из браузера — ничего ставить на компьютер не нужно.
+    </p>
+  </header>
+
+  <div class="install">
+    <esp-web-install-button manifest="./firmware/manifest.json">
+      <span slot="unsupported" class="unsupported">
+        Нужен Chrome, Edge или Opera на компьютере — Web Serial не работает в Safari, Firefox и на телефоне.
+      </span>
+      <span slot="not-allowed" class="not-allowed">
+        Страницу нужно открыть по https:// или на localhost.
+      </span>
+    </esp-web-install-button>
+    <p class="hint">Подключите плату к компьютеру кабелем USB-C и нажмите «Connect».</p>
+  </div>
+
+  <section>
+    <h2>Как прошить</h2>
+    <ol>
+      <li>Откройте эту страницу в <b>Chrome</b>, <b>Edge</b> или <b>Opera</b> на компьютере.</li>
+      <li>Подключите плату кабелем <b>USB-C</b>. Кабель должен быть с передачей данных, а не только для зарядки.</li>
+      <li>Нажмите кнопку установки и выберите появившийся COM-порт (обычно <code>USB JTAG/serial debug unit</code>).</li>
+      <li>Выберите <b>Install ESPHA</b> и дождитесь окончания записи (2–3 минуты).</li>
+      <li>Тут же в браузере введите имя и пароль вашей сети Wi-Fi.</li>
+      <li>Откройте Home&nbsp;Assistant — устройство появится в <b>Настройки → Устройства и службы</b> как новое ESPHome-устройство. Нажмите «Настроить».</li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>Если плата не появляется в списке портов</h2>
+    <ol>
+      <li>Отключите кабель.</li>
+      <li>Зажмите кнопку <b>BOOT</b> на плате и, не отпуская, подключите кабель — плата войдёт в режим загрузки.</li>
+      <li>Отпустите кнопку и повторите установку.</li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>Что на экране</h2>
+    <div class="grid">
+      <div class="tile">
+        <h3>Часы</h3>
+        <p>Время, дата и два значения из Home Assistant. Кольцо по краю показывает, сколько прошло от суток.</p>
+      </div>
+      <div class="tile">
+        <h3>Дом</h3>
+        <p>Четыре плитки с любыми числовыми сущностями: температура, влажность, потребление.</p>
+      </div>
+      <div class="tile">
+        <h3>Устройство</h3>
+        <p>Wi-Fi, IP, время работы и регулятор яркости AMOLED.</p>
+      </div>
+    </div>
+    <p style="color:var(--muted); margin-top:14px">
+      Страницы листаются свайпом влево-вправо или кнопкой BOOT.
+    </p>
+  </section>
+
+  <section>
+    <h2>Настроить свои сущности</h2>
+    <p style="color:var(--muted)">
+      После добавления устройства в Home Assistant откройте надстройку <b>ESPHome Builder</b>,
+      найдите <code>espha</code> и поправьте подстановки <code>slot1_entity</code>…<code>slot4_entity</code>,
+      подписи и часовой пояс. Затем нажмите «Install» — обновление уйдёт по воздуху.
+      Подробности — в <a href="https://github.com/koshg28/ESPHA#readme">README проекта</a>.
+    </p>
+  </section>
+
+  <footer>
+    <a href="https://github.com/koshg28/ESPHA">Исходники на GitHub</a> ·
+    собрано с помощью <a href="https://esphome.io">ESPHome</a> и
+    <a href="https://esphome.github.io/esp-web-tools/">ESP Web Tools</a>
+  </footer>
+</main>
+
+<script type="module" src="https://unpkg.com/esp-web-tools@10.4.0/dist/web/install-button.js?module"></script>
+</body>
+</html>

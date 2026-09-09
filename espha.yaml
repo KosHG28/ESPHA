@@ -1,0 +1,88 @@
+# ===========================================================================
+# ESPHA — Waveshare ESP32-S3-Touch-AMOLED-1.43 как панель Home Assistant
+#
+# Это основной («усыновляемый») конфиг. Прошивка для браузера собирается из
+# espha-factory.yaml, который включает этот файл.
+#
+# Что показывать на экране — меняется в подстановках ниже.
+# ===========================================================================
+
+substitutions:
+  name: espha
+  friendly_name: ESPHA
+
+  # Часовой пояс. Важно задать явно: сборка идёт в GitHub Actions,
+  # где системный пояс — UTC.
+  timezone: Europe/Moscow
+
+  # ---- Данные из Home Assistant ------------------------------------------
+  # slotN_entity — entity_id числовой сущности (sensor.*)
+  # slotN_title  — подпись на экране
+  # slotN_format — формат printf для значения (%f — само значение)
+  slot1_entity: sensor.outside_temperature
+  slot1_title: "На улице"
+  slot1_format: "%.1f°"
+
+  slot2_entity: sensor.indoor_temperature
+  slot2_title: "В комнате"
+  slot2_format: "%.1f°"
+
+  slot3_entity: sensor.indoor_humidity
+  slot3_title: "Влажность"
+  slot3_format: "%.0f%%"
+
+  slot4_entity: sensor.power_consumption
+  slot4_title: "Потребление"
+  slot4_format: "%.0f Вт"
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+  name_add_mac_suffix: false
+  min_version: 2026.7.0
+  project:
+    name: koshg28.espha
+    version: "1.0.0"
+  on_boot:
+    - priority: -100
+      then:
+        - script.execute: wake_screen
+        - script.execute: refresh_clock
+        - lvgl.arc.update:
+            id: arc_bright
+            value: !lambda 'return (int) id(screen_brightness).state;'
+        - lvgl.label.update:
+            id: lbl_bright
+            text: !lambda |-
+              char buf[8];
+              snprintf(buf, sizeof(buf), "%d%%", (int) id(screen_brightness).state);
+              return std::string(buf);
+
+packages:
+  hardware: !include packages/hardware.yaml
+  screen: !include packages/screen.yaml
+  entities: !include packages/entities.yaml
+  ui: !include packages/ui.yaml
+
+logger:
+  level: INFO
+  # У платы нет USB-UART моста: консоль идёт через встроенный USB-Serial/JTAG
+  hardware_uart: USB_SERIAL_JTAG
+
+api:
+
+ota:
+  - platform: esphome
+
+wifi:
+  # Точка доступа-запаска, если сохранённая сеть недоступна
+  ap:
+
+captive_portal:
+
+# Позволяет задать Wi-Fi прямо из браузера сразу после прошивки
+improv_serial:
+
+dashboard_import:
+  package_import_url: github://koshg28/ESPHA/espha.yaml@main
+  import_full_config: false

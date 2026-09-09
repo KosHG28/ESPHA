@@ -1,0 +1,79 @@
+name: Сборка прошивки и публикация установщика
+
+on:
+  push:
+    branches: ["**"]
+    paths-ignore:
+      - "README.md"
+      - ".gitignore"
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Собрать прошивку
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+
+      - name: Подставить номер версии
+        run: |
+          version="$(date -u +'%Y.%m.%d')-${GITHUB_SHA::7}"
+          sed -i "s/^    version: \".*\"$/    version: \"${version}\"/" espha.yaml
+          grep -n 'version:' espha.yaml
+
+      - name: Собрать через ESPHome
+        id: esphome
+        uses: esphome/build-action@v8.1.0
+        with:
+          yaml-file: espha-factory.yaml
+          version: latest
+          complete-manifest: true
+          release-summary: "Сборка из ветки ${{ github.ref_name }}"
+          release-url: ${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}
+
+      - name: Собрать сайт установщика
+        run: |
+          mkdir -p site/firmware
+          cp -r static/. site/
+          cp -r "${{ steps.esphome.outputs.name }}"/. site/firmware/
+          # .elf нужен только для отладки — на страницу его не кладём
+          rm -f site/firmware/*.elf
+          ls -lR site
+
+      - name: Сохранить артефакт сборки
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: espha-firmware
+          path: site
+          if-no-files-found: error
+
+      - name: Подготовить артефакт для GitHub Pages
+        if: github.ref == 'refs/heads/main'
+        uses: actions/upload-pages-artifact@v5.0.0
+        with:
+          path: site
+
+  deploy:
+    name: Опубликовать на GitHub Pages
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v5.0.1
