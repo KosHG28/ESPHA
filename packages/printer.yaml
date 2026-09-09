@@ -111,11 +111,24 @@ text_sensor:
       # в этот момент, поэтому показываем страницу принтера сразу
       - if:
           condition:
-            lambda: 'return x == "finish" || x == "failed";'
+            lambda: 'return x == "finish";'
           then:
-            - script.execute: wake_screen
             - lvgl.page.show:
                 id: page_printer
+            - script.execute:
+                id: flash_screen
+                color: !lambda 'return 0x22DD44;'
+                text: !lambda 'return "ГОТОВО";'
+      - if:
+          condition:
+            lambda: 'return x == "failed";'
+          then:
+            - lvgl.page.show:
+                id: page_printer
+            - script.execute:
+                id: flash_screen
+                color: !lambda 'return 0xE53935;'
+                text: !lambda 'return "ОШИБКА";'
       # Зелёное кольцо при печати, серое во всех остальных состояниях
       - lvgl.arc.update:
           id: arc_print

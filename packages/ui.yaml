@@ -145,6 +145,29 @@ lvgl:
   # в каждую из них, и точки приходилось править в четырёх местах
   top_layer:
     widgets:
+      # Полноэкранная вспышка о событии. Обычно скрыта; показывается скриптом
+      # flash_screen. Не кликабельна, чтобы не перехватывать касания.
+      - obj:
+          id: alert_overlay
+          width: 466
+          height: 466
+          align: CENTER
+          radius: 233
+          bg_color: 0x22DD44
+          bg_opa: COVER
+          border_width: 0
+          pad_all: 0
+          hidden: true
+          clickable: false
+          scrollable: false
+          widgets:
+            - label:
+                id: alert_text
+                text: "ГОТОВО"
+                text_font: font_pct
+                text_color: 0x08210E
+                align: CENTER
+
       - obj:
           align: CENTER
           y: 196
