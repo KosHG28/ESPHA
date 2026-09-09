@@ -87,14 +87,6 @@ touchscreen:
       x_max: 465
       y_min: 0
       y_max: 465
-    # Изображение повёрнуто на 90° по часовой стрелке (lvgl: rotation), но
-    # входные координаты LVGL не разворачивает — это делается здесь.
-    # Панельная точка (px, py) -> логическая (py, 465 - px): сначала
-    # переставляются оси, затем зеркалится Y.
-    transform:
-      swap_xy: true
-      mirror_x: false
-      mirror_y: true
     on_touch:
       - script.execute: wake_screen
       - lambda: |-
@@ -117,6 +109,8 @@ touchscreen:
               return dx <= -${swipe_threshold} && adx > ady;
           then:
             - lvgl.page.next:
+                animation: OUT_LEFT
+                time: ${page_anim_time}
       - if:
           condition:
             lambda: |-
@@ -126,6 +120,8 @@ touchscreen:
               return dx >= ${swipe_threshold} && adx > ady;
           then:
             - lvgl.page.previous:
+                animation: OUT_RIGHT
+                time: ${page_anim_time}
       - lambda: |-
           id(swipe_dx) = 0;
           id(swipe_dy) = 0;
@@ -156,3 +152,5 @@ binary_sensor:
     on_click:
       - script.execute: wake_screen
       - lvgl.page.next:
+          animation: OUT_LEFT
+          time: ${page_anim_time}
