@@ -1,0 +1,184 @@
+# ---------------------------------------------------------------------------
+# Данные: время, четыре «слота» с сущностями Home Assistant и диагностика.
+#
+# Какие сущности показывать — задаётся подстановками slotN_entity/title/format
+# в espha.yaml. После усыновления устройства в ESPHome-дашборде их можно
+# переопределить, не трогая этот файл.
+# ---------------------------------------------------------------------------
+
+time:
+  # Часы реального времени на плате: держат время при перезагрузке и без Wi-Fi
+  - platform: pcf85063
+    id: rtc_time
+    timezone: ${timezone}
+    i2c_id: bus_i2c
+    address: 0x51
+    update_interval: 60min
+
+  - platform: homeassistant
+    id: ha_time
+    timezone: ${timezone}
+    on_time_sync:
+      - pcf85063.write_time:
+      - script.execute: refresh_clock
+    on_time:
+      - seconds: 0
+        then:
+          - script.execute: refresh_clock
+
+script:
+  - id: refresh_clock
+    mode: restart
+    then:
+      - lvgl.label.update:
+          id: lbl_time
+          text: !lambda |-
+            auto now = id(ha_time).now();
+            if (!now.is_valid())
+              return std::string("--:--");
+            char buf[8];
+            snprintf(buf, sizeof(buf), "%02d:%02d", now.hour, now.minute);
+            return std::string(buf);
+      - lvgl.arc.update:
+          id: arc_day
+          value: !lambda |-
+            auto now = id(ha_time).now();
+            if (!now.is_valid())
+              return 0;
+            return now.hour * 60 + now.minute;
+      - lvgl.label.update:
+          id: lbl_date
+          text: !lambda |-
+            static const char *const WD[] = {"воскресенье", "понедельник", "вторник",
+                                             "среда", "четверг", "пятница", "суббота"};
+            static const char *const MON[] = {"января", "февраля", "марта", "апреля",
+                                              "мая", "июня", "июля", "августа",
+                                              "сентября", "октября", "ноября", "декабря"};
+            auto now = id(ha_time).now();
+            if (!now.is_valid())
+              return std::string("нет связи с Home Assistant");
+            char buf[64];
+            snprintf(buf, sizeof(buf), "%s, %d %s", WD[now.day_of_week - 1], now.day_of_month,
+                     MON[now.month - 1]);
+            return std::string(buf);
+
+sensor:
+  # ---- слоты с данными из Home Assistant --------------------------------
+  - platform: homeassistant
+    id: ha_slot1
+    entity_id: ${slot1_entity}
+    internal: true
+    on_value:
+      - lvgl.label.update:
+          id: [lbl_slot1, lbl_slot1_card]
+          text: !lambda |-
+            if (std::isnan(x))
+              return std::string("--");
+            char buf[24];
+            snprintf(buf, sizeof(buf), "${slot1_format}", x);
+            return std::string(buf);
+
+  - platform: homeassistant
+    id: ha_slot2
+    entity_id: ${slot2_entity}
+    internal: true
+    on_value:
+      - lvgl.label.update:
+          id: [lbl_slot2, lbl_slot2_card]
+          text: !lambda |-
+            if (std::isnan(x))
+              return std::string("--");
+            char buf[24];
+            snprintf(buf, sizeof(buf), "${slot2_format}", x);
+            return std::string(buf);
+
+  - platform: homeassistant
+    id: ha_slot3
+    entity_id: ${slot3_entity}
+    internal: true
+    on_value:
+      - lvgl.label.update:
+          id: lbl_slot3
+          text: !lambda |-
+            if (std::isnan(x))
+              return std::string("--");
+            char buf[24];
+            snprintf(buf, sizeof(buf), "${slot3_format}", x);
+            return std::string(buf);
+
+  - platform: homeassistant
+    id: ha_slot4
+    entity_id: ${slot4_entity}
+    internal: true
+    on_value:
+      - lvgl.label.update:
+          id: lbl_slot4
+          text: !lambda |-
+            if (std::isnan(x))
+              return std::string("--");
+            char buf[24];
+            snprintf(buf, sizeof(buf), "${slot4_format}", x);
+            return std::string(buf);
+
+  # ---- диагностика самого устройства ------------------------------------
+  - platform: wifi_signal
+    id: wifi_rssi
+    name: Уровень Wi-Fi
+    entity_category: diagnostic
+    update_interval: 60s
+    on_value:
+      - lvgl.label.update:
+          id: lbl_sys_wifi
+          text: !lambda |-
+            char buf[24];
+            snprintf(buf, sizeof(buf), "%.0f dBm", x);
+            return std::string(buf);
+
+  - platform: uptime
+    id: dev_uptime
+    name: Время работы
+    entity_category: diagnostic
+    update_interval: 60s
+    on_value:
+      - lvgl.label.update:
+          id: lbl_sys_uptime
+          text: !lambda |-
+            uint32_t s = (uint32_t) x;
+            char buf[24];
+            if (s < 3600)
+              snprintf(buf, sizeof(buf), "%u мин", s / 60);
+            else if (s < 86400)
+              snprintf(buf, sizeof(buf), "%u ч %u мин", s / 3600, (s % 3600) / 60);
+            else
+              snprintf(buf, sizeof(buf), "%u д %u ч", s / 86400, (s % 86400) / 3600);
+            return std::string(buf);
+
+  - platform: internal_temperature
+    id: chip_temperature
+    name: Температура чипа
+    entity_category: diagnostic
+    update_interval: 60s
+
+text_sensor:
+  - platform: wifi_info
+    ip_address:
+      id: dev_ip
+      name: IP-адрес
+      entity_category: diagnostic
+      on_value:
+        - lvgl.label.update:
+            id: lbl_sys_ip
+            text: !lambda 'return x.empty() ? std::string("--") : x;'
+    ssid:
+      id: dev_ssid
+      name: Сеть Wi-Fi
+      entity_category: diagnostic
+      on_value:
+        - lvgl.label.update:
+            id: lbl_sys_ssid
+            text: !lambda 'return x.empty() ? std::string("--") : x;'
+
+button:
+  - platform: restart
+    name: Перезагрузка
+    entity_category: config

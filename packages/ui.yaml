@@ -1,0 +1,425 @@
+# ---------------------------------------------------------------------------
+# Интерфейс на LVGL для круглого экрана 466x466.
+# Три страницы; листаются свайпом влево/вправо, кнопкой BOOT или действием
+# lvgl.page.next из Home Assistant.
+# ---------------------------------------------------------------------------
+
+font:
+  # Только цифры и двоеточие — большой шрифт не раздувает прошивку
+  - file: "gfonts://Roboto@700"
+    id: font_time
+    size: 96
+    bpp: 4
+    glyphs: "0123456789:-"
+
+  - file: "gfonts://Roboto@500"
+    id: font_l
+    size: 38
+    bpp: 4
+    glyphsets: [GF_Latin_Kernel, GF_Cyrillic_Core]
+    glyphs: ["°"]
+    ignore_missing_glyphs: true
+
+  - file: "gfonts://Roboto@400"
+    id: font_m
+    size: 24
+    bpp: 4
+    glyphsets: [GF_Latin_Kernel, GF_Cyrillic_Core]
+    glyphs: ["°"]
+    ignore_missing_glyphs: true
+
+  - file: "gfonts://Roboto@400"
+    id: font_s
+    size: 18
+    bpp: 4
+    glyphsets: [GF_Latin_Kernel, GF_Cyrillic_Core]
+    glyphs: ["°"]
+    ignore_missing_glyphs: true
+
+lvgl:
+  id: lvgl_main
+  displays: [amoled]
+  touchscreens: [touch]
+  buffer_size: 25%
+  default_font: font_m
+  bg_color: 0x000000
+  text_color: 0xFFFFFF
+  border_width: 0
+  pad_all: 0
+  page_wrap: true
+
+  style_definitions:
+    - id: style_page
+      bg_color: 0x000000
+      bg_opa: COVER
+      border_width: 0
+      pad_all: 0
+      radius: 0
+
+    - id: style_card
+      bg_color: 0x14181D
+      bg_opa: COVER
+      radius: 22
+      border_width: 0
+      pad_all: 6
+      text_color: 0xFFFFFF
+
+    - id: style_caption
+      text_font: font_s
+      text_color: 0x8A9199
+
+    - id: style_dot
+      width: 10
+      height: 10
+      radius: 5
+      border_width: 0
+      bg_opa: COVER
+
+  pages:
+    # =====================================================================
+    # Страница 1 — часы
+    # =====================================================================
+    - id: page_clock
+      styles: style_page
+      scrollable: false
+      widgets:
+        - obj:
+            id: root_clock
+            width: 466
+            height: 466
+            align: CENTER
+            bg_opa: TRANSP
+            border_width: 0
+            pad_all: 0
+            scrollable: false
+            on_swipe_left:
+              - lvgl.page.next:
+            on_swipe_right:
+              - lvgl.page.previous:
+            widgets:
+              # Кольцо-индикатор: доля прошедших минут в сутках
+              - arc:
+                  id: arc_day
+                  width: 450
+                  height: 450
+                  align: CENTER
+                  clickable: false
+                  adjustable: false
+                  min_value: 0
+                  max_value: 1440
+                  value: 0
+                  start_angle: 270
+                  end_angle: 270
+                  rotation: 0
+                  arc_width: 6
+                  arc_color: 0x1B1F24
+                  arc_rounded: true
+                  indicator:
+                    arc_width: 6
+                    arc_color: 0x03A9F4
+                    arc_rounded: true
+                  knob:
+                    bg_opa: TRANSP
+                    pad_all: 0
+
+              - label:
+                  id: lbl_slot1_title
+                  text: "${slot1_title}"
+                  styles: style_caption
+                  align: CENTER
+                  y: -132
+
+              - label:
+                  id: lbl_slot1
+                  text: "--"
+                  text_font: font_l
+                  text_color: 0xFFFFFF
+                  align: CENTER
+                  y: -98
+
+              - label:
+                  id: lbl_time
+                  text: "--:--"
+                  text_font: font_time
+                  text_color: 0xFFFFFF
+                  align: CENTER
+                  y: -8
+
+              - label:
+                  id: lbl_date
+                  text: "нет связи с Home Assistant"
+                  styles: style_caption
+                  align: CENTER
+                  y: 62
+
+              - label:
+                  id: lbl_slot2_title
+                  text: "${slot2_title}"
+                  styles: style_caption
+                  align: CENTER
+                  y: 112
+
+              - label:
+                  id: lbl_slot2
+                  text: "--"
+                  text_font: font_l
+                  text_color: 0xFFFFFF
+                  align: CENTER
+                  y: 148
+
+              - obj:
+                  id: dots_1
+                  align: CENTER
+                  y: 196
+                  width: 58
+                  height: 14
+                  bg_opa: TRANSP
+                  border_width: 0
+                  pad_all: 0
+                  scrollable: false
+                  clickable: false
+                  widgets:
+                    - obj: { styles: style_dot, bg_color: 0x03A9F4, align: LEFT_MID, x: 0 }
+                    - obj: { styles: style_dot, bg_color: 0x33383E, align: CENTER }
+                    - obj: { styles: style_dot, bg_color: 0x33383E, align: RIGHT_MID }
+
+    # =====================================================================
+    # Страница 2 — четыре значения из Home Assistant
+    # =====================================================================
+    - id: page_home
+      styles: style_page
+      scrollable: false
+      widgets:
+        - obj:
+            id: root_home
+            width: 466
+            height: 466
+            align: CENTER
+            bg_opa: TRANSP
+            border_width: 0
+            pad_all: 0
+            scrollable: false
+            on_swipe_left:
+              - lvgl.page.next:
+            on_swipe_right:
+              - lvgl.page.previous:
+            widgets:
+              - label:
+                  text: "Дом"
+                  styles: style_caption
+                  align: CENTER
+                  y: -186
+
+              - obj:
+                  styles: style_card
+                  width: 164
+                  height: 128
+                  align: CENTER
+                  x: -86
+                  y: -74
+                  scrollable: false
+                  clickable: false
+                  widgets:
+                    - label:
+                        text: "${slot1_title}"
+                        styles: style_caption
+                        align: TOP_MID
+                        y: 8
+                    - label:
+                        id: lbl_slot1_card
+                        text: "--"
+                        text_font: font_l
+                        align: CENTER
+                        y: 10
+              - obj:
+                  styles: style_card
+                  width: 164
+                  height: 128
+                  align: CENTER
+                  x: 86
+                  y: -74
+                  scrollable: false
+                  clickable: false
+                  widgets:
+                    - label:
+                        text: "${slot2_title}"
+                        styles: style_caption
+                        align: TOP_MID
+                        y: 8
+                    - label:
+                        id: lbl_slot2_card
+                        text: "--"
+                        text_font: font_l
+                        align: CENTER
+                        y: 10
+              - obj:
+                  styles: style_card
+                  width: 164
+                  height: 128
+                  align: CENTER
+                  x: -86
+                  y: 74
+                  scrollable: false
+                  clickable: false
+                  widgets:
+                    - label:
+                        text: "${slot3_title}"
+                        styles: style_caption
+                        align: TOP_MID
+                        y: 8
+                    - label:
+                        id: lbl_slot3
+                        text: "--"
+                        text_font: font_l
+                        align: CENTER
+                        y: 10
+              - obj:
+                  styles: style_card
+                  width: 164
+                  height: 128
+                  align: CENTER
+                  x: 86
+                  y: 74
+                  scrollable: false
+                  clickable: false
+                  widgets:
+                    - label:
+                        text: "${slot4_title}"
+                        styles: style_caption
+                        align: TOP_MID
+                        y: 8
+                    - label:
+                        id: lbl_slot4
+                        text: "--"
+                        text_font: font_l
+                        align: CENTER
+                        y: 10
+
+              - obj:
+                  align: CENTER
+                  y: 196
+                  width: 58
+                  height: 14
+                  bg_opa: TRANSP
+                  border_width: 0
+                  pad_all: 0
+                  scrollable: false
+                  clickable: false
+                  widgets:
+                    - obj: { styles: style_dot, bg_color: 0x33383E, align: LEFT_MID }
+                    - obj: { styles: style_dot, bg_color: 0x03A9F4, align: CENTER }
+                    - obj: { styles: style_dot, bg_color: 0x33383E, align: RIGHT_MID }
+
+    # =====================================================================
+    # Страница 3 — состояние устройства и яркость
+    # =====================================================================
+    - id: page_system
+      styles: style_page
+      scrollable: false
+      widgets:
+        - obj:
+            id: root_system
+            width: 466
+            height: 466
+            align: CENTER
+            bg_opa: TRANSP
+            border_width: 0
+            pad_all: 0
+            scrollable: false
+            on_swipe_left:
+              - lvgl.page.next:
+            on_swipe_right:
+              - lvgl.page.previous:
+            widgets:
+              - label:
+                  text: "Устройство"
+                  styles: style_caption
+                  align: CENTER
+                  y: -186
+
+              - label: { text: "Сеть", styles: style_caption, align: CENTER, x: -140, y: -132 }
+              - label:
+                  id: lbl_sys_ssid
+                  text: "--"
+                  text_font: font_m
+                  align: CENTER
+                  x: 40
+                  y: -132
+
+              - label: { text: "Сигнал", styles: style_caption, align: CENTER, x: -140, y: -92 }
+              - label:
+                  id: lbl_sys_wifi
+                  text: "--"
+                  text_font: font_m
+                  align: CENTER
+                  x: 40
+                  y: -92
+
+              - label: { text: "IP", styles: style_caption, align: CENTER, x: -140, y: -52 }
+              - label:
+                  id: lbl_sys_ip
+                  text: "--"
+                  text_font: font_m
+                  align: CENTER
+                  x: 40
+                  y: -52
+
+              - label: { text: "Работает", styles: style_caption, align: CENTER, x: -140, y: -12 }
+              - label:
+                  id: lbl_sys_uptime
+                  text: "--"
+                  text_font: font_m
+                  align: CENTER
+                  x: 40
+                  y: -12
+
+              - arc:
+                  id: arc_bright
+                  width: 150
+                  height: 150
+                  align: CENTER
+                  y: 92
+                  min_value: 5
+                  max_value: 100
+                  value: 70
+                  adjustable: true
+                  arc_width: 10
+                  arc_color: 0x1B1F24
+                  arc_rounded: true
+                  indicator:
+                    arc_width: 10
+                    arc_color: 0x03A9F4
+                    arc_rounded: true
+                  knob:
+                    bg_color: 0x03A9F4
+                  on_change:
+                    - number.set:
+                        id: screen_brightness
+                        value: !lambda 'return x;'
+                    - lvgl.label.update:
+                        id: lbl_bright
+                        text: !lambda |-
+                          char buf[8];
+                          snprintf(buf, sizeof(buf), "%d%%", (int) x);
+                          return std::string(buf);
+              - label:
+                  id: lbl_bright
+                  text: "70%"
+                  text_font: font_m
+                  align: CENTER
+                  y: 92
+
+              - obj:
+                  align: CENTER
+                  y: 196
+                  width: 58
+                  height: 14
+                  bg_opa: TRANSP
+                  border_width: 0
+                  pad_all: 0
+                  scrollable: false
+                  clickable: false
+                  widgets:
+                    - obj: { styles: style_dot, bg_color: 0x33383E, align: LEFT_MID }
+                    - obj: { styles: style_dot, bg_color: 0x33383E, align: CENTER }
+                    - obj: { styles: style_dot, bg_color: 0x03A9F4, align: RIGHT_MID }

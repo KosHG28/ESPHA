@@ -1,0 +1,65 @@
+# ---------------------------------------------------------------------------
+# Управление яркостью AMOLED и автогашение экрана.
+# У AMOLED нет подсветки: яркость задаётся командой контроллера (регистр 0x51),
+# поэтому используем display->set_brightness() вместо light/ledc.
+# ---------------------------------------------------------------------------
+
+number:
+  - platform: template
+    id: screen_brightness
+    name: Яркость экрана
+    icon: mdi:brightness-6
+    entity_category: config
+    unit_of_measurement: "%"
+    min_value: 5
+    max_value: 100
+    step: 5
+    initial_value: 70
+    optimistic: true
+    restore_value: true
+    on_value:
+      - script.execute: wake_screen
+
+  - platform: template
+    id: screen_dim
+    name: Яркость в режиме ожидания
+    icon: mdi:brightness-4
+    entity_category: config
+    unit_of_measurement: "%"
+    min_value: 0
+    max_value: 100
+    step: 5
+    initial_value: 10
+    optimistic: true
+    restore_value: true
+
+  - platform: template
+    id: screen_timeout
+    name: Гасить экран через
+    icon: mdi:timer-outline
+    entity_category: config
+    unit_of_measurement: s
+    min_value: 0
+    max_value: 600
+    step: 10
+    initial_value: 60
+    optimistic: true
+    restore_value: true
+    on_value:
+      - script.execute: wake_screen
+
+script:
+  # Полная яркость, затем — через screen_timeout секунд — приглушение.
+  # mode: restart => каждое касание перезапускает таймер.
+  - id: wake_screen
+    mode: restart
+    then:
+      - lambda: |-
+          id(amoled)->set_brightness((uint8_t) (id(screen_brightness).state * 2.55f + 0.5f));
+      - if:
+          condition:
+            lambda: 'return id(screen_timeout).state > 0;'
+          then:
+            - delay: !lambda 'return (uint32_t) (id(screen_timeout).state * 1000);'
+            - lambda: |-
+                id(amoled)->set_brightness((uint8_t) (id(screen_dim).state * 2.55f + 0.5f));
