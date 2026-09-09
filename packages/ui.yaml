@@ -570,7 +570,10 @@ lvgl:
                     arc_rounded: true
                   knob:
                     bg_color: 0x03A9F4
+                  on_press:
+                    - lambda: 'id(lvgl_press_count)++;'
                   on_change:
+                    - lambda: 'id(lvgl_change_count)++;'
                     - number.set:
                         id: screen_brightness
                         value: !lambda 'return x;'
@@ -586,3 +589,4 @@ lvgl:
                   text_font: font_m
                   align: CENTER
                   y: 118
+                  clickable: false

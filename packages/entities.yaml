@@ -186,7 +186,10 @@ text_sensor:
     icon: mdi:gesture-tap
     entity_category: diagnostic
     update_interval: 2s
-    lambda: 'return id(touch)->debug_state();'
+    lambda: |-
+      char buf[32];
+      snprintf(buf, sizeof(buf), " lvgl=%d/%d", id(lvgl_press_count), id(lvgl_change_count));
+      return id(touch)->debug_state() + buf;
 
   - platform: wifi_info
     ip_address:
