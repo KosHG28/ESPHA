@@ -29,6 +29,8 @@ i2c:
   sda: GPIO47
   scl: GPIO48
   frequency: 400kHz
+  # Печатает найденные адреса при загрузке — по ним видно, какой тач на плате
+  scan: true
 
 spi:
   id: bus_qspi
@@ -58,12 +60,31 @@ display:
     auto_clear_enabled: false
     update_interval: never
 
+# Плата выпускается в двух ревизиях с разными тачскринами, и по внешнему виду
+# они не отличаются. Поэтому объявлены оба драйвера — рабочим окажется тот,
+# чей контроллер реально стоит на плате.
+#
+#   старая ревизия: дисплей SH8601 + тач FT3168, адрес 0x38
+#   новая ревизия:  дисплей CO5300  + тач CST820, адрес 0x15
+#
+# Тот драйвер, чей чип не отвечает по I2C, помечается как failed и просто
+# молчит. Чтобы убрать ошибку из логов, посмотрите результат сканирования шины
+# (строки «Found i2c device at address ...» при загрузке) и удалите лишний блок.
 touchscreen:
   - platform: ft5x06
-    id: touch
+    id: touch_ft
     i2c_id: bus_i2c
-    # FT3168 совместим с регистровой картой FT5x06, адрес 0x38
+    # FT3168 совместим с регистровой картой FT5x06
     address: 0x38
+    display: amoled
+    on_touch:
+      - script.execute: wake_screen
+
+  - platform: cst816
+    id: touch_cst
+    i2c_id: bus_i2c
+    # CST820 определяется драйвером cst816 по chip id 0xB7
+    address: 0x15
     display: amoled
     on_touch:
       - script.execute: wake_screen
