@@ -25,9 +25,11 @@ jobs:
         uses: actions/checkout@v7.0.1
 
       - name: Подставить номер версии
+        id: version
         run: |
           version="$(date -u +'%Y.%m.%d')-${GITHUB_SHA::7}"
           sed -i "s/^    version: \".*\"$/    version: \"${version}\"/" espha.yaml
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
           grep -n 'version:' espha.yaml
 
       - name: Собрать через ESPHome
@@ -47,6 +49,12 @@ jobs:
           cp -r "${{ steps.esphome.outputs.name }}"/. site/firmware/
           # .elf нужен только для отладки — на страницу его не кладём
           rm -f site/firmware/*.elf
+          # GitHub Pages кеширует manifest.json на 10 минут, из-за чего
+          # ESP Web Tools видит старую версию и не предлагает обновление.
+          # Уникальный параметр в ссылке заставляет браузер взять свежий файл.
+          version="${{ steps.version.outputs.version }}"
+          sed -i "s#\./firmware/manifest\.json#./firmware/manifest.json?v=${version}#" site/index.html
+          sed -i "s#__BUILD_VERSION__#${version}#g" site/index.html
           ls -lR site
 
       - name: Сохранить артефакт сборки
