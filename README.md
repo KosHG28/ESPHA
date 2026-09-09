@@ -38,17 +38,54 @@
 
 ## Что на экране
 
-Три страницы, листаются свайпом влево-вправо или кнопкой **BOOT**:
+Четыре страницы, листаются свайпом влево-вправо или кнопкой **BOOT**:
 
 | Страница | Что показывает |
 | --- | --- |
 | **Часы** | Крупное время, дата по-русски, два значения из Home Assistant, кольцо прогресса суток |
 | **Дом** | Четыре плитки с числовыми сущностями |
+| **Принтер** | Прогресс печати Bambu Lab: кольцо, проценты, статус, температуры сопла и стола, слой, остаток времени |
 | **Устройство** | Wi-Fi, уровень сигнала, IP, время работы, регулятор яркости |
 
 Время берётся из Home Assistant и записывается в часы реального времени
 **PCF85063** на плате, поэтому после перезагрузки время остаётся верным даже
 без сети.
+
+## 3D-принтер Bambu Lab
+
+Страница принтера берёт данные из интеграции
+[Bambu Lab](https://github.com/greghesp/ha-bambulab) (ставится через HACS).
+Она работает и в **LAN-режиме**, без облака — достаточно включить на принтере
+«LAN Only Mode» и ввести код доступа с экрана принтера.
+
+Имена сущностей задаются подстановками в `espha.yaml`. По умолчанию там `p1s` —
+замените на имя своего принтера:
+
+```yaml
+substitutions:
+  printer_progress_entity: sensor.p1s_print_progress
+  printer_status_entity: sensor.p1s_print_status
+  printer_nozzle_entity: sensor.p1s_nozzle_temperature
+  printer_bed_entity: sensor.p1s_bed_temperature
+  printer_layer_entity: sensor.p1s_current_layer
+  printer_total_layers_entity: sensor.p1s_total_layer_count
+  printer_remaining_entity: sensor.p1s_remaining_time
+  printer_remaining_to_minutes: "60"
+```
+
+Точные `entity_id` смотрите в **Инструменты разработчика → Состояния**,
+отфильтровав по имени принтера.
+
+> **Про остаток времени.** Интеграция отдаёт `remaining_time` в минутах, но
+> помечает его как «предпочтительно в часах», поэтому в Home Assistant сущность
+> обычно оказывается **в часах**. Отсюда множитель `printer_remaining_to_minutes: "60"`.
+> Если в Инструментах разработчика у сущности единица `min` — поставьте `"1"`.
+
+Кольцо становится зелёным, когда статус печати `running`, и серым в остальных
+состояниях. Названия статусов переведены на русский в
+[`packages/printer.yaml`](packages/printer.yaml) — там же их можно поправить.
+
+Иконки берутся из шрифта Material Design Icons, он скачивается при сборке.
 
 ## Сущности в Home Assistant
 
@@ -124,6 +161,7 @@ espha-factory.yaml         то же самое + суффикс MAC в имен
 packages/hardware.yaml     плата: дисплей, тач, I2C, SPI, кнопка
 packages/screen.yaml       яркость AMOLED и автогашение
 packages/entities.yaml     время, слоты Home Assistant, диагностика
+packages/printer.yaml      данные 3D-принтера Bambu Lab
 packages/ui.yaml           шрифты и интерфейс LVGL
 static/index.html          страница установщика (ESP Web Tools)
 .github/workflows/build.yml  сборка прошивки и публикация на GitHub Pages

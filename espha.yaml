@@ -35,6 +35,23 @@ substitutions:
   slot4_title: "Потребление"
   slot4_format: "%.0f Вт"
 
+  # ---- 3D-принтер Bambu Lab ----------------------------------------------
+  # Сущности создаёт интеграция Bambu Lab (HACS, greghesp/ha-bambulab),
+  # она же работает в LAN-режиме. Замените p1s на имя своего принтера —
+  # посмотреть точные entity_id можно в Инструменты разработчика → Состояния.
+  printer_progress_entity: sensor.p1s_print_progress
+  printer_status_entity: sensor.p1s_print_status
+  printer_nozzle_entity: sensor.p1s_nozzle_temperature
+  printer_bed_entity: sensor.p1s_bed_temperature
+  printer_layer_entity: sensor.p1s_current_layer
+  printer_total_layers_entity: sensor.p1s_total_layer_count
+  printer_remaining_entity: sensor.p1s_remaining_time
+
+  # Во что перевести значение «остатка времени», чтобы получить минуты.
+  # Интеграция по умолчанию показывает часы, поэтому 60.
+  # Если у вас сущность в минутах — поставьте 1.
+  printer_remaining_to_minutes: "60"
+
 esphome:
   name: ${name}
   friendly_name: ${friendly_name}
@@ -62,6 +79,7 @@ packages:
   hardware: !include packages/hardware.yaml
   screen: !include packages/screen.yaml
   entities: !include packages/entities.yaml
+  printer: !include packages/printer.yaml
   ui: !include packages/ui.yaml
 
 logger:
