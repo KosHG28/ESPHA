@@ -187,6 +187,16 @@ text_sensor:
           id: lbl_sys_i2c
           text: !lambda 'return "I2C: " + x;'
 
+  # Диагностика тачскрина: видно, отвечает ли чип и приходят ли координаты.
+  # Коснитесь экрана и посмотрите, растёт ли счётчик касаний.
+  - platform: template
+    id: touch_state
+    name: Состояние тачскрина
+    icon: mdi:gesture-tap
+    entity_category: diagnostic
+    update_interval: 2s
+    lambda: 'return id(touch)->debug_state();'
+
   - platform: wifi_info
     ip_address:
       id: dev_ip
