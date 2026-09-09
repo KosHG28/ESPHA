@@ -54,6 +54,33 @@ script:
           then:
             - lvgl.widget.update: { id: dot_4, bg_color: 0x03A9F4 }
 
+  # Вспышка во весь экран о важном событии: экран будится на полную яркость
+  # и несколько раз мигает цветом. Цвет и надпись задаёт вызывающая сторона.
+  - id: flash_screen
+    parameters:
+      color: int
+      text: string
+    mode: restart
+    then:
+      - script.execute: wake_screen
+      - lvgl.label.update:
+          id: alert_text
+          text: !lambda 'return text;'
+      - lvgl.widget.update:
+          id: alert_overlay
+          bg_color: !lambda 'return lv_color_hex(color);'
+      - repeat:
+          count: 4
+          then:
+            - lvgl.widget.show: alert_overlay
+            - delay: 400ms
+            - lvgl.widget.hide: alert_overlay
+            - delay: 250ms
+      # Последний показ подольше, чтобы надпись успели прочитать
+      - lvgl.widget.show: alert_overlay
+      - delay: 3s
+      - lvgl.widget.hide: alert_overlay
+
 interval:
   # Часы: двоеточие мигает раз в секунду, иначе на экране совсем ничего не
   # движется и панель выглядит зависшей.
