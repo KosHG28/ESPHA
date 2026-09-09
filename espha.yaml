@@ -15,6 +15,9 @@ substitutions:
   # где системный пояс — UTC.
   timezone: Europe/Moscow
 
+  # На сколько пикселей нужно провести пальцем, чтобы страница пролистнулась
+  swipe_threshold: "60"
+
   # ---- Данные из Home Assistant ------------------------------------------
   # slotN_entity — entity_id числовой сущности (sensor.*)
   # slotN_title  — подпись на экране

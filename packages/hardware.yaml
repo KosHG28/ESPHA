@@ -80,8 +80,60 @@ touchscreen:
     i2c_id: bus_i2c
     address: 0x38
     display: amoled
+    # Диапазон сырых координат задан явно, чтобы он не зависел от того,
+    # успел ли инициализироваться дисплей к моменту настройки тача.
+    calibration:
+      x_min: 0
+      x_max: 465
+      y_min: 0
+      y_max: 465
     on_touch:
       - script.execute: wake_screen
+      - lambda: |-
+          id(swipe_dx) = 0;
+          id(swipe_dy) = 0;
+    on_update:
+      - lambda: |-
+          if (!touches.empty()) {
+            // x_org/y_org — точка, в которой касание началось
+            id(swipe_dx) = (int) touches[0].x - (int) touches[0].x_org;
+            id(swipe_dy) = (int) touches[0].y - (int) touches[0].y_org;
+          }
+    on_release:
+      - if:
+          condition:
+            lambda: |-
+              int dx = id(swipe_dx), dy = id(swipe_dy);
+              int adx = dx < 0 ? -dx : dx;
+              int ady = dy < 0 ? -dy : dy;
+              return dx <= -${swipe_threshold} && adx > ady;
+          then:
+            - lvgl.page.next:
+      - if:
+          condition:
+            lambda: |-
+              int dx = id(swipe_dx), dy = id(swipe_dy);
+              int adx = dx < 0 ? -dx : dx;
+              int ady = dy < 0 ? -dy : dy;
+              return dx >= ${swipe_threshold} && adx > ady;
+          then:
+            - lvgl.page.previous:
+      - lambda: |-
+          id(swipe_dx) = 0;
+          id(swipe_dy) = 0;
+
+# Смещение текущего касания от точки его начала. Листание страниц считается
+# здесь, а не жестами LVGL: жест доходит до виджета под пальцем и до корневого
+# контейнера страницы не всплывает.
+globals:
+  - id: swipe_dx
+    type: int
+    restore_value: false
+    initial_value: '0'
+  - id: swipe_dy
+    type: int
+    restore_value: false
+    initial_value: '0'
 
 binary_sensor:
   - platform: gpio
