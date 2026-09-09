@@ -1,0 +1,130 @@
+# ---------------------------------------------------------------------------
+# Страница 3D-принтера Bambu Lab.
+#
+# Данные берутся из интеграции Bambu Lab (HACS, greghesp/ha-bambulab) —
+# она работает и в LAN-режиме, без облака. Имена сущностей задаются
+# подстановками printer_*_entity в espha.yaml.
+# ---------------------------------------------------------------------------
+
+sensor:
+  - platform: homeassistant
+    id: ha_printer_progress
+    entity_id: ${printer_progress_entity}
+    internal: true
+    on_value:
+      - lvgl.arc.update:
+          id: arc_print
+          value: !lambda 'return std::isnan(x) ? 0 : (int) x;'
+      - lvgl.label.update:
+          id: lbl_print_pct
+          text: !lambda |-
+            if (std::isnan(x))
+              return std::string("--");
+            char buf[8];
+            snprintf(buf, sizeof(buf), "%d%%", (int) x);
+            return std::string(buf);
+
+  - platform: homeassistant
+    id: ha_printer_nozzle
+    entity_id: ${printer_nozzle_entity}
+    internal: true
+    on_value:
+      - lvgl.label.update:
+          id: lbl_print_nozzle
+          text: !lambda |-
+            char buf[24];
+            if (std::isnan(x))
+              snprintf(buf, sizeof(buf), "\U000F0E5B --");
+            else
+              snprintf(buf, sizeof(buf), "\U000F0E5B %.0f°", x);
+            return std::string(buf);
+
+  - platform: homeassistant
+    id: ha_printer_bed
+    entity_id: ${printer_bed_entity}
+    internal: true
+    on_value:
+      - lvgl.label.update:
+          id: lbl_print_bed
+          text: !lambda |-
+            char buf[24];
+            if (std::isnan(x))
+              snprintf(buf, sizeof(buf), "\U000F1A45 --");
+            else
+              snprintf(buf, sizeof(buf), "\U000F1A45 %.0f°", x);
+            return std::string(buf);
+
+  - platform: homeassistant
+    id: ha_printer_layer
+    entity_id: ${printer_layer_entity}
+    internal: true
+    on_value:
+      - script.execute: refresh_printer_layers
+
+  - platform: homeassistant
+    id: ha_printer_total_layers
+    entity_id: ${printer_total_layers_entity}
+    internal: true
+    on_value:
+      - script.execute: refresh_printer_layers
+
+  - platform: homeassistant
+    id: ha_printer_remaining
+    entity_id: ${printer_remaining_entity}
+    internal: true
+    on_value:
+      - lvgl.label.update:
+          id: lbl_print_eta
+          text: !lambda |-
+            if (std::isnan(x))
+              return std::string("\U000F0150 --");
+            // Интеграция отдаёт время в часах; множитель задаётся подстановкой
+            int total = (int) (x * ${printer_remaining_to_minutes} + 0.5f);
+            char buf[24];
+            if (total < 60)
+              snprintf(buf, sizeof(buf), "\U000F0150 %dм", total);
+            else
+              snprintf(buf, sizeof(buf), "\U000F0150 %dч %02dм", total / 60, total % 60);
+            return std::string(buf);
+
+text_sensor:
+  - platform: homeassistant
+    id: ha_printer_status
+    entity_id: ${printer_status_entity}
+    internal: true
+    on_value:
+      - lvgl.label.update:
+          id: lbl_print_status
+          text: !lambda |-
+            // Состояния сенсора print_status интеграции Bambu Lab
+            if (x == "running")  return std::string("печать");
+            if (x == "idle")     return std::string("ожидание");
+            if (x == "prepare")  return std::string("подготовка");
+            if (x == "slicing")  return std::string("нарезка");
+            if (x == "init")     return std::string("запуск");
+            if (x == "pause")    return std::string("пауза");
+            if (x == "finish")   return std::string("готово");
+            if (x == "failed")   return std::string("ошибка");
+            if (x == "offline")  return std::string("нет связи");
+            return x.empty() ? std::string("--") : x;
+      # Зелёное кольцо при печати, серое во всех остальных состояниях
+      - lvgl.arc.update:
+          id: arc_print
+          indicator:
+            arc_color: !lambda |-
+              return x == "running" ? lv_color_hex(0x22DD44) : lv_color_hex(0x555C63);
+
+script:
+  - id: refresh_printer_layers
+    mode: restart
+    then:
+      - lvgl.label.update:
+          id: lbl_print_layer
+          text: !lambda |-
+            float cur = id(ha_printer_layer).state;
+            float tot = id(ha_printer_total_layers).state;
+            if (std::isnan(cur) || std::isnan(tot))
+              return std::string("\U000F0F58 --");
+            char buf[32];
+            snprintf(buf, sizeof(buf), "\U000F0F58 %d / %d", (int) cur, (int) tot);
+            return std::string(buf);

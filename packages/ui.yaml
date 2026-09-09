@@ -1,6 +1,6 @@
 # ---------------------------------------------------------------------------
 # Интерфейс на LVGL для круглого экрана 466x466.
-# Три страницы; листаются свайпом влево/вправо, кнопкой BOOT или действием
+# Четыре страницы; листаются свайпом влево/вправо, кнопкой BOOT или действием
 # lvgl.page.next из Home Assistant.
 # ---------------------------------------------------------------------------
 
@@ -35,6 +35,41 @@ font:
     glyphsets: [GF_Latin_Kernel, GF_Cyrillic_Core]
     glyphs: ["°"]
     ignore_missing_glyphs: true
+
+  # Крупный процент на странице принтера
+  - file: "gfonts://Roboto@700"
+    id: font_pct
+    size: 58
+    bpp: 4
+    glyphs: "0123456789%-"
+
+  # Текст вперемешку с иконками Material Design Icons
+  - file: "gfonts://Roboto@400"
+    id: font_icon
+    size: 26
+    bpp: 4
+    glyphsets: [GF_Latin_Kernel, GF_Cyrillic_Core]
+    glyphs: ["°"]
+    ignore_missing_glyphs: true
+    extras:
+      - file:
+          url: "https://raw.githubusercontent.com/Templarian/MaterialDesign-Webfont/master/fonts/materialdesignicons-webfont.ttf"
+          type: web
+        glyphs:
+          - "\U000F0E5B"   # mdi-printer-3d-nozzle — сопло
+          - "\U000F1A45"   # mdi-heat-wave — стол
+          - "\U000F0F58"   # mdi-layers-triple — слои
+          - "\U000F0150"   # mdi-clock-outline — остаток времени
+
+  # Крупная иконка принтера в центре страницы
+  - file:
+      url: "https://raw.githubusercontent.com/Templarian/MaterialDesign-Webfont/master/fonts/materialdesignicons-webfont.ttf"
+      type: web
+    id: font_printer
+    size: 76
+    bpp: 4
+    glyphsets: []
+    glyphs: ["\U000F042B"]   # mdi-printer-3d
 
 lvgl:
   id: lvgl_main
@@ -171,7 +206,7 @@ lvgl:
                   id: dots_1
                   align: CENTER
                   y: 196
-                  width: 58
+                  width: 76
                   height: 14
                   bg_opa: TRANSP
                   border_width: 0
@@ -179,9 +214,10 @@ lvgl:
                   scrollable: false
                   clickable: false
                   widgets:
-                    - obj: { styles: style_dot, bg_color: 0x03A9F4, align: LEFT_MID, x: 0 }
-                    - obj: { styles: style_dot, bg_color: 0x33383E, align: CENTER }
-                    - obj: { styles: style_dot, bg_color: 0x33383E, align: RIGHT_MID }
+                    - obj: { styles: style_dot, bg_color: 0x03A9F4, align: CENTER, x: -33 }
+                    - obj: { styles: style_dot, bg_color: 0x33383E, align: CENTER, x: -11 }
+                    - obj: { styles: style_dot, bg_color: 0x33383E, align: CENTER, x: 11 }
+                    - obj: { styles: style_dot, bg_color: 0x33383E, align: CENTER, x: 33 }
 
     # =====================================================================
     # Страница 2 — четыре значения из Home Assistant
@@ -298,7 +334,7 @@ lvgl:
               - obj:
                   align: CENTER
                   y: 196
-                  width: 58
+                  width: 76
                   height: 14
                   bg_opa: TRANSP
                   border_width: 0
@@ -306,12 +342,131 @@ lvgl:
                   scrollable: false
                   clickable: false
                   widgets:
-                    - obj: { styles: style_dot, bg_color: 0x33383E, align: LEFT_MID }
-                    - obj: { styles: style_dot, bg_color: 0x03A9F4, align: CENTER }
-                    - obj: { styles: style_dot, bg_color: 0x33383E, align: RIGHT_MID }
+                    - obj: { styles: style_dot, bg_color: 0x33383E, align: CENTER, x: -33 }
+                    - obj: { styles: style_dot, bg_color: 0x03A9F4, align: CENTER, x: -11 }
+                    - obj: { styles: style_dot, bg_color: 0x33383E, align: CENTER, x: 11 }
+                    - obj: { styles: style_dot, bg_color: 0x33383E, align: CENTER, x: 33 }
 
     # =====================================================================
-    # Страница 3 — состояние устройства и яркость
+    # Страница 3 — 3D-принтер Bambu Lab
+    # =====================================================================
+    - id: page_printer
+      styles: style_page
+      scrollable: false
+      widgets:
+        - obj:
+            id: root_printer
+            width: 466
+            height: 466
+            align: CENTER
+            bg_opa: TRANSP
+            border_width: 0
+            pad_all: 0
+            scrollable: false
+            on_swipe_left:
+              - lvgl.page.next:
+            on_swipe_right:
+              - lvgl.page.previous:
+            widgets:
+              # Кольцо прогресса с разрывом сверху
+              - arc:
+                  id: arc_print
+                  width: 440
+                  height: 440
+                  align: CENTER
+                  clickable: false
+                  adjustable: false
+                  min_value: 0
+                  max_value: 100
+                  value: 0
+                  start_angle: 285
+                  end_angle: 255
+                  arc_width: 14
+                  arc_color: 0x1B1F24
+                  arc_rounded: true
+                  indicator:
+                    arc_width: 14
+                    arc_color: 0x22DD44
+                    arc_rounded: true
+                  knob:
+                    bg_opa: TRANSP
+                    pad_all: 0
+
+              - label:
+                  id: lbl_print_pct
+                  text: "--"
+                  text_font: font_pct
+                  text_color: 0xFFFFFF
+                  align: CENTER
+                  y: -122
+
+              - label:
+                  id: lbl_print_status
+                  text: "нет данных"
+                  text_font: font_m
+                  text_color: 0x8A9199
+                  align: CENTER
+                  y: -66
+
+              - label:
+                  text: "\U000F042B"
+                  text_font: font_printer
+                  text_color: 0x22DD44
+                  align: CENTER
+                  y: 2
+
+              - label:
+                  id: lbl_print_nozzle
+                  text: "\U000F0E5B --"
+                  text_font: font_icon
+                  text_color: 0xFFFFFF
+                  align: CENTER
+                  x: -128
+                  y: 12
+
+              - label:
+                  id: lbl_print_bed
+                  text: "\U000F1A45 --"
+                  text_font: font_icon
+                  text_color: 0xFFFFFF
+                  align: CENTER
+                  x: 128
+                  y: 12
+
+              - label:
+                  id: lbl_print_layer
+                  text: "\U000F0F58 --"
+                  text_font: font_icon
+                  text_color: 0xFFFFFF
+                  align: CENTER
+                  y: 96
+
+              - label:
+                  id: lbl_print_eta
+                  text: "\U000F0150 --"
+                  text_font: font_icon
+                  text_color: 0x03A9F4
+                  align: CENTER
+                  y: 146
+
+              - obj:
+                  align: CENTER
+                  y: 196
+                  width: 76
+                  height: 14
+                  bg_opa: TRANSP
+                  border_width: 0
+                  pad_all: 0
+                  scrollable: false
+                  clickable: false
+                  widgets:
+                    - obj: { styles: style_dot, bg_color: 0x33383E, align: CENTER, x: -33 }
+                    - obj: { styles: style_dot, bg_color: 0x33383E, align: CENTER, x: -11 }
+                    - obj: { styles: style_dot, bg_color: 0x03A9F4, align: CENTER, x: 11 }
+                    - obj: { styles: style_dot, bg_color: 0x33383E, align: CENTER, x: 33 }
+
+    # =====================================================================
+    # Страница 4 — состояние устройства и яркость
     # =====================================================================
     - id: page_system
       styles: style_page
@@ -412,7 +567,7 @@ lvgl:
               - obj:
                   align: CENTER
                   y: 196
-                  width: 58
+                  width: 76
                   height: 14
                   bg_opa: TRANSP
                   border_width: 0
@@ -420,6 +575,7 @@ lvgl:
                   scrollable: false
                   clickable: false
                   widgets:
-                    - obj: { styles: style_dot, bg_color: 0x33383E, align: LEFT_MID }
-                    - obj: { styles: style_dot, bg_color: 0x33383E, align: CENTER }
-                    - obj: { styles: style_dot, bg_color: 0x03A9F4, align: RIGHT_MID }
+                    - obj: { styles: style_dot, bg_color: 0x33383E, align: CENTER, x: -33 }
+                    - obj: { styles: style_dot, bg_color: 0x33383E, align: CENTER, x: -11 }
+                    - obj: { styles: style_dot, bg_color: 0x33383E, align: CENTER, x: 11 }
+                    - obj: { styles: style_dot, bg_color: 0x03A9F4, align: CENTER, x: 33 }
