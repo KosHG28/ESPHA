@@ -65,6 +65,7 @@ esphome:
       then:
         - script.execute: wake_screen
         - script.execute: refresh_clock
+        - component.update: i2c_devices
         - lvgl.arc.update:
             id: arc_bright
             value: !lambda 'return (int) id(screen_brightness).state;'
