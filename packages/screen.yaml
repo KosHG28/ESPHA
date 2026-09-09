@@ -65,7 +65,5 @@ script:
             # горящих пикселей, и понятнее, что панель просто спит
             - lvgl.page.show:
                 id: page_clock
-                animation: FADE_IN
-                time: 300ms
             - lambda: |-
                 id(amoled)->set_brightness((uint8_t) (id(screen_dim).state * 2.55f + 0.5f));
