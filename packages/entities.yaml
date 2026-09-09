@@ -30,15 +30,6 @@ script:
   - id: refresh_clock
     mode: restart
     then:
-      - lvgl.label.update:
-          id: lbl_time
-          text: !lambda |-
-            auto now = id(ha_time).now();
-            if (!now.is_valid())
-              return std::string("--:--");
-            char buf[8];
-            snprintf(buf, sizeof(buf), "%02d:%02d", now.hour, now.minute);
-            return std::string(buf);
       - lvgl.arc.update:
           id: arc_day
           value: !lambda |-

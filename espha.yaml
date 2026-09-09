@@ -18,6 +18,9 @@ substitutions:
   # На сколько пикселей нужно провести пальцем, чтобы страница пролистнулась
   swipe_threshold: "60"
 
+  # Как часто содержимое сдвигается на пару пикселей против выгорания AMOLED
+  pixel_shift_interval: 3min
+
   # ---- Данные из Home Assistant ------------------------------------------
   # slotN_entity — entity_id числовой сущности (sensor.*)
   # slotN_title  — подпись на экране
@@ -92,6 +95,7 @@ packages:
   entities: !include packages/entities.yaml
   printer: !include packages/printer.yaml
   ui: !include packages/ui.yaml
+  behaviour: !include packages/behaviour.yaml
 
 logger:
   level: INFO
