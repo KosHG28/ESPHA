@@ -1,7 +1,7 @@
 # ---------------------------------------------------------------------------
 # Интерфейс на LVGL для круглого экрана 466x466.
 #
-# Пять страниц; листаются свайпом (считается в packages/hardware.yaml, а не
+# Четыре страницы; листаются свайпом (считается в packages/hardware.yaml, а не
 # жестами LVGL), кнопкой BOOT или действием lvgl.page.next из Home Assistant.
 #
 # Поворот изображения не используется: у CO5300 нет аппаратной перестановки
@@ -171,7 +171,7 @@ lvgl:
       - obj:
           align: CENTER
           y: 196
-          width: 98
+          width: 76
           height: 14
           bg_opa: TRANSP
           border_width: 0
@@ -179,11 +179,10 @@ lvgl:
           scrollable: false
           clickable: false
           widgets:
-            - obj: { id: dot_1, styles: style_dot, bg_color: 0x03A9F4, align: CENTER, x: -44 }
-            - obj: { id: dot_2, styles: style_dot, bg_color: 0x33383E, align: CENTER, x: -22 }
-            - obj: { id: dot_3, styles: style_dot, bg_color: 0x33383E, align: CENTER, x: 0 }
-            - obj: { id: dot_4, styles: style_dot, bg_color: 0x33383E, align: CENTER, x: 22 }
-            - obj: { id: dot_5, styles: style_dot, bg_color: 0x33383E, align: CENTER, x: 44 }
+            - obj: { id: dot_1, styles: style_dot, bg_color: 0x03A9F4, align: CENTER, x: -33 }
+            - obj: { id: dot_2, styles: style_dot, bg_color: 0x33383E, align: CENTER, x: -11 }
+            - obj: { id: dot_3, styles: style_dot, bg_color: 0x33383E, align: CENTER, x: 11 }
+            - obj: { id: dot_4, styles: style_dot, bg_color: 0x33383E, align: CENTER, x: 33 }
 
   pages:
     # =====================================================================
@@ -474,79 +473,7 @@ lvgl:
                   y: 146
 
     # =====================================================================
-    # Страница 4 — превью печатаемой модели
-    # Картинка в круглой маске, кольцо прогресса и процент — как на странице
-    # принтера, чтобы при перелистывании кольцо не «прыгало»
-    # =====================================================================
-    - id: page_preview
-      styles: style_page
-      scrollable: false
-      on_load:
-        - script.execute:
-            id: mark_page
-            idx: 3
-      widgets:
-        - obj:
-            id: root_preview
-            styles: style_root
-            scrollable: false
-            widgets:
-              - obj:
-                  width: 392
-                  height: 392
-                  align: CENTER
-                  radius: 196
-                  clip_corner: true
-                  bg_color: 0x0B0D10
-                  bg_opa: COVER
-                  border_width: 0
-                  pad_all: 0
-                  scrollable: false
-                  clickable: false
-                  widgets:
-                    - image:
-                        id: img_preview
-                        src: printer_preview
-                        align: CENTER
-                    - label:
-                        id: lbl_preview_note
-                        text: "загрузка превью…"
-                        styles: style_caption
-                        align: CENTER
-
-              - arc:
-                  id: arc_preview
-                  width: 436
-                  height: 436
-                  align: CENTER
-                  clickable: false
-                  adjustable: false
-                  min_value: 0
-                  max_value: 100
-                  value: 0
-                  start_angle: 285
-                  end_angle: 255
-                  arc_width: 14
-                  arc_color: 0x1B1F24
-                  arc_rounded: true
-                  indicator:
-                    arc_width: 14
-                    arc_color: 0x22DD44
-                    arc_rounded: true
-                  knob:
-                    bg_opa: TRANSP
-                    pad_all: 0
-
-              - label:
-                  id: lbl_preview_pct
-                  text: "--"
-                  text_font: font_m
-                  text_color: 0xFFFFFF
-                  align: CENTER
-                  y: -198
-
-    # =====================================================================
-    # Страница 5 — состояние устройства и яркость
+    # Страница 4 — состояние устройства и яркость
     # =====================================================================
     - id: page_system
       styles: style_page
@@ -554,7 +481,7 @@ lvgl:
       on_load:
         - script.execute:
             id: mark_page
-            idx: 4
+            idx: 3
       widgets:
         - obj:
             id: root_system
