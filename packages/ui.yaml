@@ -83,7 +83,12 @@ lvgl:
   id: lvgl_main
   displays: [amoled]
   touchscreens: [touch]
-  buffer_size: 100%
+  # Буфер на весь экран был нужен только для программного поворота,
+  # от которого отказались. Вернули четверть экрана — минус ~330 КБ памяти.
+  buffer_size: ${lvgl_buffer_size}
+  # Проверять, нужна ли перерисовка, 30 раз в секунду, а не 60 —
+  # для этого интерфейса разницы не видно, а холостой работы вдвое меньше
+  refresh_interval: 33ms
   default_font: font_m
   bg_color: 0x000000
   text_color: 0xFFFFFF
@@ -472,6 +477,20 @@ lvgl:
                   align: CENTER
                   y: 146
 
+              # Когда принтер не печатает: когда закончилась последняя печать.
+              # Показывается вместо слоя и остатка времени, которые в простое
+              # бессмысленны
+              - label:
+                  id: lbl_print_last
+                  text: ""
+                  styles: style_caption
+                  align: CENTER
+                  y: 110
+                  width: 380
+                  long_mode: DOT
+                  text_align: CENTER
+                  hidden: true
+
     # =====================================================================
     # Страница 4 — состояние устройства и яркость
     # =====================================================================
@@ -589,10 +608,7 @@ lvgl:
                     arc_rounded: true
                   knob:
                     bg_color: 0x03A9F4
-                  on_press:
-                    - lambda: 'id(lvgl_press_count)++;'
                   on_change:
-                    - lambda: 'id(lvgl_change_count)++;'
                     - number.set:
                         id: screen_brightness
                         value: !lambda 'return x;'

@@ -5,22 +5,29 @@
 # она работает и в LAN-режиме, без облака. Имена сущностей задаются
 # подстановками printer_*_entity в espha.yaml.
 #
-# Кольцо показывает не только прогресс, но и фазу работы принтера: цвет и
-# пульсация зависят от того, что он сейчас делает. Идея подсмотрена в проекте
+# Кольцо показывает не только прогресс, но и фазу работы принтера: его цвет
+# зависит от того, что принтер сейчас делает. Идея подсмотрена в проекте
 # PrintSphere-Display (cptkirki), реализация своя.
+#
+# Пульсирует не кольцо, а подпись стадии под процентом. Кольцо 436×436 при
+# каждом кадре перерисовывало почти весь экран; подпись — в десятки раз
+# меньшая площадь.
 #
 # Фазы (глобальная printer_phase):
 #   0 ожидание      — серое кольцо
 #   1 печать        — зелёное
 #   2 готово        — зелёное; при переходе в эту фазу — вспышка «ГОТОВО»
-#   3 ошибка        — пульсирует красным; при переходе — вспышка «ОШИБКА»
-#   4 пауза         — пульсирует янтарным
-#   5 нагрев        — пульсирует оранжевым
-#   6 очистка сопла — пульсирует белым
-#   7 калибровка    — пульсирует фиолетовым
-#   8 подготовка    — пульсирует оранжевым
-#   9 загрузка филамента  — жёлтое кольцо заполняется
-#  10 выгрузка филамента  — жёлтое кольцо опустошается
+#   3 ошибка        — красное, подпись пульсирует; при переходе — «ОШИБКА»
+#   4 пауза         — янтарное, подпись пульсирует
+#   5 нагрев        — оранжевое, подпись пульсирует
+#   6 очистка сопла — белое, подпись пульсирует
+#   7 калибровка    — фиолетовое, подпись пульсирует
+#   8 подготовка    — оранжевое, подпись пульсирует
+#   9 загрузка филамента  — жёлтое
+#  10 выгрузка филамента  — жёлтое
+#
+# В простое (ожидание, готово, нет связи) слой и остаток времени скрыты,
+# а вместо них показано, когда закончилась последняя печать.
 # ---------------------------------------------------------------------------
 
 globals:
@@ -39,6 +46,12 @@ globals:
     type: bool
     restore_value: false
     initial_value: 'false'
+  # Когда закончилась последняя печать (секунды с 1970-го), 0 — неизвестно.
+  # Сохраняется во флеш: пишется раз за печать, это не изнашивает память.
+  - id: printer_last_finish
+    type: uint32_t
+    restore_value: true
+    initial_value: '0'
 
 sensor:
   - platform: homeassistant
@@ -168,6 +181,34 @@ script:
             snprintf(buf, sizeof(buf), "\U000F0F58 %d / %d", (int) cur, (int) tot);
             return std::string(buf);
 
+  # «закончилась в 14:32» / «последняя печать вчера в 14:32».
+  # Вызывается при смене фазы и раз в минуту из refresh_clock, чтобы
+  # «сегодня» в полночь превращалось во «вчера»
+  - id: refresh_printer_last
+    mode: restart
+    then:
+      - lvgl.label.update:
+          id: lbl_print_last
+          text: !lambda |-
+            uint32_t ts = id(printer_last_finish);
+            if (ts == 0)
+              return std::string("");
+            auto now = id(ha_time).now();
+            auto t = ESPTime::from_epoch_local(ts);
+            const char *prefix = id(printer_phase) == 2 ? "закончилась" : "последняя печать";
+            char buf[96];
+            if (now.is_valid() && t.year == now.year && t.day_of_year == now.day_of_year) {
+              snprintf(buf, sizeof(buf), "%s в %02d:%02d", prefix, t.hour, t.minute);
+            } else {
+              auto y = ESPTime::from_epoch_local(now.timestamp - 86400);
+              if (now.is_valid() && t.year == y.year && t.day_of_year == y.day_of_year)
+                snprintf(buf, sizeof(buf), "%s вчера в %02d:%02d", prefix, t.hour, t.minute);
+              else
+                snprintf(buf, sizeof(buf), "%s %02d.%02d в %02d:%02d", prefix, t.day_of_month,
+                         t.month, t.hour, t.minute);
+            }
+            return std::string(buf);
+
   # Разрешить вспышки через некоторое время после подключения к HA —
   # когда начальный поток состояний уже пришёл
   - id: printer_arm
@@ -252,29 +293,69 @@ script:
             if (ps == "offline") return std::string("нет связи");
             return ps.empty() ? std::string("--") : ps;
 
-      # Для фаз без пульсации цвет ставится один раз, а не на каждом кадре
+      # Цвет кольца — сплошной по фазе, ставится один раз при смене фазы
       - lvgl.arc.update:
           id: arc_print
+          value: !lambda |-
+            float pr = id(ha_printer_progress).state;
+            return std::isnan(pr) ? 0 : (int) pr;
           indicator:
             arc_color: !lambda |-
               switch (id(printer_phase)) {
                 case 1:
                 case 2: return lv_color_hex(0x22DD44);
+                case 3: return lv_color_hex(0xFF3333);
+                case 4: return lv_color_hex(0xFFB300);
+                case 5:
+                case 8: return lv_color_hex(0xFF8A00);
+                case 6: return lv_color_hex(0xDDDDDD);
+                case 7: return lv_color_hex(0xAA66FF);
                 case 9:
                 case 10: return lv_color_hex(0xFFD54F);
                 default: return lv_color_hex(0x555C63);
               }
 
-      # Вне загрузки/выгрузки кольцо показывает реальный прогресс
+      # Цвет подписи стадии. Для пульсирующих фаз это стартовое значение,
+      # дальше его ведёт интервал ниже
+      - lvgl.widget.update:
+          id: lbl_print_status
+          text_color: !lambda |-
+            switch (id(printer_phase)) {
+              case 2: return lv_color_hex(0x22DD44);
+              case 3: return lv_color_hex(0xFF3333);
+              case 4: return lv_color_hex(0xFFB300);
+              case 5:
+              case 8: return lv_color_hex(0xFF8A00);
+              case 6: return lv_color_hex(0xFFFFFF);
+              case 7: return lv_color_hex(0xAA66FF);
+              case 9:
+              case 10: return lv_color_hex(0xFFD54F);
+              default: return lv_color_hex(0x8A9199);
+            }
+
+      # Простой или печать: какие строки на экране осмысленны
       - if:
           condition:
-            lambda: 'return id(printer_phase) != 9 && id(printer_phase) != 10;'
+            lambda: 'return id(printer_phase) == 0 || id(printer_phase) == 2;'
           then:
-            - lvgl.arc.update:
-                id: arc_print
-                value: !lambda |-
-                  float pr = id(ha_printer_progress).state;
-                  return std::isnan(pr) ? 0 : (int) pr;
+            - lvgl.widget.update:
+                id: [lbl_print_layer, lbl_print_eta]
+                hidden: true
+            - lvgl.widget.update:
+                id: lbl_print_last
+                hidden: false
+          else:
+            - lvgl.widget.update:
+                id: [lbl_print_layer, lbl_print_eta, lbl_print_pct]
+                hidden: false
+            - lvgl.widget.update:
+                id: lbl_print_last
+                hidden: true
+      # В ожидании процент прошлой печати только путает
+      - lvgl.widget.update:
+          id: lbl_print_pct
+          hidden: !lambda 'return id(printer_phase) == 0;'
+      - script.execute: refresh_printer_last
 
       # Вспышки — только на переходе в фазу и только после «взвода»
       - if:
@@ -282,6 +363,11 @@ script:
             lambda: |-
               return id(printer_armed) && id(printer_phase) == 2 && id(printer_prev_phase) != 2;
           then:
+            - lambda: |-
+                auto now = id(ha_time).now();
+                if (now.is_valid())
+                  id(printer_last_finish) = (uint32_t) now.timestamp;
+            - script.execute: refresh_printer_last
             - lvgl.page.show:
                 id: page_printer
             - script.execute:
@@ -301,9 +387,9 @@ script:
                 text: !lambda 'return "ОШИБКА";'
 
 interval:
-  # Пульсация и анимация загрузки филамента. Работает только когда страница
-  # принтера на экране и фаза действительно анимированная — иначе не тратим
-  # время на перерисовку кольца, которого никто не видит.
+  # Пульсация подписи стадии. Работает только когда страница принтера на
+  # экране и фаза действительно пульсирующая. Подпись яркая и тусклая по
+  # синусу — цвет не уходит в чёрный, чтобы текст оставался читаемым.
   - interval: ${printer_anim_interval}
     then:
       - if:
@@ -312,35 +398,20 @@ interval:
               int ph = id(printer_phase);
               return id(current_page) == 2 && ph >= 3 && ph <= 8;
           then:
-            - lvgl.arc.update:
-                id: arc_print
-                indicator:
-                  arc_color: !lambda |-
-                    uint32_t lo, hi, period;
-                    switch (id(printer_phase)) {
-                      case 3: lo = 0x2A0000; hi = 0xFF3333; period = 1600; break;  // ошибка
-                      case 4: lo = 0x2A1E00; hi = 0xFFB300; period = 1800; break;  // пауза
-                      case 6: lo = 0x303030; hi = 0xFFFFFF; period = 1200; break;  // очистка
-                      case 7: lo = 0x220033; hi = 0xAA66FF; period = 1400; break;  // калибровка
-                      default: lo = 0x3A1F00; hi = 0xFF8A00; period = 1400; break; // нагрев, подготовка
-                    }
-                    float t = 0.5f + 0.5f * sinf((millis() % period) * 6.2831853f / period);
-                    auto mix = [t](uint32_t a, uint32_t b, int sh) -> uint32_t {
-                      float ca = (a >> sh) & 0xFF, cb = (b >> sh) & 0xFF;
-                      return ((uint32_t) (ca + (cb - ca) * t + 0.5f)) << sh;
-                    };
-                    return lv_color_hex(mix(lo, hi, 16) | mix(lo, hi, 8) | mix(lo, hi, 0));
-      - if:
-          condition:
-            lambda: |-
-              int ph = id(printer_phase);
-              return id(current_page) == 2 && (ph == 9 || ph == 10);
-          then:
-            - lvgl.arc.update:
-                id: arc_print
-                value: !lambda |-
-                  // 2 с заполнения, 0.3 с паузы; выгрузка идёт в обратную сторону
-                  const uint32_t fill = 2000, hold = 300;
-                  uint32_t t = millis() % (fill + hold);
-                  int v = t < fill ? (int) (t * 100 / fill) : 100;
-                  return id(printer_phase) == 9 ? v : 100 - v;
+            - lvgl.widget.update:
+                id: lbl_print_status
+                text_color: !lambda |-
+                  uint32_t hi, period;
+                  switch (id(printer_phase)) {
+                    case 3: hi = 0xFF3333; period = 1600; break;  // ошибка
+                    case 4: hi = 0xFFB300; period = 1800; break;  // пауза
+                    case 6: hi = 0xFFFFFF; period = 1200; break;  // очистка
+                    case 7: hi = 0xAA66FF; period = 1400; break;  // калибровка
+                    default: hi = 0xFF8A00; period = 1400; break; // нагрев, подготовка
+                  }
+                  // Яркость от 35 до 100 %
+                  float k = 0.35f + 0.65f * (0.5f + 0.5f * sinf((millis() % period) * 6.2831853f / period));
+                  auto ch = [k](uint32_t c, int sh) -> uint32_t {
+                    return ((uint32_t) (((c >> sh) & 0xFF) * k + 0.5f)) << sh;
+                  };
+                  return lv_color_hex(ch(hi, 16) | ch(hi, 8) | ch(hi, 0));

@@ -49,7 +49,9 @@ display:
     reset_pin: GPIO21
     # LCD EN — по схеме панель питается только при высоком уровне на GPIO42
     enable_pin: GPIO42
-    data_rate: 40MHz
+    # 80 МГц вдвое быстрее отправляют кадр в панель (~11 мс против ~22 мс).
+    # Если появятся артефакты — поставьте display_data_rate: 40MHz в espha.yaml
+    data_rate: ${display_data_rate}
     spi_mode: MODE0
     color_order: rgb
     invert_colors: false
