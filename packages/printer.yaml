@@ -47,7 +47,7 @@ sensor:
     internal: true
     on_value:
       - lvgl.label.update:
-          id: [lbl_print_pct, lbl_preview_pct]
+          id: lbl_print_pct
           text: !lambda |-
             if (std::isnan(x))
               return std::string("--");
@@ -254,7 +254,7 @@ script:
 
       # Для фаз без пульсации цвет ставится один раз, а не на каждом кадре
       - lvgl.arc.update:
-          id: [arc_print, arc_preview]
+          id: arc_print
           indicator:
             arc_color: !lambda |-
               switch (id(printer_phase)) {
@@ -271,7 +271,7 @@ script:
             lambda: 'return id(printer_phase) != 9 && id(printer_phase) != 10;'
           then:
             - lvgl.arc.update:
-                id: [arc_print, arc_preview]
+                id: arc_print
                 value: !lambda |-
                   float pr = id(ha_printer_progress).state;
                   return std::isnan(pr) ? 0 : (int) pr;
@@ -302,7 +302,7 @@ script:
 
 interval:
   # Пульсация и анимация загрузки филамента. Работает только когда страница
-  # принтера или превью на экране и фаза действительно анимированная — иначе не тратим
+  # принтера на экране и фаза действительно анимированная — иначе не тратим
   # время на перерисовку кольца, которого никто не видит.
   - interval: ${printer_anim_interval}
     then:
@@ -310,10 +310,10 @@ interval:
           condition:
             lambda: |-
               int ph = id(printer_phase);
-              return (id(current_page) == 2 || id(current_page) == 3) && ph >= 3 && ph <= 8;
+              return id(current_page) == 2 && ph >= 3 && ph <= 8;
           then:
             - lvgl.arc.update:
-                id: [arc_print, arc_preview]
+                id: arc_print
                 indicator:
                   arc_color: !lambda |-
                     uint32_t lo, hi, period;
@@ -334,10 +334,10 @@ interval:
           condition:
             lambda: |-
               int ph = id(printer_phase);
-              return (id(current_page) == 2 || id(current_page) == 3) && (ph == 9 || ph == 10);
+              return id(current_page) == 2 && (ph == 9 || ph == 10);
           then:
             - lvgl.arc.update:
-                id: [arc_print, arc_preview]
+                id: arc_print
                 value: !lambda |-
                   // 2 с заполнения, 0.3 с паузы; выгрузка идёт в обратную сторону
                   const uint32_t fill = 2000, hold = 300;

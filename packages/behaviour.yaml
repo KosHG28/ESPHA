@@ -16,8 +16,7 @@ globals:
     restore_value: false
     initial_value: '0'
 
-  # Номер страницы на экране: 0 часы, 1 дом, 2 принтер, 3 превью,
-  # 4 устройство.
+  # Номер страницы на экране: 0 часы, 1 дом, 2 принтер, 3 устройство.
   # По нему анимации понимают, видно ли их вообще.
   - id: current_page
     type: int
@@ -40,7 +39,7 @@ script:
     then:
       - lambda: 'id(current_page) = idx;'
       - lvgl.widget.update:
-          id: [dot_1, dot_2, dot_3, dot_4, dot_5]
+          id: [dot_1, dot_2, dot_3, dot_4]
           bg_color: 0x33383E
       - if:
           condition:
@@ -62,11 +61,6 @@ script:
             lambda: 'return idx == 3;'
           then:
             - lvgl.widget.update: { id: dot_4, bg_color: 0x03A9F4 }
-      - if:
-          condition:
-            lambda: 'return idx == 4;'
-          then:
-            - lvgl.widget.update: { id: dot_5, bg_color: 0x03A9F4 }
 
   # Вспышка во весь экран о важном событии: экран будится на полную яркость
   # и несколько раз мигает цветом. Цвет и надпись задаёт вызывающая сторона.
@@ -116,7 +110,7 @@ interval:
     then:
       - lambda: 'id(shift_idx) = (id(shift_idx) + 1) % 4;'
       - lvgl.widget.update:
-          id: [root_clock, root_home, root_printer, root_preview, root_system]
+          id: [root_clock, root_home, root_printer, root_system]
           translate_x: !lambda 'return (id(shift_idx) == 1 || id(shift_idx) == 2) ? 2 : -2;'
           translate_y: !lambda 'return (id(shift_idx) >= 2) ? 2 : -2;'
 

@@ -72,12 +72,6 @@ substitutions:
   printer_stage_entity: sensor.x1c_00m09a391500084_current_stage
   printer_error_entity: binary_sensor.x1c_00m09a391500084_print_error
   printer_hms_entity: binary_sensor.x1c_00m09a391500084_hms_errors
-  # Картинка печатаемой модели для страницы превью
-  printer_cover_entity: image.x1c_00m09a391500084_cover_image
-
-  # Адрес Home Assistant, с которого устройство скачивает превью.
-  # Лучше по IP: имена .local устройство может не разрешить.
-  ha_url: "http://homeassistant.local:8123"
 
   # Период кадра пульсации кольца. Больше — дешевле для процессора,
   # но пульсация становится заметно ступенчатой.
@@ -127,7 +121,6 @@ packages:
   screen: !include packages/screen.yaml
   entities: !include packages/entities.yaml
   printer: !include packages/printer.yaml
-  preview: !include packages/preview.yaml
   ui: !include packages/ui.yaml
   imu: !include packages/imu.yaml
   behaviour: !include packages/behaviour.yaml
