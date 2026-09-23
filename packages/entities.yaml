@@ -52,6 +52,8 @@ script:
             snprintf(buf, sizeof(buf), "%s, %d %s", WD[now.day_of_week - 1], now.day_of_month,
                      MON[now.month - 1]);
             return std::string(buf);
+      # «сегодня» в строке о последней печати в полночь должно стать «вчера»
+      - script.execute: refresh_printer_last
 
 sensor:
   # ---- слоты с данными из Home Assistant --------------------------------
@@ -177,19 +179,6 @@ text_sensor:
       - lvgl.label.update:
           id: lbl_sys_i2c
           text: !lambda 'return "I2C: " + x;'
-
-  # Диагностика тачскрина: видно, отвечает ли чип и приходят ли координаты.
-  # Коснитесь экрана и посмотрите, растёт ли счётчик касаний.
-  - platform: template
-    id: touch_state
-    name: Состояние тачскрина
-    icon: mdi:gesture-tap
-    entity_category: diagnostic
-    update_interval: 2s
-    lambda: |-
-      char buf[32];
-      snprintf(buf, sizeof(buf), " lvgl=%d/%d", id(lvgl_press_count), id(lvgl_change_count));
-      return id(touch)->debug_state() + buf;
 
   - platform: wifi_info
     ip_address:
