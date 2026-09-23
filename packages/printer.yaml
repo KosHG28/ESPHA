@@ -4,7 +4,41 @@
 # Данные берутся из интеграции Bambu Lab (HACS, greghesp/ha-bambulab) —
 # она работает и в LAN-режиме, без облака. Имена сущностей задаются
 # подстановками printer_*_entity в espha.yaml.
+#
+# Кольцо показывает не только прогресс, но и фазу работы принтера: цвет и
+# пульсация зависят от того, что он сейчас делает. Идея подсмотрена в проекте
+# PrintSphere-Display (cptkirki), реализация своя.
+#
+# Фазы (глобальная printer_phase):
+#   0 ожидание      — серое кольцо
+#   1 печать        — зелёное
+#   2 готово        — зелёное; при переходе в эту фазу — вспышка «ГОТОВО»
+#   3 ошибка        — пульсирует красным; при переходе — вспышка «ОШИБКА»
+#   4 пауза         — пульсирует янтарным
+#   5 нагрев        — пульсирует оранжевым
+#   6 очистка сопла — пульсирует белым
+#   7 калибровка    — пульсирует фиолетовым
+#   8 подготовка    — пульсирует оранжевым
+#   9 загрузка филамента  — жёлтое кольцо заполняется
+#  10 выгрузка филамента  — жёлтое кольцо опустошается
 # ---------------------------------------------------------------------------
+
+globals:
+  - id: printer_phase
+    type: int
+    restore_value: false
+    initial_value: '0'
+  - id: printer_prev_phase
+    type: int
+    restore_value: false
+    initial_value: '0'
+  # Вспышки разрешены только спустя время после подключения к Home Assistant.
+  # При подключении HA заново присылает все текущие состояния, и без этой
+  # задержки законченная час назад печать снова вызывала бы «ГОТОВО».
+  - id: printer_armed
+    type: bool
+    restore_value: false
+    initial_value: 'false'
 
 sensor:
   - platform: homeassistant
@@ -12,17 +46,15 @@ sensor:
     entity_id: ${printer_progress_entity}
     internal: true
     on_value:
-      - lvgl.arc.update:
-          id: arc_print
-          value: !lambda 'return std::isnan(x) ? 0 : (int) x;'
       - lvgl.label.update:
-          id: lbl_print_pct
+          id: [lbl_print_pct, lbl_preview_pct]
           text: !lambda |-
             if (std::isnan(x))
               return std::string("--");
             char buf[8];
             snprintf(buf, sizeof(buf), "%d%%", (int) x);
             return std::string(buf);
+      - script.execute: update_printer_phase
 
   - platform: homeassistant
     id: ha_printer_nozzle
@@ -93,48 +125,33 @@ text_sensor:
     entity_id: ${printer_status_entity}
     internal: true
     on_value:
-      - lvgl.label.update:
-          id: lbl_print_status
-          text: !lambda |-
-            // Состояния сенсора print_status интеграции Bambu Lab
-            if (x == "running")  return std::string("печать");
-            if (x == "idle")     return std::string("ожидание");
-            if (x == "prepare")  return std::string("подготовка");
-            if (x == "slicing")  return std::string("нарезка");
-            if (x == "init")     return std::string("запуск");
-            if (x == "pause")    return std::string("пауза");
-            if (x == "finish")   return std::string("готово");
-            if (x == "failed")   return std::string("ошибка");
-            if (x == "offline")  return std::string("нет связи");
-            return x.empty() ? std::string("--") : x;
-      # Печать закончилась или упала — panel на столе полезнее всего именно
-      # в этот момент, поэтому показываем страницу принтера сразу
-      - if:
-          condition:
-            lambda: 'return x == "finish";'
-          then:
-            - lvgl.page.show:
-                id: page_printer
-            - script.execute:
-                id: flash_screen
-                color: !lambda 'return 0x22DD44;'
-                text: !lambda 'return "ГОТОВО";'
-      - if:
-          condition:
-            lambda: 'return x == "failed";'
-          then:
-            - lvgl.page.show:
-                id: page_printer
-            - script.execute:
-                id: flash_screen
-                color: !lambda 'return 0xE53935;'
-                text: !lambda 'return "ОШИБКА";'
-      # Зелёное кольцо при печати, серое во всех остальных состояниях
-      - lvgl.arc.update:
-          id: arc_print
-          indicator:
-            arc_color: !lambda |-
-              return x == "running" ? lv_color_hex(0x22DD44) : lv_color_hex(0x555C63);
+      - script.execute: update_printer_phase
+
+  # Стадия подробнее статуса: «нагрев стола», «очистка сопла» и т. д.
+  - platform: homeassistant
+    id: ha_printer_stage
+    entity_id: ${printer_stage_entity}
+    internal: true
+    on_value:
+      - script.execute: update_printer_phase
+
+binary_sensor:
+  - platform: homeassistant
+    id: ha_printer_error
+    entity_id: ${printer_error_entity}
+    internal: true
+    on_state:
+      - script.execute: update_printer_phase
+
+  # HMS — системные сообщения принтера. Среди них бывают и безобидные
+  # предупреждения, которые висят всю печать, поэтому ошибкой HMS считается
+  # только когда принтер не печатает — иначе нормальная печать краснела бы.
+  - platform: homeassistant
+    id: ha_printer_hms
+    entity_id: ${printer_hms_entity}
+    internal: true
+    on_state:
+      - script.execute: update_printer_phase
 
 script:
   - id: refresh_printer_layers
@@ -150,3 +167,180 @@ script:
             char buf[32];
             snprintf(buf, sizeof(buf), "\U000F0F58 %d / %d", (int) cur, (int) tot);
             return std::string(buf);
+
+  # Разрешить вспышки через некоторое время после подключения к HA —
+  # когда начальный поток состояний уже пришёл
+  - id: printer_arm
+    mode: restart
+    then:
+      - lambda: 'id(printer_armed) = false;'
+      - delay: 20s
+      - lambda: 'id(printer_armed) = true;'
+
+  # Пересчитать фазу принтера по статусу, стадии, прогрессу и ошибкам,
+  # обновить подпись и кольцо, отреагировать на переходы в «готово» и «ошибку»
+  - id: update_printer_phase
+    mode: queued
+    max_runs: 3
+    then:
+      - lambda: |-
+          const std::string &ps = id(ha_printer_status).state;
+          const std::string &st = id(ha_printer_stage).state;
+          float pr = id(ha_printer_progress).state;
+          bool perr = id(ha_printer_error).has_state() && id(ha_printer_error).state;
+          bool hms = id(ha_printer_hms).has_state() && id(ha_printer_hms).state;
+          auto starts = [](const std::string &s, const char *p) { return s.rfind(p, 0) == 0; };
+
+          int ph;
+          if (st == "filament_loading")
+            ph = 9;
+          else if (st == "filament_unloading")
+            ph = 10;
+          else if (ps == "failed" || perr || (hms && ps != "running"))
+            ph = 3;
+          // «Готово» строго: статус finish И прогресс дошёл до 100
+          else if (ps == "finish" && !std::isnan(pr) && pr >= 100)
+            ph = 2;
+          else if (ps == "pause" || starts(st, "paused"))
+            ph = 4;
+          else if (st == "heatbed_preheating" || st == "heating_hotend" || st == "heating_chamber" ||
+                   st == "waiting_for_heatbed_temperature")
+            ph = 5;
+          else if (st == "cleaning_nozzle_tip")
+            ph = 6;
+          else if (st == "auto_bed_leveling" || starts(st, "bed_level"))
+            ph = 7;
+          else if (ps == "prepare" || ps == "slicing" || ps == "init")
+            ph = 8;
+          else if (ps == "running")
+            ph = 1;
+          else
+            ph = 0;
+
+          id(printer_prev_phase) = id(printer_phase);
+          id(printer_phase) = ph;
+
+      # Подпись: сначала конкретная стадия, если она известна, иначе статус
+      - lvgl.label.update:
+          id: lbl_print_status
+          text: !lambda |-
+            const std::string &st = id(ha_printer_stage).state;
+            const std::string &ps = id(ha_printer_status).state;
+            switch (id(printer_phase)) {
+              case 2: return std::string("готово");
+              case 3: return std::string("ошибка");
+              case 9: return std::string("загрузка филамента");
+              case 10: return std::string("выгрузка филамента");
+            }
+            if (st == "heatbed_preheating" || st == "waiting_for_heatbed_temperature")
+              return std::string("нагрев стола");
+            if (st == "heating_hotend") return std::string("нагрев сопла");
+            if (st == "heating_chamber") return std::string("нагрев камеры");
+            if (st == "cleaning_nozzle_tip") return std::string("очистка сопла");
+            if (st == "auto_bed_leveling" || st.rfind("bed_level", 0) == 0)
+              return std::string("калибровка стола");
+            if (st == "changing_filament") return std::string("смена филамента");
+            if (st == "paused_filament_runout") return std::string("кончился филамент");
+            if (st.rfind("paused", 0) == 0) return std::string("пауза");
+            if (ps == "running") return std::string("печать");
+            if (ps == "idle") return std::string("ожидание");
+            if (ps == "prepare") return std::string("подготовка");
+            if (ps == "slicing") return std::string("нарезка");
+            if (ps == "init") return std::string("запуск");
+            if (ps == "pause") return std::string("пауза");
+            if (ps == "finish") return std::string("завершено");
+            if (ps == "offline") return std::string("нет связи");
+            return ps.empty() ? std::string("--") : ps;
+
+      # Для фаз без пульсации цвет ставится один раз, а не на каждом кадре
+      - lvgl.arc.update:
+          id: [arc_print, arc_preview]
+          indicator:
+            arc_color: !lambda |-
+              switch (id(printer_phase)) {
+                case 1:
+                case 2: return lv_color_hex(0x22DD44);
+                case 9:
+                case 10: return lv_color_hex(0xFFD54F);
+                default: return lv_color_hex(0x555C63);
+              }
+
+      # Вне загрузки/выгрузки кольцо показывает реальный прогресс
+      - if:
+          condition:
+            lambda: 'return id(printer_phase) != 9 && id(printer_phase) != 10;'
+          then:
+            - lvgl.arc.update:
+                id: [arc_print, arc_preview]
+                value: !lambda |-
+                  float pr = id(ha_printer_progress).state;
+                  return std::isnan(pr) ? 0 : (int) pr;
+
+      # Вспышки — только на переходе в фазу и только после «взвода»
+      - if:
+          condition:
+            lambda: |-
+              return id(printer_armed) && id(printer_phase) == 2 && id(printer_prev_phase) != 2;
+          then:
+            - lvgl.page.show:
+                id: page_printer
+            - script.execute:
+                id: flash_screen
+                color: !lambda 'return 0x22DD44;'
+                text: !lambda 'return "ГОТОВО";'
+      - if:
+          condition:
+            lambda: |-
+              return id(printer_armed) && id(printer_phase) == 3 && id(printer_prev_phase) != 3;
+          then:
+            - lvgl.page.show:
+                id: page_printer
+            - script.execute:
+                id: flash_screen
+                color: !lambda 'return 0xE53935;'
+                text: !lambda 'return "ОШИБКА";'
+
+interval:
+  # Пульсация и анимация загрузки филамента. Работает только когда страница
+  # принтера или превью на экране и фаза действительно анимированная — иначе не тратим
+  # время на перерисовку кольца, которого никто не видит.
+  - interval: ${printer_anim_interval}
+    then:
+      - if:
+          condition:
+            lambda: |-
+              int ph = id(printer_phase);
+              return (id(current_page) == 2 || id(current_page) == 3) && ph >= 3 && ph <= 8;
+          then:
+            - lvgl.arc.update:
+                id: [arc_print, arc_preview]
+                indicator:
+                  arc_color: !lambda |-
+                    uint32_t lo, hi, period;
+                    switch (id(printer_phase)) {
+                      case 3: lo = 0x2A0000; hi = 0xFF3333; period = 1600; break;  // ошибка
+                      case 4: lo = 0x2A1E00; hi = 0xFFB300; period = 1800; break;  // пауза
+                      case 6: lo = 0x303030; hi = 0xFFFFFF; period = 1200; break;  // очистка
+                      case 7: lo = 0x220033; hi = 0xAA66FF; period = 1400; break;  // калибровка
+                      default: lo = 0x3A1F00; hi = 0xFF8A00; period = 1400; break; // нагрев, подготовка
+                    }
+                    float t = 0.5f + 0.5f * sinf((millis() % period) * 6.2831853f / period);
+                    auto mix = [t](uint32_t a, uint32_t b, int sh) -> uint32_t {
+                      float ca = (a >> sh) & 0xFF, cb = (b >> sh) & 0xFF;
+                      return ((uint32_t) (ca + (cb - ca) * t + 0.5f)) << sh;
+                    };
+                    return lv_color_hex(mix(lo, hi, 16) | mix(lo, hi, 8) | mix(lo, hi, 0));
+      - if:
+          condition:
+            lambda: |-
+              int ph = id(printer_phase);
+              return (id(current_page) == 2 || id(current_page) == 3) && (ph == 9 || ph == 10);
+          then:
+            - lvgl.arc.update:
+                id: [arc_print, arc_preview]
+                value: !lambda |-
+                  // 2 с заполнения, 0.3 с паузы; выгрузка идёт в обратную сторону
+                  const uint32_t fill = 2000, hold = 300;
+                  uint32_t t = millis() % (fill + hold);
+                  int v = t < fill ? (int) (t * 100 / fill) : 100;
+                  return id(printer_phase) == 9 ? v : 100 - v;
