@@ -52,16 +52,6 @@ substitutions:
   slot2_title: "В комнате"
   slot2_format: "%.1f°"
 
-  # Влажность с того же датчика, что и температура в комнате. Если у вашего
-  # датчика нет канала влажности, на плитке будет прочерк — поменяйте entity_id.
-  slot3_entity: sensor.0xa4c138e62d2c9de0_humidity
-  slot3_title: "Влажность"
-  slot3_format: "%.0f%%"
-
-  # Прогресс печати виден и на странице «Дом», не переключаясь на принтер
-  slot4_entity: sensor.x1c_00m09a391500084_print_progress
-  slot4_title: "Печать"
-  slot4_format: "%.0f%%"
 
   # ---- 3D-принтер Bambu Lab ----------------------------------------------
   # Сущности создаёт интеграция Bambu Lab (HACS, greghesp/ha-bambulab),
@@ -85,9 +75,9 @@ substitutions:
   printer_anim_interval: 80ms
 
   # Во что перевести значение «остатка времени», чтобы получить минуты.
-  # Интеграция по умолчанию показывает часы, поэтому 60.
-  # Если у вас сущность в минутах — поставьте 1.
-  printer_remaining_to_minutes: "60"
+  # У этой установки сущность в минутах — поэтому 1. Если в Home Assistant
+  # она показывается в часах (единица h), поставьте 60.
+  printer_remaining_to_minutes: "1"
 
 esphome:
   name: ${name}
