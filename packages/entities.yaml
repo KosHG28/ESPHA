@@ -85,34 +85,6 @@ sensor:
             snprintf(buf, sizeof(buf), "${slot2_format}", x);
             return std::string(buf);
 
-  - platform: homeassistant
-    id: ha_slot3
-    entity_id: ${slot3_entity}
-    internal: true
-    on_value:
-      - lvgl.label.update:
-          id: lbl_slot3
-          text: !lambda |-
-            if (std::isnan(x))
-              return std::string("--");
-            char buf[24];
-            snprintf(buf, sizeof(buf), "${slot3_format}", x);
-            return std::string(buf);
-
-  - platform: homeassistant
-    id: ha_slot4
-    entity_id: ${slot4_entity}
-    internal: true
-    on_value:
-      - lvgl.label.update:
-          id: lbl_slot4
-          text: !lambda |-
-            if (std::isnan(x))
-              return std::string("--");
-            char buf[24];
-            snprintf(buf, sizeof(buf), "${slot4_format}", x);
-            return std::string(buf);
-
   # ---- диагностика самого устройства ------------------------------------
   - platform: wifi_signal
     id: wifi_rssi
@@ -175,10 +147,6 @@ text_sensor:
         return std::string("шина пуста");
       out.erase(out.size() - 1);
       return out;
-    on_value:
-      - lvgl.label.update:
-          id: lbl_sys_i2c
-          text: !lambda 'return "I2C: " + x;'
 
   - platform: wifi_info
     ip_address:

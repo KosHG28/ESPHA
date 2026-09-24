@@ -27,6 +27,15 @@ font:
     bpp: 4
     glyphs: "0123456789%-"
 
+  # Крупные значения на двух плитках страницы «Дом»
+  - file: "gfonts://Roboto@500"
+    id: font_tile
+    size: 60
+    bpp: 4
+    glyphsets: [GF_Latin_Kernel, GF_Cyrillic_Core]
+    glyphs: ["°"]
+    ignore_missing_glyphs: true
+
   - file: "gfonts://Roboto@500"
     id: font_l
     size: 38
@@ -175,7 +184,7 @@ lvgl:
 
       - obj:
           align: CENTER
-          y: 196
+          y: 184
           width: 76
           height: 14
           bg_opa: TRANSP
@@ -217,8 +226,11 @@ lvgl:
                   min_value: 0
                   max_value: 1440
                   value: 0
-                  start_angle: 270
-                  end_angle: 270
+                  # Полный круг, начало сверху (0 ч = 12 часов на циферблате).
+                  # При start_angle == end_angle LVGL не рисует дугу вовсе.
+                  rotation: 270
+                  start_angle: 0
+                  end_angle: 360
                   arc_width: 6
                   arc_color: 0x1B1F24
                   arc_rounded: true
@@ -274,7 +286,7 @@ lvgl:
                   y: 148
 
     # =====================================================================
-    # Страница 2 — четыре значения из Home Assistant
+    # Страница 2 — два значения из Home Assistant крупно
     # =====================================================================
     - id: page_home
       styles: style_page
@@ -289,19 +301,13 @@ lvgl:
             styles: style_root
             scrollable: false
             widgets:
-              - label:
-                  text: "Дом"
-                  styles: style_caption
-                  align: CENTER
-                  y: -186
-
               - obj:
                   styles: style_card
-                  width: 164
-                  height: 128
+                  width: 196
+                  height: 200
+                  radius: 28
                   align: CENTER
-                  x: -86
-                  y: -74
+                  x: -103
                   scrollable: false
                   clickable: false
                   widgets:
@@ -309,20 +315,20 @@ lvgl:
                         text: "${slot1_title}"
                         styles: style_caption
                         align: TOP_MID
-                        y: 8
+                        y: 22
                     - label:
                         id: lbl_slot1_card
                         text: "--"
-                        text_font: font_l
+                        text_font: font_tile
                         align: CENTER
-                        y: 10
+                        y: 14
               - obj:
                   styles: style_card
-                  width: 164
-                  height: 128
+                  width: 196
+                  height: 200
+                  radius: 28
                   align: CENTER
-                  x: 86
-                  y: -74
+                  x: 103
                   scrollable: false
                   clickable: false
                   widgets:
@@ -330,55 +336,13 @@ lvgl:
                         text: "${slot2_title}"
                         styles: style_caption
                         align: TOP_MID
-                        y: 8
+                        y: 22
                     - label:
                         id: lbl_slot2_card
                         text: "--"
-                        text_font: font_l
+                        text_font: font_tile
                         align: CENTER
-                        y: 10
-              - obj:
-                  styles: style_card
-                  width: 164
-                  height: 128
-                  align: CENTER
-                  x: -86
-                  y: 74
-                  scrollable: false
-                  clickable: false
-                  widgets:
-                    - label:
-                        text: "${slot3_title}"
-                        styles: style_caption
-                        align: TOP_MID
-                        y: 8
-                    - label:
-                        id: lbl_slot3
-                        text: "--"
-                        text_font: font_l
-                        align: CENTER
-                        y: 10
-              - obj:
-                  styles: style_card
-                  width: 164
-                  height: 128
-                  align: CENTER
-                  x: 86
-                  y: 74
-                  scrollable: false
-                  clickable: false
-                  widgets:
-                    - label:
-                        text: "${slot4_title}"
-                        styles: style_caption
-                        align: TOP_MID
-                        y: 8
-                    - label:
-                        id: lbl_slot4
-                        text: "--"
-                        text_font: font_l
-                        align: CENTER
-                        y: 10
+                        y: 14
 
     # =====================================================================
     # Страница 3 — 3D-принтер Bambu Lab
@@ -579,22 +543,12 @@ lvgl:
                         long_mode: DOT
                         text_align: RIGHT
 
-              - label:
-                  id: lbl_sys_i2c
-                  text: "I2C: —"
-                  styles: style_caption
-                  align: CENTER
-                  y: 46
-                  width: 360
-                  long_mode: DOT
-                  text_align: CENTER
-
               - arc:
                   id: arc_bright
                   width: 128
                   height: 128
                   align: CENTER
-                  y: 118
+                  y: 100
                   min_value: 5
                   max_value: 100
                   value: 70
@@ -623,5 +577,5 @@ lvgl:
                   text: "70%"
                   text_font: font_m
                   align: CENTER
-                  y: 118
+                  y: 100
                   clickable: false

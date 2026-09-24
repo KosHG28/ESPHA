@@ -110,7 +110,7 @@ api:
     - lambda: 'id(printer_armed) = false;'
     - lvgl.widget.update:
         id: [lbl_slot1, lbl_slot1_card, lbl_slot2, lbl_slot2_card,
-             lbl_slot3, lbl_slot4, lbl_time, lbl_print_pct]
+             lbl_time, lbl_print_pct]
         text_color: 0x555C63
     - lvgl.label.update:
         id: lbl_date
@@ -118,7 +118,7 @@ api:
   on_client_connected:
     - lvgl.widget.update:
         id: [lbl_slot1, lbl_slot1_card, lbl_slot2, lbl_slot2_card,
-             lbl_slot3, lbl_slot4, lbl_time, lbl_print_pct]
+             lbl_time, lbl_print_pct]
         text_color: 0xFFFFFF
     - script.execute: refresh_clock
     - script.execute: printer_arm
