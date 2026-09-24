@@ -74,6 +74,11 @@ substitutions:
   # но пульсация становится заметно ступенчатой.
   printer_anim_interval: 80ms
 
+  # ---- Обновление прошивки ----------------------------------------------
+  # Откуда Home Assistant берёт новые сборки. Это манифест, который GitHub
+  # Actions публикует вместе со страницей установки
+  firmware_manifest_url: https://koshg28.github.io/ESPHA/firmware/manifest.json
+
   # ---- Погода на фоне -----------------------------------------------------
   # Сущность с состоянием погоды: rain, light_snow, sleet и т. д. Во время
   # дождя или снега на странице часов идут капли или снежинки.
@@ -141,6 +146,21 @@ api:
 
 ota:
   - platform: esphome
+  # Обновление по воздуху с GitHub Pages — через сущность «Прошивка» ниже
+  - platform: http_request
+
+# Для загрузки манифеста и прошивки с GitHub Pages
+http_request:
+  timeout: 15s
+
+# Сущность «Прошивка» в Home Assistant: раз в 6 часов проверяет, не вышла ли
+# новая сборка, и ставит её по кнопке «Установить» — без браузера и кабеля
+update:
+  - platform: http_request
+    id: firmware_update
+    name: Прошивка
+    source: ${firmware_manifest_url}
+    update_interval: 6h
 
 wifi:
   # Без энергосбережения данные из Home Assistant доходят без задержки.

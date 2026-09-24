@@ -48,6 +48,17 @@ globals:
     initial_value: 'false'
   # Когда закончилась последняя печать (секунды с 1970-го), 0 — неизвестно.
   # Сохраняется во флеш: пишется раз за печать, это не изнашивает память.
+  # Идёт ли сейчас печать (включая нагрев, калибровку и паузу). По смене
+  # этого флага ловится начало печати. Загрузка филамента его не меняет —
+  # иначе каждая смена цвета в AMS считалась бы новой печатью
+  - id: printer_active
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  - id: printer_was_active
+    type: bool
+    restore_value: false
+    initial_value: 'false'
   - id: printer_last_finish
     type: uint32_t
     restore_value: true
@@ -211,6 +222,28 @@ script:
 
   # Разрешить вспышки через некоторое время после подключения к HA —
   # когда начальный поток состояний уже пришёл
+  # Показать страницу принтера и разбудить экран. Через 2 минуты — обратно
+  # на часы, если пользователь сам ничего не листал (касание и кнопка BOOT
+  # останавливают этот скрипт). При обычном таймауте гашения экран вернётся
+  # на часы ещё раньше
+  - id: printer_focus
+    mode: restart
+    then:
+      - if:
+          condition:
+            lambda: 'return id(current_page) != 2;'
+          then:
+            - lvgl.page.show:
+                id: page_printer
+      - script.execute: wake_screen
+      - delay: 2min
+      - if:
+          condition:
+            lambda: 'return id(current_page) == 2;'
+          then:
+            - lvgl.page.show:
+                id: page_clock
+
   - id: printer_arm
     mode: restart
     then:
@@ -263,6 +296,11 @@ script:
 
           id(printer_prev_phase) = id(printer_phase);
           id(printer_phase) = ph;
+          id(printer_was_active) = id(printer_active);
+          if (ph == 1 || (ph >= 4 && ph <= 8))
+            id(printer_active) = true;
+          else if (ph == 0 || ph == 2 || ph == 3)
+            id(printer_active) = false;
 
       # Подпись: сначала конкретная стадия, если она известна, иначе статус
       - lvgl.label.update:
@@ -371,8 +409,7 @@ script:
                 if (now.is_valid())
                   id(printer_last_finish) = (uint32_t) now.timestamp;
             - script.execute: refresh_printer_last
-            - lvgl.page.show:
-                id: page_printer
+            - script.execute: printer_focus
             - script.execute:
                 id: flash_screen
                 color: !lambda 'return 0x22DD44;'
@@ -382,12 +419,23 @@ script:
             lambda: |-
               return id(printer_armed) && id(printer_phase) == 3 && id(printer_prev_phase) != 3;
           then:
-            - lvgl.page.show:
-                id: page_printer
+            - script.execute: printer_focus
             - script.execute:
                 id: flash_screen
                 color: !lambda 'return 0xE53935;'
                 text: !lambda 'return "ОШИБКА";'
+      # Печать началась или встала на паузу — показать страницу принтера
+      # без вспышки
+      - if:
+          condition:
+            lambda: |-
+              if (!id(printer_armed))
+                return false;
+              bool started = id(printer_active) && !id(printer_was_active);
+              bool paused = id(printer_phase) == 4 && id(printer_prev_phase) != 4;
+              return started || paused;
+          then:
+            - script.execute: printer_focus
 
 interval:
   # Пульсация подписи стадии. Работает только когда страница принтера на
