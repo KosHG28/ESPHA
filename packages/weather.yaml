@@ -1,5 +1,5 @@
 # ---------------------------------------------------------------------------
-# Погодный фон на странице часов: дождь с брызгами, снежинки разной формы,
+# Погодный фон на странице часов: дождь с брызгами о край экрана, снежинки разной формы,
 # град, облака и молнии в грозу. Работает и в приглушённом режиме — при
 # гашении экран возвращается на часы, а частицы переходят на яркую палитру,
 # чтобы их было видно при низкой яркости панели.
@@ -83,14 +83,15 @@ script:
           if (s == "partly_cloudy") { clouds = 1; }
           else if (s == "cloudy") { clouds = 2; }
           else if (s == "overcast") { clouds = 3; }
-          else if (s == "light_rain") { mode = 1; cnt = 8; clouds = 2; }
-          else if (s == "rain") { mode = 1; cnt = 12; clouds = 2; }
-          else if (s == "heavy_rain" || s == "showers") { mode = 1; cnt = 16; clouds = 3; }
-          else if (s == "sleet") { mode = 3; cnt = 12; clouds = 2; }
-          else if (s == "light_snow") { mode = 2; cnt = 8; clouds = 2; }
-          else if (s == "snow") { mode = 2; cnt = 12; clouds = 2; }
-          else if (s == "snowfall") { mode = 2; cnt = 16; clouds = 3; }
-          else if (s == "hail") { mode = 4; cnt = 12; clouds = 2; }
+          // В дождь и снег облаков нет — только сами осадки
+          else if (s == "light_rain") { mode = 1; cnt = 8; }
+          else if (s == "rain") { mode = 1; cnt = 12; }
+          else if (s == "heavy_rain" || s == "showers") { mode = 1; cnt = 16; }
+          else if (s == "sleet") { mode = 3; cnt = 12; }
+          else if (s == "light_snow") { mode = 2; cnt = 8; }
+          else if (s == "snow") { mode = 2; cnt = 12; }
+          else if (s == "snowfall") { mode = 2; cnt = 16; }
+          else if (s == "hail") { mode = 4; cnt = 12; }
           else if (s == "thunderstorm") { storm = true; clouds = 3; }
           else if (s == "thunderstorm_with_rain") { mode = 1; cnt = 12; clouds = 3; storm = true; }
           else if (s == "thunderstorm_with_hail") { mode = 4; cnt = 12; clouds = 3; storm = true; }
@@ -212,11 +213,10 @@ interval:
             return;
           }
 
-          // Нижняя граница для капли: «земля» внизу экрана или край круга
+          // Капля разбивается о нижний край круглого экрана
           auto ground = [](float x) {
             float d = x - 233.0f;
-            float e = 233.0f + sqrtf(std::max(0.0f, 233.0f * 233.0f - d * d)) - 8.0f;
-            return std::min(424.0f, e);
+            return 233.0f + sqrtf(std::max(0.0f, 233.0f * 233.0f - d * d)) - 8.0f;
           };
 
           for (int i = 0; i < nd; i++) {
