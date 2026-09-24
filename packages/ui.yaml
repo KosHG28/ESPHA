@@ -78,6 +78,42 @@ font:
           - "\U000F0F58"   # mdi-layers-triple — слои
           - "\U000F0150"   # mdi-clock-outline — остаток времени
 
+  # Снежинки погодного фона: три формы из Noto Sans Symbols 2 и две из
+  # Material Design Icons, в двух размерах — дальние и ближние
+  - file:
+      type: gfonts
+      family: Noto Sans Symbols 2
+      weight: 400
+    id: font_flake_s
+    size: 14
+    bpp: 4
+    glyphsets: []
+    glyphs: ["❄", "❅", "❆"]
+    extras:
+      - file:
+          url: "https://raw.githubusercontent.com/Templarian/MaterialDesign-Webfont/master/fonts/materialdesignicons-webfont.ttf"
+          type: web
+        glyphs:
+          - "\U000F0717"   # mdi-snowflake
+          - "\U000F0F2A"   # mdi-snowflake-variant
+
+  - file:
+      type: gfonts
+      family: Noto Sans Symbols 2
+      weight: 400
+    id: font_flake_l
+    size: 26
+    bpp: 4
+    glyphsets: []
+    glyphs: ["❄", "❅", "❆"]
+    extras:
+      - file:
+          url: "https://raw.githubusercontent.com/Templarian/MaterialDesign-Webfont/master/fonts/materialdesignicons-webfont.ttf"
+          type: web
+        glyphs:
+          - "\U000F0717"   # mdi-snowflake
+          - "\U000F0F2A"   # mdi-snowflake-variant
+
   # Крупная иконка принтера в центре страницы
   - file:
       url: "https://raw.githubusercontent.com/Templarian/MaterialDesign-Webfont/master/fonts/materialdesignicons-webfont.ttf"
@@ -157,6 +193,38 @@ lvgl:
       border_width: 0
       pad_all: 0
 
+    # Снежинка погодного фона: только знак, без фона
+    - id: style_flake
+      bg_opa: TRANSP
+      border_width: 0
+      pad_all: 0
+
+    # Брызги от капли
+    - id: style_splash
+      width: 3
+      height: 3
+      radius: 1
+      bg_color: 0x2A6F99
+      bg_opa: COVER
+      border_width: 0
+      pad_all: 0
+
+    # Прозрачный слой погодного фона во весь экран
+    - id: style_fx_layer
+      width: 466
+      height: 466
+      align: TOP_LEFT
+      bg_opa: TRANSP
+      border_width: 0
+      pad_all: 0
+
+    # Клуб облака; цвет задаёт packages/weather.yaml
+    - id: style_puff
+      bg_color: 0x1D232A
+      bg_opa: COVER
+      border_width: 0
+      pad_all: 0
+
     # Строка «подпись — значение» на странице устройства
     - id: style_row
       width: 330
@@ -221,36 +289,143 @@ lvgl:
             id: mark_page
             idx: 0
       widgets:
-        # Погодный фон — первым, чтобы лежать под часами. Частицы двигает
+        # Погодный фон — первым, чтобы лежать под часами. Всё двигает
         # packages/weather.yaml, только пока открыта эта страница
         - obj:
             id: weather_fx
-            width: 466
-            height: 466
-            align: TOP_LEFT
-            bg_opa: TRANSP
-            border_width: 0
-            pad_all: 0
+            styles: style_fx_layer
             hidden: true
             clickable: false
             scrollable: false
             widgets:
-              - obj: { styles: style_fx }
-              - obj: { styles: style_fx }
-              - obj: { styles: style_fx }
-              - obj: { styles: style_fx }
-              - obj: { styles: style_fx }
-              - obj: { styles: style_fx }
-              - obj: { styles: style_fx }
-              - obj: { styles: style_fx }
-              - obj: { styles: style_fx }
-              - obj: { styles: style_fx }
-              - obj: { styles: style_fx }
-              - obj: { styles: style_fx }
-              - obj: { styles: style_fx }
-              - obj: { styles: style_fx }
-              - obj: { styles: style_fx }
-              - obj: { styles: style_fx }
+              # Молния: свечение и яркая сердцевина по одним и тем же точкам.
+              # Точки задаёт packages/weather.yaml при каждом ударе
+              - line:
+                  id: fx_bolt_glow
+                  points: [[0, 0], [0, 1]]
+                  line_width: 9
+                  line_color: 0x28427A
+                  line_rounded: true
+                  hidden: true
+                  clickable: false
+              - line:
+                  id: fx_bolt
+                  points: [[0, 0], [0, 1]]
+                  line_width: 3
+                  line_color: 0xEAF2FF
+                  line_rounded: true
+                  hidden: true
+                  clickable: false
+              # Облака: каждое — несколько перекрывающихся клубов
+              - obj:
+                  id: fx_clouds
+                  styles: style_fx_layer
+                  clickable: false
+                  scrollable: false
+                  widgets:
+                    - obj:
+                        width: 180
+                        height: 72
+                        bg_opa: TRANSP
+                        border_width: 0
+                        pad_all: 0
+                        hidden: true
+                        clickable: false
+                        scrollable: false
+                        widgets:
+                          - obj: { styles: style_puff, x: 0, y: 32, width: 72, height: 40, radius: 20, clickable: false }
+                          - obj: { styles: style_puff, x: 38, y: 6, width: 70, height: 66, radius: 33, clickable: false }
+                          - obj: { styles: style_puff, x: 88, y: 0, width: 58, height: 58, radius: 29, clickable: false }
+                          - obj: { styles: style_puff, x: 116, y: 26, width: 64, height: 46, radius: 23, clickable: false }
+                    - obj:
+                        width: 180
+                        height: 72
+                        bg_opa: TRANSP
+                        border_width: 0
+                        pad_all: 0
+                        hidden: true
+                        clickable: false
+                        scrollable: false
+                        widgets:
+                          - obj: { styles: style_puff, x: 0, y: 32, width: 72, height: 40, radius: 20, clickable: false }
+                          - obj: { styles: style_puff, x: 38, y: 6, width: 70, height: 66, radius: 33, clickable: false }
+                          - obj: { styles: style_puff, x: 88, y: 0, width: 58, height: 58, radius: 29, clickable: false }
+                          - obj: { styles: style_puff, x: 116, y: 26, width: 64, height: 46, radius: 23, clickable: false }
+                    - obj:
+                        width: 180
+                        height: 72
+                        bg_opa: TRANSP
+                        border_width: 0
+                        pad_all: 0
+                        hidden: true
+                        clickable: false
+                        scrollable: false
+                        widgets:
+                          - obj: { styles: style_puff, x: 0, y: 32, width: 72, height: 40, radius: 20, clickable: false }
+                          - obj: { styles: style_puff, x: 38, y: 6, width: 70, height: 66, radius: 33, clickable: false }
+                          - obj: { styles: style_puff, x: 88, y: 0, width: 58, height: 58, radius: 29, clickable: false }
+                          - obj: { styles: style_puff, x: 116, y: 26, width: 64, height: 46, radius: 23, clickable: false }
+              # Капли и градины; размер и цвет задаёт packages/weather.yaml
+              - obj:
+                  id: fx_drops
+                  styles: style_fx_layer
+                  clickable: false
+                  scrollable: false
+                  widgets:
+                    - obj: { styles: style_fx, hidden: true, clickable: false }
+                    - obj: { styles: style_fx, hidden: true, clickable: false }
+                    - obj: { styles: style_fx, hidden: true, clickable: false }
+                    - obj: { styles: style_fx, hidden: true, clickable: false }
+                    - obj: { styles: style_fx, hidden: true, clickable: false }
+                    - obj: { styles: style_fx, hidden: true, clickable: false }
+                    - obj: { styles: style_fx, hidden: true, clickable: false }
+                    - obj: { styles: style_fx, hidden: true, clickable: false }
+                    - obj: { styles: style_fx, hidden: true, clickable: false }
+                    - obj: { styles: style_fx, hidden: true, clickable: false }
+                    - obj: { styles: style_fx, hidden: true, clickable: false }
+                    - obj: { styles: style_fx, hidden: true, clickable: false }
+                    - obj: { styles: style_fx, hidden: true, clickable: false }
+                    - obj: { styles: style_fx, hidden: true, clickable: false }
+                    - obj: { styles: style_fx, hidden: true, clickable: false }
+                    - obj: { styles: style_fx, hidden: true, clickable: false }
+              # Снежинки: чётные мелкие («далеко»), нечётные крупные («близко»)
+              - obj:
+                  id: fx_flakes
+                  styles: style_fx_layer
+                  clickable: false
+                  scrollable: false
+                  widgets:
+                    - label: { text: "❄", text_font: font_flake_s, styles: style_flake, hidden: true, clickable: false }
+                    - label: { text: "❅", text_font: font_flake_l, styles: style_flake, hidden: true, clickable: false }
+                    - label: { text: "❆", text_font: font_flake_s, styles: style_flake, hidden: true, clickable: false }
+                    - label: { text: "\U000F0717", text_font: font_flake_l, styles: style_flake, hidden: true, clickable: false }
+                    - label: { text: "\U000F0F2A", text_font: font_flake_s, styles: style_flake, hidden: true, clickable: false }
+                    - label: { text: "❄", text_font: font_flake_l, styles: style_flake, hidden: true, clickable: false }
+                    - label: { text: "❅", text_font: font_flake_s, styles: style_flake, hidden: true, clickable: false }
+                    - label: { text: "❆", text_font: font_flake_l, styles: style_flake, hidden: true, clickable: false }
+                    - label: { text: "\U000F0717", text_font: font_flake_s, styles: style_flake, hidden: true, clickable: false }
+                    - label: { text: "\U000F0F2A", text_font: font_flake_l, styles: style_flake, hidden: true, clickable: false }
+                    - label: { text: "❄", text_font: font_flake_s, styles: style_flake, hidden: true, clickable: false }
+                    - label: { text: "❅", text_font: font_flake_l, styles: style_flake, hidden: true, clickable: false }
+                    - label: { text: "❆", text_font: font_flake_s, styles: style_flake, hidden: true, clickable: false }
+                    - label: { text: "\U000F0717", text_font: font_flake_l, styles: style_flake, hidden: true, clickable: false }
+                    - label: { text: "\U000F0F2A", text_font: font_flake_s, styles: style_flake, hidden: true, clickable: false }
+                    - label: { text: "❄", text_font: font_flake_l, styles: style_flake, hidden: true, clickable: false }
+              # Брызги от капель
+              - obj:
+                  id: fx_splash
+                  styles: style_fx_layer
+                  clickable: false
+                  scrollable: false
+                  widgets:
+                    - obj: { styles: style_splash, hidden: true, clickable: false }
+                    - obj: { styles: style_splash, hidden: true, clickable: false }
+                    - obj: { styles: style_splash, hidden: true, clickable: false }
+                    - obj: { styles: style_splash, hidden: true, clickable: false }
+                    - obj: { styles: style_splash, hidden: true, clickable: false }
+                    - obj: { styles: style_splash, hidden: true, clickable: false }
+                    - obj: { styles: style_splash, hidden: true, clickable: false }
+                    - obj: { styles: style_splash, hidden: true, clickable: false }
         - obj:
             id: root_clock
             styles: style_root
