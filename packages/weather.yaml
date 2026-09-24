@@ -9,8 +9,8 @@
 # и не тратят ни кадра. Каждая частица — несколько пикселей, облако — около
 # 180×70, поэтому за кадр перерисовываются только маленькие области.
 #
-# Молния — ломаная линия со свечением, мигает дважды. Вспышку неба даёт сама
-# панель: на долю секунды поднимается яркость, перерисовывать ничего не надо.
+# Молния — ломаная линия со свечением, мигает дважды. Ярко светится только
+# сама молния, яркость экрана она не трогает.
 #
 # Вид осадков (глобальная weather_mode):
 #   0 нет  1 дождь  2 снег  3 мокрый снег (дождь + снег)  4 град
@@ -128,19 +128,12 @@ interval:
             if (v) lv_obj_clear_flag(o, LV_OBJ_FLAG_HIDDEN);
             else lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
           };
-          auto base_level = []() -> float {
-            return id(screen_dimmed) ? id(screen_dim).state : id(screen_brightness).state;
-          };
-          auto set_level = [](float pct) {
-            id(amoled)->set_brightness((uint8_t) (pct * 2.55f + 0.5f));
-          };
           auto end_strike = [&]() {
             if (!striking) return;
             striking = false;
             bolt_on = false;
             show(bolt, false);
             show(glow, false);
-            set_level(base_level());
             next_strike = millis() + rnd(5000, 15000);
           };
 
@@ -192,6 +185,9 @@ interval:
               slife[i] = 0;
               show(p, false);
             }
+            // Свечение молнии: в приглушённом режиме ярче
+            lv_obj_set_style_line_color(glow, lv_color_hex(dim ? 0x8AB4FF : 0x4A7BD6), 0);
+
             // Облака: при пасмурной погоде и грозе — темнее
             bool heavy = ncl >= 3 || storm;
             uint32_t c_cloud = heavy ? (dim ? 0x3A4452 : 0x161B21) : (dim ? 0x465262 : 0x1D232A);
@@ -323,9 +319,4 @@ interval:
             bolt_on = on;
             show(glow, on);
             show(bolt, on);
-            float base = base_level();
-            // Вспышка неба — яркостью панели. Если экран погашен в ноль,
-            // не зажигаем его посреди ночи
-            if (base > 0)
-              set_level(on ? std::min(100.0f, base + 35.0f) : base);
           }
