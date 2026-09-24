@@ -114,6 +114,29 @@ font:
           - "\U000F0717"   # mdi-snowflake
           - "\U000F0F2A"   # mdi-snowflake-variant
 
+  # Иконка погоды рядом с уличной температурой
+  - file:
+      url: "https://raw.githubusercontent.com/Templarian/MaterialDesign-Webfont/master/fonts/materialdesignicons-webfont.ttf"
+      type: web
+    id: font_wicon
+    size: 36
+    bpp: 4
+    glyphsets: []
+    glyphs:
+      - "\U000F0599"   # weather-sunny
+      - "\U000F0594"   # weather-night
+      - "\U000F0595"   # weather-partly-cloudy
+      - "\U000F0F31"   # weather-night-partly-cloudy
+      - "\U000F0590"   # weather-cloudy
+      - "\U000F0597"   # weather-rainy
+      - "\U000F0596"   # weather-pouring
+      - "\U000F067F"   # weather-snowy-rainy
+      - "\U000F0598"   # weather-snowy
+      - "\U000F0F36"   # weather-snowy-heavy
+      - "\U000F0592"   # weather-hail
+      - "\U000F0593"   # weather-lightning
+      - "\U000F067E"   # weather-lightning-rainy
+
   # Крупная иконка принтера в центре страницы
   - file:
       url: "https://raw.githubusercontent.com/Templarian/MaterialDesign-Webfont/master/fonts/materialdesignicons-webfont.ttf"
@@ -262,6 +285,7 @@ lvgl:
                 align: CENTER
 
       - obj:
+          id: page_dots
           align: CENTER
           y: 184
           width: 76
@@ -437,20 +461,58 @@ lvgl:
                   align: CENTER
                   y: -134
 
-              - label:
-                  id: lbl_slot1
-                  text: "--"
-                  text_font: font_l
-                  text_color: 0xFFFFFF
+              # Иконка погоды и уличная температура — в одну строку по центру
+              - obj:
                   align: CENTER
                   y: -98
+                  width: SIZE_CONTENT
+                  height: SIZE_CONTENT
+                  bg_opa: TRANSP
+                  border_width: 0
+                  pad_all: 0
+                  clickable: false
+                  scrollable: false
+                  layout:
+                    type: flex
+                    flex_flow: ROW
+                    flex_align_main: CENTER
+                    flex_align_cross: CENTER
+                    flex_align_track: CENTER
+                    pad_column: 10
+                  widgets:
+                    - label:
+                        id: lbl_weather_icon
+                        text: ""
+                        text_font: font_wicon
+                        hidden: true
+                    - label:
+                        id: lbl_slot1
+                        text: "--"
+                        text_font: font_l
+                        text_color: 0xFFFFFF
 
+              # Время без двоеточия: часы белые справа от центра зазора,
+              # минуты цветные слева от него. Цифры Roboto одинаковой
+              # ширины, поэтому время не прыгает
               - label:
-                  id: lbl_time
-                  text: "--:--"
+                  id: lbl_time_h
+                  text: "--"
                   text_font: font_time
                   text_color: 0xFFFFFF
+                  text_align: RIGHT
+                  width: 130
                   align: CENTER
+                  x: -79
+                  y: -8
+              - label:
+                  id: lbl_time_m
+                  text: "--"
+                  text_font: font_time
+                  text_color: ${time_minutes_color}
+                  text_align: LEFT
+                  width: 130
+                  align: CENTER
+                  x: 79
                   y: -8
 
               - label:

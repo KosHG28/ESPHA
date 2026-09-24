@@ -84,6 +84,10 @@ sensor:
     id: ha_printer_nozzle
     entity_id: ${printer_nozzle_entity}
     internal: true
+    # Во время печати температура приходит каждую секунду; перерисовываем,
+    # только когда она сдвинулась хотя бы на градус
+    filters:
+      - delta: 1.0
     on_value:
       - lvgl.label.update:
           id: lbl_print_nozzle
@@ -99,6 +103,8 @@ sensor:
     id: ha_printer_bed
     entity_id: ${printer_bed_entity}
     internal: true
+    filters:
+      - delta: 1.0
     on_value:
       - lvgl.label.update:
           id: lbl_print_bed
