@@ -1,5 +1,5 @@
 # ---------------------------------------------------------------------------
-# Данные: время, четыре «слота» с сущностями Home Assistant и диагностика.
+# Данные: время, два «слота» с сущностями Home Assistant и диагностика.
 #
 # Какие сущности показывать — задаётся подстановками slotN_entity/title/format
 # в espha.yaml. После усыновления устройства в ESPHome-дашборде их можно
@@ -14,6 +14,9 @@ time:
     i2c_id: bus_i2c
     address: 0x51
     update_interval: 60min
+    # Время из RTC приходит раньше, чем из Home Assistant, — сразу показать его
+    on_time_sync:
+      - script.execute: refresh_clock
 
   - platform: homeassistant
     id: ha_time
@@ -27,9 +30,31 @@ time:
           - script.execute: refresh_clock
 
 script:
+  # Раз в минуту: время, дата, иконка погоды (днём и ночью она разная)
   - id: refresh_clock
     mode: restart
     then:
+      # Часы и минуты — отдельные надписи без двоеточия. В обычную минуту
+      # меняются только минуты, и перерисовывается только их надпись
+      - lvgl.label.update:
+          id: lbl_time_h
+          text: !lambda |-
+            auto now = id(ha_time).now();
+            if (!now.is_valid())
+              return std::string("--");
+            char buf[4];
+            snprintf(buf, sizeof(buf), "%02d", now.hour);
+            return std::string(buf);
+      - lvgl.label.update:
+          id: lbl_time_m
+          text: !lambda |-
+            auto now = id(ha_time).now();
+            if (!now.is_valid())
+              return std::string("--");
+            char buf[4];
+            snprintf(buf, sizeof(buf), "%02d", now.minute);
+            return std::string(buf);
+      - script.execute: weather_icon
       - lvgl.label.update:
           id: lbl_date
           text: !lambda |-
@@ -54,6 +79,9 @@ sensor:
     id: ha_slot1
     entity_id: ${slot1_entity}
     internal: true
+    # На экране одна цифра после запятой — мелкие колебания не перерисовываем
+    filters:
+      - delta: 0.05
     on_value:
       - lvgl.label.update:
           id: [lbl_slot1, lbl_slot1_card]
@@ -68,6 +96,8 @@ sensor:
     id: ha_slot2
     entity_id: ${slot2_entity}
     internal: true
+    filters:
+      - delta: 0.05
     on_value:
       - lvgl.label.update:
           id: [lbl_slot2, lbl_slot2_card]

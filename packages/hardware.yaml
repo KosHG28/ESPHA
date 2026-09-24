@@ -20,6 +20,10 @@ esp32:
   flash_size: 8MB
   framework:
     type: esp-idf
+    advanced:
+      # Собирать «на скорость», а не «на размер»: отрисовка LVGL заметно
+      # быстрее, а прошивка подрастает на сотню-другую килобайт — место есть
+      compiler_optimization: PERF
 
 # 8 МБ octal PSRAM — обязательна для буфера кадра 466x466
 psram:
@@ -91,6 +95,7 @@ touchscreen:
       y_max: 465
     on_touch:
       - script.execute: wake_screen
+      - script.execute: dots_autohide
       # Пользователь взял экран в свои руки — не уводить его на часы
       - script.stop: printer_focus
       - lambda: |-
@@ -155,6 +160,7 @@ binary_sensor:
       inverted: true
     on_click:
       - script.execute: wake_screen
+      - script.execute: dots_autohide
       - script.stop: printer_focus
       - lvgl.page.next:
           animation: OUT_LEFT

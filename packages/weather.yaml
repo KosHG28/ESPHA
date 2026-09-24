@@ -44,6 +44,7 @@ text_sensor:
     internal: true
     on_value:
       - script.execute: weather_apply
+      - script.execute: weather_icon
 
 select:
   # «Авто» — по погоде из Home Assistant. Остальные пункты — чтобы проверить
@@ -62,6 +63,41 @@ select:
       - script.execute: weather_apply
 
 script:
+  # Иконка погоды рядом с уличной температурой. Показывает настоящую погоду,
+  # а не пункт «Фона погоды». Ночью (с 21 до 6) — луна вместо солнца
+  - id: weather_icon
+    mode: restart
+    then:
+      - lambda: |-
+          const std::string s = id(ha_weather).has_state() ? id(ha_weather).state : "";
+          auto now = id(ha_time).now();
+          bool night = now.is_valid() && (now.hour >= 21 || now.hour < 6);
+          const char *icon = "";
+          uint32_t color = 0x90A4AE;
+          if (s == "clear") { icon = night ? "\U000F0594" : "\U000F0599"; color = night ? 0xB0BEC5 : 0xFFB300; }
+          else if (s == "partly_cloudy") { icon = night ? "\U000F0F31" : "\U000F0595"; color = night ? 0xB0BEC5 : 0xFFCA28; }
+          else if (s == "cloudy" || s == "overcast") { icon = "\U000F0590"; }
+          else if (s == "light_rain" || s == "rain") { icon = "\U000F0597"; color = 0x4FC3F7; }
+          else if (s == "heavy_rain" || s == "showers") { icon = "\U000F0596"; color = 0x4FC3F7; }
+          else if (s == "sleet") { icon = "\U000F067F"; color = 0x81D4FA; }
+          else if (s == "light_snow" || s == "snow") { icon = "\U000F0598"; color = 0xE0E0E0; }
+          else if (s == "snowfall") { icon = "\U000F0F36"; color = 0xE0E0E0; }
+          else if (s == "hail") { icon = "\U000F0592"; color = 0xCFD8DC; }
+          else if (s == "thunderstorm" || s == "thunderstorm_with_hail") { icon = "\U000F0593"; color = 0xFFD54F; }
+          else if (s == "thunderstorm_with_rain") { icon = "\U000F067E"; color = 0xFFD54F; }
+
+          // Надпись меняем, только когда иконка правда сменилась: этот скрипт
+          // вызывается каждую минуту, а лишняя установка текста — лишняя перерисовка
+          static std::string shown = "-";
+          lv_obj_t *lbl = id(lbl_weather_icon);
+          if (shown != icon) {
+            shown = icon;
+            lv_label_set_text(lbl, icon);
+            lv_obj_set_style_text_color(lbl, lv_color_hex(color), 0);
+            if (*icon) lv_obj_clear_flag(lbl, LV_OBJ_FLAG_HIDDEN);
+            else lv_obj_add_flag(lbl, LV_OBJ_FLAG_HIDDEN);
+          }
+
   # Выбрать осадки, облака и грозу по погоде и настройке «Фон погоды»
   - id: weather_apply
     mode: restart

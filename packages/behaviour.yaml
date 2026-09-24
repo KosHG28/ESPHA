@@ -1,6 +1,6 @@
 # ---------------------------------------------------------------------------
-# Поведение интерфейса: индикатор страниц, защита AMOLED от выгорания,
-# «живые» часы и индикация потери связи с Home Assistant.
+# Поведение интерфейса: индикатор страниц, защита AMOLED от выгорания
+# и индикация потери связи с Home Assistant.
 # ---------------------------------------------------------------------------
 
 globals:
@@ -26,6 +26,7 @@ script:
     mode: restart
     then:
       - lambda: 'id(current_page) = idx;'
+      - script.execute: dots_autohide
       - lvgl.widget.update:
           id: [dot_1, dot_2, dot_3, dot_4]
           bg_color: 0x33383E
@@ -49,6 +50,15 @@ script:
             lambda: 'return idx == 3;'
           then:
             - lvgl.widget.update: { id: dot_4, bg_color: 0x03A9F4 }
+
+  # Точки страниц видны после касания или смены страницы и прячутся через
+  # page_dots_timeout без касаний: чище вид и меньше выгорание AMOLED
+  - id: dots_autohide
+    mode: restart
+    then:
+      - lvgl.widget.show: page_dots
+      - delay: ${page_dots_timeout}
+      - lvgl.widget.hide: page_dots
 
   # Вспышка во весь экран о важном событии: экран будится на полную яркость
   # и несколько раз мигает цветом. Цвет и надпись задаёт вызывающая сторона.
@@ -78,20 +88,6 @@ script:
       - lvgl.widget.hide: alert_overlay
 
 interval:
-  # Часы: двоеточие мигает раз в секунду, иначе на экране совсем ничего не
-  # движется и панель выглядит зависшей.
-  - interval: 1s
-    then:
-      - lvgl.label.update:
-          id: lbl_time
-          text: !lambda |-
-            auto now = id(ha_time).now();
-            if (!now.is_valid())
-              return std::string("--:--");
-            char buf[8];
-            snprintf(buf, sizeof(buf), "%02d%c%02d", now.hour, (now.second % 2) ? ' ' : ':', now.minute);
-            return std::string(buf);
-
   # Защита AMOLED: содержимое каждые несколько минут сдвигается на два
   # пикселя по кругу, чтобы статичные элементы не выжигали пиксели.
   - interval: ${pixel_shift_interval}
@@ -110,7 +106,7 @@ api:
     - lambda: 'id(printer_armed) = false;'
     - lvgl.widget.update:
         id: [lbl_slot1, lbl_slot1_card, lbl_slot2, lbl_slot2_card,
-             lbl_time, lbl_print_pct]
+             lbl_time_h, lbl_time_m, lbl_print_pct]
         text_color: 0x555C63
     - lvgl.label.update:
         id: lbl_date
@@ -118,7 +114,10 @@ api:
   on_client_connected:
     - lvgl.widget.update:
         id: [lbl_slot1, lbl_slot1_card, lbl_slot2, lbl_slot2_card,
-             lbl_time, lbl_print_pct]
+             lbl_time_h, lbl_print_pct]
         text_color: 0xFFFFFF
+    - lvgl.widget.update:
+        id: lbl_time_m
+        text_color: ${time_minutes_color}
     - script.execute: refresh_clock
     - script.execute: printer_arm
