@@ -106,11 +106,9 @@ lvgl:
   page_wrap: true
 
   style_definitions:
-    # Страницы прозрачные: под ними лежит нижний слой с погодным фоном.
-    # Чёрный фон даёт сам нижний слой
     - id: style_page
       bg_color: 0x000000
-      bg_opa: TRANSP
+      bg_opa: COVER
       border_width: 0
       pad_all: 0
       radius: 0
@@ -168,41 +166,6 @@ lvgl:
       border_width: 0
       pad_all: 0
 
-  # Нижний слой — под всеми страницами. На нём чёрный фон и погодный
-  # эффект: он виден на любой странице, в том числе в приглушённом режиме
-  bottom_layer:
-    bg_color: 0x000000
-    bg_opa: COVER
-    widgets:
-      - obj:
-          id: weather_fx
-          width: 466
-          height: 466
-          align: TOP_LEFT
-          bg_opa: TRANSP
-          border_width: 0
-          pad_all: 0
-          hidden: true
-          clickable: false
-          scrollable: false
-          widgets:
-            - obj: { styles: style_fx }
-            - obj: { styles: style_fx }
-            - obj: { styles: style_fx }
-            - obj: { styles: style_fx }
-            - obj: { styles: style_fx }
-            - obj: { styles: style_fx }
-            - obj: { styles: style_fx }
-            - obj: { styles: style_fx }
-            - obj: { styles: style_fx }
-            - obj: { styles: style_fx }
-            - obj: { styles: style_fx }
-            - obj: { styles: style_fx }
-            - obj: { styles: style_fx }
-            - obj: { styles: style_fx }
-            - obj: { styles: style_fx }
-            - obj: { styles: style_fx }
-
   # Индикатор страниц один на все страницы: раньше он был скопирован
   # в каждую из них, и точки приходилось править в четырёх местах
   top_layer:
@@ -258,6 +221,36 @@ lvgl:
             id: mark_page
             idx: 0
       widgets:
+        # Погодный фон — первым, чтобы лежать под часами. Частицы двигает
+        # packages/weather.yaml, только пока открыта эта страница
+        - obj:
+            id: weather_fx
+            width: 466
+            height: 466
+            align: TOP_LEFT
+            bg_opa: TRANSP
+            border_width: 0
+            pad_all: 0
+            hidden: true
+            clickable: false
+            scrollable: false
+            widgets:
+              - obj: { styles: style_fx }
+              - obj: { styles: style_fx }
+              - obj: { styles: style_fx }
+              - obj: { styles: style_fx }
+              - obj: { styles: style_fx }
+              - obj: { styles: style_fx }
+              - obj: { styles: style_fx }
+              - obj: { styles: style_fx }
+              - obj: { styles: style_fx }
+              - obj: { styles: style_fx }
+              - obj: { styles: style_fx }
+              - obj: { styles: style_fx }
+              - obj: { styles: style_fx }
+              - obj: { styles: style_fx }
+              - obj: { styles: style_fx }
+              - obj: { styles: style_fx }
         - obj:
             id: root_clock
             styles: style_root
