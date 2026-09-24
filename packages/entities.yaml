@@ -30,13 +30,6 @@ script:
   - id: refresh_clock
     mode: restart
     then:
-      - lvgl.arc.update:
-          id: arc_day
-          value: !lambda |-
-            auto now = id(ha_time).now();
-            if (!now.is_valid())
-              return 0;
-            return now.hour * 60 + now.minute;
       - lvgl.label.update:
           id: lbl_date
           text: !lambda |-
