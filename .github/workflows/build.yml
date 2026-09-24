@@ -4,7 +4,7 @@ on:
   push:
     branches: ["**"]
     paths-ignore:
-      - "README.md"
+      - "**.md"
       - ".gitignore"
   pull_request:
   workflow_dispatch:
