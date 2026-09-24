@@ -1,0 +1,157 @@
+# ---------------------------------------------------------------------------
+# Погодный фон: во время дождя или снега по фону всех страниц идут капли
+# или снежинки. Работает и в приглушённом режиме — яркость меняется, а
+# анимация продолжается.
+#
+# Частицы лежат на нижнем слое LVGL (bottom_layer в packages/ui.yaml), под
+# прозрачными страницами. Карточки и кольца их закрывают, текст — нет.
+# Каждая частица — прямоугольник в несколько пикселей, поэтому за кадр
+# перерисовываются только маленькие области вокруг них, а не весь экран.
+#
+# Режимы (глобальная weather_mode):
+#   0 нет эффекта  1 дождь  2 снег  3 мокрый снег (дождь + снег)  4 град
+# ---------------------------------------------------------------------------
+
+globals:
+  - id: weather_mode
+    type: int
+    restore_value: false
+    initial_value: '0'
+  # Сколько частиц используется: слабые осадки — меньше, сильные — больше
+  - id: weather_count
+    type: int
+    restore_value: false
+    initial_value: '0'
+
+text_sensor:
+  - platform: homeassistant
+    id: ha_weather
+    entity_id: ${weather_condition_entity}
+    internal: true
+    on_value:
+      - script.execute: weather_apply
+
+select:
+  # «Авто» — по погоде из Home Assistant. «Дождь» и «Снег» — чтобы проверить,
+  # как выглядит эффект, не дожидаясь осадков
+  - platform: template
+    id: weather_fx_select
+    name: Фон погоды
+    icon: mdi:weather-snowy-rainy
+    entity_category: config
+    options: ["Авто", "Выкл", "Дождь", "Снег"]
+    initial_option: "Авто"
+    optimistic: true
+    restore_value: true
+    on_value:
+      - script.execute: weather_apply
+
+script:
+  # Выбрать режим и число частиц по погоде и настройке «Фон погоды»
+  - id: weather_apply
+    mode: restart
+    then:
+      - lambda: |-
+          // Номер пункта «Фона погоды»: 0 Авто, 1 Выкл, 2 Дождь, 3 Снег
+          size_t sel = id(weather_fx_select).active_index().value_or(0);
+          int mode = 0, cnt = 0;
+          if (sel == 2) {
+            mode = 1; cnt = 12;
+          } else if (sel == 3) {
+            mode = 2; cnt = 12;
+          } else if (sel == 0 && id(ha_weather).has_state()) {
+            const std::string &s = id(ha_weather).state;
+            if (s == "light_rain") { mode = 1; cnt = 8; }
+            else if (s == "rain" || s == "thunderstorm_with_rain") { mode = 1; cnt = 12; }
+            else if (s == "heavy_rain" || s == "showers") { mode = 1; cnt = 16; }
+            else if (s == "sleet") { mode = 3; cnt = 12; }
+            else if (s == "light_snow") { mode = 2; cnt = 8; }
+            else if (s == "snow") { mode = 2; cnt = 12; }
+            else if (s == "snowfall") { mode = 2; cnt = 16; }
+            else if (s == "hail" || s == "thunderstorm_with_hail") { mode = 4; cnt = 12; }
+          }
+          id(weather_mode) = mode;
+          id(weather_count) = cnt;
+
+interval:
+  - interval: ${weather_fx_interval}
+    then:
+      - lambda: |-
+          static const int MAX = 16;
+          static float px[MAX], py[MAX], ph[MAX];
+          static int applied_mode = -1, applied_cnt = -1;
+
+          lv_obj_t *box = id(weather_fx);
+          int mode = id(weather_mode);
+          int cnt = std::min(id(weather_count), (int) lv_obj_get_child_count(box));
+          cnt = std::min(cnt, MAX);
+
+          // Вид частицы: 1 капля, 2 снежинка, 4 градина. Мокрый снег — через одну
+          auto kind = [mode](int i) { return mode == 3 ? (i % 2 ? 1 : 2) : mode; };
+          auto rnd = [](int lo, int hi) { return lo + (int) (random_uint32() % (uint32_t) (hi - lo)); };
+
+          // Смена режима: настроить вид частиц и разбросать их по экрану
+          if (mode != applied_mode || cnt != applied_cnt) {
+            applied_mode = mode;
+            applied_cnt = cnt;
+            if (mode == 0 || cnt == 0) {
+              lv_obj_add_flag(box, LV_OBJ_FLAG_HIDDEN);
+              return;
+            }
+            for (int i = 0; i < (int) lv_obj_get_child_count(box); i++) {
+              lv_obj_t *p = lv_obj_get_child(box, i);
+              if (i >= cnt) {
+                lv_obj_add_flag(p, LV_OBJ_FLAG_HIDDEN);
+                continue;
+              }
+              switch (kind(i)) {
+                case 1:  // капля — тонкий приглушённо-голубой штрих
+                  lv_obj_set_size(p, 2, 16);
+                  lv_obj_set_style_radius(p, 1, 0);
+                  lv_obj_set_style_bg_color(p, lv_color_hex(0x2A6F99), 0);
+                  break;
+                case 2:  // снежинка — мягкая светло-серая точка
+                  lv_obj_set_size(p, 6, 6);
+                  lv_obj_set_style_radius(p, 3, 0);
+                  lv_obj_set_style_bg_color(p, lv_color_hex(0x9AA4AE), 0);
+                  break;
+                default:  // градина — белая точка поменьше
+                  lv_obj_set_size(p, 5, 5);
+                  lv_obj_set_style_radius(p, 3, 0);
+                  lv_obj_set_style_bg_color(p, lv_color_hex(0xCFD8DC), 0);
+                  break;
+              }
+              px[i] = rnd(40, 426);
+              py[i] = rnd(0, 466);
+              ph[i] = rnd(0, 628) / 100.0f;
+              lv_obj_set_pos(p, (int) px[i], (int) py[i]);
+              lv_obj_clear_flag(p, LV_OBJ_FLAG_HIDDEN);
+            }
+            lv_obj_clear_flag(box, LV_OBJ_FLAG_HIDDEN);
+          }
+          if (mode == 0 || cnt == 0)
+            return;
+
+          // Шаг анимации. Скорость у частиц немного разная — так поток
+          // не выглядит строем
+          for (int i = 0; i < cnt; i++) {
+            switch (kind(i)) {
+              case 1:
+                py[i] += 12.0f + (i % 3) * 2.0f;
+                break;
+              case 2:
+                py[i] += 1.2f + (i % 3) * 0.5f;
+                ph[i] += 0.08f;
+                px[i] += cosf(ph[i]) * 0.7f;
+                break;
+              default:
+                py[i] += 7.0f + (i % 3);
+                break;
+            }
+            // Ушла за нижний край — появляется сверху в новом месте
+            if (py[i] > 470) {
+              py[i] = -18;
+              px[i] = rnd(40, 426);
+            }
+            lv_obj_set_pos(lv_obj_get_child(box, i), (int) px[i], (int) py[i]);
+          }
