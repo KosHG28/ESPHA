@@ -48,6 +48,14 @@ number:
     on_value:
       - script.execute: wake_screen
 
+globals:
+  # Экран приглушён по таймауту. По нему погодный фон берёт яркую палитру,
+  # а вспышка молнии знает, к какой яркости вернуться
+  - id: screen_dimmed
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+
 script:
   # Полная яркость, затем — через screen_timeout секунд — приглушение.
   # mode: restart => каждое касание перезапускает таймер.
@@ -55,6 +63,7 @@ script:
     mode: restart
     then:
       - lambda: |-
+          id(screen_dimmed) = false;
           id(amoled)->set_brightness((uint8_t) (id(screen_brightness).state * 2.55f + 0.5f));
       - if:
           condition:
@@ -66,4 +75,5 @@ script:
             - lvgl.page.show:
                 id: page_clock
             - lambda: |-
+                id(screen_dimmed) = true;
                 id(amoled)->set_brightness((uint8_t) (id(screen_dim).state * 2.55f + 0.5f));
