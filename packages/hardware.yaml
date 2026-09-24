@@ -91,6 +91,8 @@ touchscreen:
       y_max: 465
     on_touch:
       - script.execute: wake_screen
+      # Пользователь взял экран в свои руки — не уводить его на часы
+      - script.stop: printer_focus
       - lambda: |-
           id(swipe_dx) = 0;
           id(swipe_dy) = 0;
@@ -153,6 +155,7 @@ binary_sensor:
       inverted: true
     on_click:
       - script.execute: wake_screen
+      - script.stop: printer_focus
       - lvgl.page.next:
           animation: OUT_LEFT
           time: ${page_anim_time}
