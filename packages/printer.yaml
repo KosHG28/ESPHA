@@ -157,8 +157,8 @@ binary_sensor:
       - script.execute: update_printer_phase
 
   # HMS — системные сообщения принтера. Среди них бывают и безобидные
-  # предупреждения, которые висят всю печать, поэтому ошибкой HMS считается
-  # только когда принтер не печатает — иначе нормальная печать краснела бы.
+  # предупреждения, которые висят и во время печати, и после неё. Поэтому
+  # ошибкой HMS считается только на паузе — когда принтер из-за неё встал.
   - platform: homeassistant
     id: ha_printer_hms
     entity_id: ${printer_hms_entity}
@@ -237,11 +237,14 @@ script:
             ph = 9;
           else if (st == "filament_unloading")
             ph = 10;
-          else if (ps == "failed" || perr || (hms && ps != "running"))
-            ph = 3;
-          // «Готово» строго: статус finish И прогресс дошёл до 100
+          // «Готово» строго: статус finish И прогресс дошёл до 100. Проверяется
+          // раньше ошибок: после печати флаги ошибок и HMS могут остаться
+          // висеть, и законченная печать показывалась бы как «ошибка»
           else if (ps == "finish" && !std::isnan(pr) && pr >= 100)
             ph = 2;
+          else if (ps == "failed" || (perr && (ps == "running" || ps == "pause" || ps == "prepare")) ||
+                   (hms && ps == "pause"))
+            ph = 3;
           else if (ps == "pause" || starts(st, "paused"))
             ph = 4;
           else if (st == "heatbed_preheating" || st == "heating_hotend" || st == "heating_chamber" ||

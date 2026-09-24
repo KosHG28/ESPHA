@@ -74,6 +74,15 @@ substitutions:
   # но пульсация становится заметно ступенчатой.
   printer_anim_interval: 80ms
 
+  # ---- Погода на фоне -----------------------------------------------------
+  # Сущность с состоянием погоды: rain, light_snow, sleet и т. д. Во время
+  # дождя или снега по фону всех страниц идут капли или снежинки.
+  # Включить, выключить или проверить эффект — сущностью «Фон погоды».
+  weather_condition_entity: sensor.yandex_pogoda_condition_yandex
+
+  # Период кадра погодного фона. 50ms — 20 кадров в секунду
+  weather_fx_interval: 50ms
+
   # Во что перевести значение «остатка времени», чтобы получить минуты.
   # У этой установки сущность в минутах — поэтому 1. Если в Home Assistant
   # она показывается в часах (единица h), поставьте 60.
@@ -118,6 +127,7 @@ packages:
   screen: !include packages/screen.yaml
   entities: !include packages/entities.yaml
   printer: !include packages/printer.yaml
+  weather: !include packages/weather.yaml
   ui: !include packages/ui.yaml
   imu: !include packages/imu.yaml
   behaviour: !include packages/behaviour.yaml
