@@ -303,16 +303,16 @@ lvgl:
               - line:
                   id: fx_bolt_glow
                   points: [[0, 0], [0, 1]]
-                  line_width: 9
-                  line_color: 0x28427A
+                  line_width: 11
+                  line_color: 0x4A7BD6
                   line_rounded: true
                   hidden: true
                   clickable: false
               - line:
                   id: fx_bolt
                   points: [[0, 0], [0, 1]]
-                  line_width: 3
-                  line_color: 0xEAF2FF
+                  line_width: 4
+                  line_color: 0xFFFFFF
                   line_rounded: true
                   hidden: true
                   clickable: false
