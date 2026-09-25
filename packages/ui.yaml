@@ -13,12 +13,35 @@
 # ---------------------------------------------------------------------------
 
 font:
-  # Часы: только цифры, двоеточие и пробел (для мигания двоеточия)
+  # Время: только цифры и прочерк. Минуты — font_time, часы на 5 пунктов
+  # крупнее — font_time_h
   - file: "gfonts://Roboto@700"
     id: font_time
     size: 96
     bpp: 4
-    glyphs: "0123456789: -"
+    glyphs: "0123456789-"
+
+  - file: "gfonts://Roboto@700"
+    id: font_time_h
+    size: 101
+    bpp: 4
+    glyphs: "0123456789-"
+
+  # Строка восхода и заката на часах. Она же пишет «нет связи с HA»,
+  # поэтому с кириллицей
+  - file: "gfonts://Roboto@400"
+    id: font_sun
+    size: 22
+    bpp: 4
+    glyphsets: [GF_Latin_Kernel, GF_Cyrillic_Core]
+    ignore_missing_glyphs: true
+    extras:
+      - file:
+          url: "https://raw.githubusercontent.com/Templarian/MaterialDesign-Webfont/master/fonts/materialdesignicons-webfont.ttf"
+          type: web
+        glyphs:
+          - "\U000F059C"   # weather-sunset-up
+          - "\U000F059B"   # weather-sunset-down
 
   # Крупный процент на странице принтера
   - file: "gfonts://Roboto@700"
@@ -136,6 +159,8 @@ font:
       - "\U000F0592"   # weather-hail
       - "\U000F0593"   # weather-lightning
       - "\U000F067E"   # weather-lightning-rainy
+      - "\U000F081C"   # door-open — значок открытой двери
+      - "\U000F07D0"   # home-assistant — заставка при запуске
 
   # Крупная иконка принтера в центре страницы
   - file:
@@ -222,6 +247,16 @@ lvgl:
       border_width: 0
       pad_all: 0
 
+    # Звезда: маленькая точка, яркость мерцания задаёт packages/weather.yaml
+    - id: style_star
+      width: 3
+      height: 3
+      radius: 1
+      bg_color: 0x808890
+      bg_opa: COVER
+      border_width: 0
+      pad_all: 0
+
     # Брызги от капли
     - id: style_splash
       width: 3
@@ -261,6 +296,40 @@ lvgl:
   # в каждую из них, и точки приходилось править в четырёх местах
   top_layer:
     widgets:
+      # Заставка при запуске: видна, пока нет связи с Home Assistant (но не
+      # дольше минуты — часы идут и без HA, по RTC). Прячет её behaviour.yaml
+      - obj:
+          id: splash
+          width: 466
+          height: 466
+          align: CENTER
+          radius: 233
+          bg_color: 0x000000
+          bg_opa: COVER
+          border_width: 0
+          pad_all: 0
+          clickable: false
+          scrollable: false
+          widgets:
+            - label:
+                text: "\U000F07D0"
+                text_font: font_wicon
+                text_color: 0x03A9F4
+                align: CENTER
+                y: -52
+            - label:
+                text: "ESPHA"
+                text_font: font_l
+                text_color: 0xFFFFFF
+                align: CENTER
+                y: 0
+            - label:
+                id: splash_text
+                text: "Подключение к Wi-Fi..."
+                styles: style_caption
+                align: CENTER
+                y: 44
+
       # Полноэкранная вспышка о событии. Обычно скрыта; показывается скриптом
       # flash_screen. Не кликабельна, чтобы не перехватывать касания.
       - obj:
@@ -328,7 +397,7 @@ lvgl:
                   id: fx_bolt_glow
                   points: [[0, 0], [0, 1]]
                   line_width: 11
-                  line_color: 0x4A7BD6
+                  line_color: 0xFF9800
                   line_rounded: true
                   hidden: true
                   clickable: false
@@ -336,7 +405,7 @@ lvgl:
                   id: fx_bolt
                   points: [[0, 0], [0, 1]]
                   line_width: 4
-                  line_color: 0xFFFFFF
+                  line_color: 0xFFEB3B
                   line_rounded: true
                   hidden: true
                   clickable: false
@@ -389,6 +458,25 @@ lvgl:
                           - obj: { styles: style_puff, x: 38, y: 6, width: 70, height: 66, radius: 33, clickable: false }
                           - obj: { styles: style_puff, x: 88, y: 0, width: 58, height: 58, radius: 29, clickable: false }
                           - obj: { styles: style_puff, x: 116, y: 26, width: 64, height: 46, radius: 23, clickable: false }
+              # Звёзды ясной ночью
+              - obj:
+                  id: fx_stars
+                  styles: style_fx_layer
+                  clickable: false
+                  scrollable: false
+                  widgets:
+                    - obj: { styles: style_star, hidden: true, clickable: false }
+                    - obj: { styles: style_star, hidden: true, clickable: false }
+                    - obj: { styles: style_star, hidden: true, clickable: false }
+                    - obj: { styles: style_star, hidden: true, clickable: false }
+                    - obj: { styles: style_star, hidden: true, clickable: false }
+                    - obj: { styles: style_star, hidden: true, clickable: false }
+                    - obj: { styles: style_star, hidden: true, clickable: false }
+                    - obj: { styles: style_star, hidden: true, clickable: false }
+                    - obj: { styles: style_star, hidden: true, clickable: false }
+                    - obj: { styles: style_star, hidden: true, clickable: false }
+                    - obj: { styles: style_star, hidden: true, clickable: false }
+                    - obj: { styles: style_star, hidden: true, clickable: false }
               # Капли и градины; размер и цвет задаёт packages/weather.yaml
               - obj:
                   id: fx_drops
@@ -455,11 +543,15 @@ lvgl:
             styles: style_root
             scrollable: false
             widgets:
+              # Значок открытой входной двери — пока дверь открыта
               - label:
-                  text: "${slot1_title}"
-                  styles: style_caption
+                  id: lbl_door
+                  text: "\U000F081C"
+                  text_font: font_wicon
+                  text_color: 0xFF9800
                   align: CENTER
-                  y: -134
+                  y: -152
+                  hidden: true
 
               # Иконка погоды и уличная температура — в одну строку по центру
               - obj:
@@ -493,17 +585,18 @@ lvgl:
 
               # Время без двоеточия: часы белые справа от центра зазора,
               # минуты цветные слева от него. Цифры Roboto одинаковой
-              # ширины, поэтому время не прыгает
+              # ширины, поэтому время не прыгает. Часы на 5 пунктов крупнее
+              # и подняты на 2 px, чтобы низ цифр совпадал с минутами
               - label:
                   id: lbl_time_h
                   text: "--"
-                  text_font: font_time
+                  text_font: font_time_h
                   text_color: 0xFFFFFF
                   text_align: RIGHT
-                  width: 130
+                  width: 136
                   align: CENTER
-                  x: -79
-                  y: -8
+                  x: -82
+                  y: -10
               - label:
                   id: lbl_time_m
                   text: "--"
@@ -515,18 +608,15 @@ lvgl:
                   x: 79
                   y: -8
 
+              # Восход и закат. Без связи с Home Assistant здесь пишется
+              # «нет связи с HA»
               - label:
-                  id: lbl_date
-                  text: "нет связи с Home Assistant"
-                  styles: style_caption
+                  id: lbl_sun
+                  text: ""
+                  text_font: font_sun
+                  text_color: 0x8A9199
                   align: CENTER
                   y: 62
-
-              - label:
-                  text: "${slot2_title}"
-                  styles: style_caption
-                  align: CENTER
-                  y: 112
 
               - label:
                   id: lbl_slot2
@@ -534,7 +624,7 @@ lvgl:
                   text_font: font_l
                   text_color: 0xFFFFFF
                   align: CENTER
-                  y: 148
+                  y: 124
 
     # =====================================================================
     # Страница 2 — два значения из Home Assistant крупно

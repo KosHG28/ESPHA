@@ -235,6 +235,14 @@ script:
   - id: printer_focus
     mode: restart
     then:
+      # Экран выключен (ночь или никого нет) — не будить, а открыть страницу
+      # принтера, когда экран включат
+      - if:
+          condition:
+            lambda: 'return id(screen_off);'
+          then:
+            - lambda: 'id(printer_pending) = true;'
+            - script.stop: printer_focus
       - if:
           condition:
             lambda: 'return id(current_page) != 2;'
