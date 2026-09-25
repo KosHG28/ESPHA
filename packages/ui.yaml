@@ -161,16 +161,7 @@ font:
       - "\U000F067E"   # weather-lightning-rainy
       - "\U000F081C"   # door-open — значок открытой двери
       - "\U000F07D0"   # home-assistant — заставка при запуске
-
-  # Крупная иконка принтера в центре страницы
-  - file:
-      url: "https://raw.githubusercontent.com/Templarian/MaterialDesign-Webfont/master/fonts/materialdesignicons-webfont.ttf"
-      type: web
-    id: font_printer
-    size: 76
-    bpp: 4
-    glyphsets: []
-    glyphs: ["\U000F042B"]   # mdi-printer-3d
+      - "\U000F042B"   # printer-3d — страница принтера
 
 lvgl:
   id: lvgl_main
@@ -385,7 +376,7 @@ lvgl:
         # Погодный фон — первым, чтобы лежать под часами. Всё двигает
         # packages/weather.yaml, только пока открыта эта страница
         - obj:
-            id: weather_fx
+            id: fx_root
             styles: style_fx_layer
             hidden: true
             clickable: false
@@ -725,62 +716,106 @@ lvgl:
                     bg_opa: TRANSP
                     pad_all: 0
 
+              # Слой — вверху, мелко
               - label:
-                  id: lbl_print_pct
-                  text: "--"
-                  text_font: font_pct
-                  text_color: 0xFFFFFF
-                  align: CENTER
-                  y: -122
-
-              - label:
-                  id: lbl_print_status
-                  text: "нет данных"
-                  text_font: font_m
+                  id: lbl_print_layer
+                  text: "\U000F0F58 --"
+                  text_font: font_icon
                   text_color: 0x8A9199
                   align: CENTER
-                  y: -66
+                  y: -150
 
-              - label:
-                  text: "\U000F042B"
-                  text_font: font_printer
-                  text_color: 0x22DD44
+              # Иконка принтера и стадия — одной строкой, как погода на часах.
+              # Иконка красится в цвет фазы, как кольцо
+              - obj:
                   align: CENTER
-                  y: 2
+                  y: -98
+                  width: SIZE_CONTENT
+                  height: SIZE_CONTENT
+                  bg_opa: TRANSP
+                  border_width: 0
+                  pad_all: 0
+                  clickable: false
+                  scrollable: false
+                  layout:
+                    type: flex
+                    flex_flow: ROW
+                    flex_align_main: CENTER
+                    flex_align_cross: CENTER
+                    flex_align_track: CENTER
+                    pad_column: 10
+                  widgets:
+                    - label:
+                        id: lbl_print_icon
+                        text: "\U000F042B"
+                        text_font: font_wicon
+                        text_color: 0x555C63
+                    - label:
+                        id: lbl_print_status
+                        text: "нет данных"
+                        text_font: font_m
+                        text_color: 0x8A9199
 
+              # Крупный процент, как время на часах: число белое тем же
+              # шрифтом, что часы, знак % — мельче и цветом минут
+              - obj:
+                  id: print_pct_box
+                  align: CENTER
+                  y: -8
+                  width: SIZE_CONTENT
+                  height: SIZE_CONTENT
+                  bg_opa: TRANSP
+                  border_width: 0
+                  pad_all: 0
+                  clickable: false
+                  scrollable: false
+                  layout:
+                    type: flex
+                    flex_flow: ROW
+                    flex_align_main: CENTER
+                    flex_align_cross: END
+                    flex_align_track: CENTER
+                    pad_column: 4
+                  widgets:
+                    - label:
+                        id: lbl_print_pct
+                        text: "--"
+                        text_font: font_time_h
+                        text_color: 0xFFFFFF
+                    # Отступ снизу поднимает знак % к линии цифр
+                    - label:
+                        text: "%"
+                        text_font: font_l
+                        text_color: ${time_minutes_color}
+                        pad_bottom: 16
+
+              # Сопло и стол — строкой под процентом, как восход и закат
               - label:
                   id: lbl_print_nozzle
                   text: "\U000F0E5B --"
                   text_font: font_icon
-                  text_color: 0xFFFFFF
+                  text_color: 0xB0B6BC
                   align: CENTER
-                  x: -128
-                  y: 12
+                  x: -72
+                  y: 62
 
               - label:
                   id: lbl_print_bed
                   text: "\U000F1A45 --"
                   text_font: font_icon
-                  text_color: 0xFFFFFF
+                  text_color: 0xB0B6BC
                   align: CENTER
-                  x: 128
-                  y: 12
+                  x: 72
+                  y: 62
 
-              - label:
-                  id: lbl_print_layer
-                  text: "\U000F0F58 --"
-                  text_font: font_icon
-                  text_color: 0xFFFFFF
-                  align: CENTER
-                  y: 96
-
+              # Остаток времени — внизу, как комнатная температура на часах
               - label:
                   id: lbl_print_eta
-                  text: "\U000F0150 --"
-                  text_font: font_icon
-                  text_color: 0x03A9F4
+                  text: "--"
+                  text_font: font_l
+                  text_color: 0xFFFFFF
                   align: CENTER
-                  y: 146
+                  y: 124
 
               # Когда принтер не печатает: когда закончилась последняя печать.
               # Показывается вместо слоя и остатка времени, которые в простое
@@ -790,8 +825,8 @@ lvgl:
                   text: ""
                   styles: style_caption
                   align: CENTER
-                  y: 110
-                  width: 380
+                  y: 124
+                  width: 320
                   long_mode: DOT
                   text_align: CENTER
                   hidden: true
