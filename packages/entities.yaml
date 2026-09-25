@@ -108,8 +108,9 @@ script:
                   lv_obj_set_style_text_color(id(lbl_slot2_card), color(z2), 0);
                 }
 
-  # Восход и закат: «↑ 6:42   ↓ 18:55». Время приходит из sun.sun в UTC в виде
-  # 2026-09-25T03:42:10.123+00:00 и переводится в местное
+  # Ближайшее событие солнца: днём «закат 18:55», ночью «восход 6:42».
+  # Время приходит из sun.sun в UTC в виде 2026-09-25T03:42:10.123+00:00 и
+  # переводится в местное
   - id: refresh_sun
     mode: restart
     then:
@@ -145,12 +146,52 @@ script:
                     m = lt.minute;
                     return true;
                   };
-                  int rh, rm, sh, sm;
-                  if (!local_hm(id(ha_sun_rising).state, rh, rm) || !local_hm(id(ha_sun_setting).state, sh, sm))
+                  const bool night = id(is_night);
+                  int h, m;
+                  if (!local_hm(night ? id(ha_sun_rising).state : id(ha_sun_setting).state, h, m))
                     return std::string("");
                   char buf[64];
-                  snprintf(buf, sizeof(buf), "\U000F059C %d:%02d     \U000F059B %d:%02d", rh, rm, sh, sm);
+                  if (night)
+                    snprintf(buf, sizeof(buf), "\U000F059C восход %d:%02d", h, m);
+                  else
+                    snprintf(buf, sizeof(buf), "\U000F059B закат %d:%02d", h, m);
                   return std::string(buf);
+
+  # Дверь открыта уже door_alarm_delay: тревога
+  - id: door_timer
+    mode: restart
+    then:
+      - delay: ${door_alarm_delay}
+      - lambda: 'id(door_alarm) = true;'
+      - if:
+          condition:
+            lambda: 'return !id(nobody_home);'
+          then:
+            - script.execute: wake_screen
+            - lvgl.page.show:
+                id: page_clock
+
+globals:
+  - id: door_alarm
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+
+interval:
+  # Мигание значка двери при тревоге: красный — тёмно-красный, раз в полсекунды.
+  # Только пока часы на экране и экран не выключен
+  - interval: 500ms
+    then:
+      - if:
+          condition:
+            lambda: 'return id(door_alarm) && id(current_page) == 0 && !id(screen_off);'
+          then:
+            - lvgl.widget.update:
+                id: lbl_door
+                text_color: !lambda |-
+                  static bool on = false;
+                  on = !on;
+                  return lv_color_hex(on ? 0xFF3333 : 0x5A1010);
 
 sensor:
   # ---- слоты с данными из Home Assistant --------------------------------
@@ -291,7 +332,9 @@ text_sensor:
             text: !lambda 'return x.empty() ? std::string("--") : x;'
 
 binary_sensor:
-  # Входная дверь: пока открыта (on), на часах горит оранжевый значок
+  # Входная дверь: пока открыта (on), на часах горит оранжевый значок.
+  # Открыта дольше door_alarm_delay — значок красный и мигает, экран
+  # просыпается (кроме случая, когда дома никого нет: смотреть некому)
   - platform: homeassistant
     id: ha_door
     entity_id: ${door_entity}
@@ -300,6 +343,15 @@ binary_sensor:
       - lvgl.widget.update:
           id: lbl_door
           hidden: !lambda 'return !x;'
+          text_color: 0xFF9800
+      - if:
+          condition:
+            lambda: 'return x;'
+          then:
+            - script.execute: door_timer
+          else:
+            - script.stop: door_timer
+            - lambda: 'id(door_alarm) = false;'
 
 button:
   - platform: template

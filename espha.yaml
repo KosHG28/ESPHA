@@ -51,6 +51,8 @@ substitutions:
 
   # Входная дверь: пока открыта (on), на часах горит значок
   door_entity: binary_sensor.vhoddver_contact
+  # Через сколько открытой двери значок краснеет, мигает и будит экран
+  door_alarm_delay: 1min
 
   # Выключение экрана. Ночные часы по умолчанию — дальше их меняют
   # сущности «Ночь: гасить экран с / до» в Home Assistant
@@ -114,6 +116,8 @@ substitutions:
   # Если таких сущностей нет, дождь и снег просто идут без сноса
   weather_wind_speed_entity: sensor.yandex_pogoda_wind_speed
   weather_wind_bearing_entity: sensor.yandex_pogoda_wind_bearing
+  # Порывы ветра, м/с. Время от времени снос на пару секунд усиливается до них
+  weather_wind_gust_entity: sensor.yandex_pogoda_wind_gust
 
   # Период кадра погодного фона. 50ms — 20 кадров в секунду
   weather_fx_interval: 50ms
@@ -157,7 +161,7 @@ esphome:
 # репозитория в Home Assistant он искал бы /config/esphome/components.
 external_components:
   - source: github://koshg28/ESPHA@main
-    components: [ft3168]
+    components: [ft3168, weather_fx]
 
 packages:
   hardware: !include packages/hardware.yaml

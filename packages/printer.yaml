@@ -75,8 +75,9 @@ sensor:
           text: !lambda |-
             if (std::isnan(x))
               return std::string("--");
+            // Знак % — отдельная надпись рядом, помельче
             char buf[8];
-            snprintf(buf, sizeof(buf), "%d%%", (int) x);
+            snprintf(buf, sizeof(buf), "%d", (int) x);
             return std::string(buf);
       - script.execute: update_printer_phase
 
@@ -139,14 +140,14 @@ sensor:
           id: lbl_print_eta
           text: !lambda |-
             if (std::isnan(x))
-              return std::string("\U000F0150 --");
-            // Интеграция отдаёт время в часах; множитель задаётся подстановкой
+              return std::string("--");
+            // Перевод в минуты задаётся подстановкой printer_remaining_to_minutes
             int total = (int) (x * ${printer_remaining_to_minutes} + 0.5f);
             char buf[24];
             if (total < 60)
-              snprintf(buf, sizeof(buf), "\U000F0150 %dм", total);
+              snprintf(buf, sizeof(buf), "%dм", total);
             else
-              snprintf(buf, sizeof(buf), "\U000F0150 %dч %02dм", total / 60, total % 60);
+              snprintf(buf, sizeof(buf), "%dч %02dм", total / 60, total % 60);
             return std::string(buf);
 
 text_sensor:
@@ -370,6 +371,24 @@ script:
                 default: return lv_color_hex(0x555C63);
               }
 
+      # Иконка принтера рядом со стадией — в цвет кольца
+      - lvgl.widget.update:
+          id: lbl_print_icon
+          text_color: !lambda |-
+            switch (id(printer_phase)) {
+              case 1:
+              case 2: return lv_color_hex(0x22DD44);
+              case 3: return lv_color_hex(0xFF3333);
+              case 4: return lv_color_hex(0xFFB300);
+              case 5:
+              case 8: return lv_color_hex(0xFF8A00);
+              case 6: return lv_color_hex(0xDDDDDD);
+              case 7: return lv_color_hex(0xAA66FF);
+              case 9:
+              case 10: return lv_color_hex(0xFFD54F);
+              default: return lv_color_hex(0x555C63);
+            }
+
       # Цвет подписи стадии. Для пульсирующих фаз это стартовое значение,
       # дальше его ведёт интервал ниже
       - lvgl.widget.update:
@@ -401,14 +420,14 @@ script:
                 hidden: false
           else:
             - lvgl.widget.update:
-                id: [lbl_print_layer, lbl_print_eta, lbl_print_pct]
+                id: [lbl_print_layer, lbl_print_eta, print_pct_box]
                 hidden: false
             - lvgl.widget.update:
                 id: lbl_print_last
                 hidden: true
       # В ожидании процент прошлой печати только путает
       - lvgl.widget.update:
-          id: lbl_print_pct
+          id: print_pct_box
           hidden: !lambda 'return id(printer_phase) == 0;'
       - script.execute: refresh_printer_last
 
