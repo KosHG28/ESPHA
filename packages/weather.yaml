@@ -186,16 +186,17 @@ script:
           else if (s == "cloudy") { clouds = 2; }
           else if (s == "overcast") { clouds = 3; }
           // В дождь и снег облаков нет — только сами осадки
-          else if (s == "light_rain") { mode = 1; cnt = 8; }
-          else if (s == "rain") { mode = 1; cnt = 12; }
-          else if (s == "heavy_rain" || s == "showers") { mode = 1; cnt = 16; }
-          else if (s == "sleet") { mode = 3; cnt = 12; }
+          // Дождь густой: капель больше, чем снежинок (до 32)
+          else if (s == "light_rain") { mode = 1; cnt = 14; }
+          else if (s == "rain") { mode = 1; cnt = 22; }
+          else if (s == "heavy_rain" || s == "showers") { mode = 1; cnt = 30; }
+          else if (s == "sleet") { mode = 3; cnt = 22; }
           else if (s == "light_snow") { mode = 2; cnt = 8; }
           else if (s == "snow") { mode = 2; cnt = 12; }
           else if (s == "snowfall") { mode = 2; cnt = 16; }
           else if (s == "hail") { mode = 4; cnt = 12; }
           else if (s == "thunderstorm") { storm = true; clouds = 3; }
-          else if (s == "thunderstorm_with_rain") { mode = 1; cnt = 12; clouds = 3; storm = true; }
+          else if (s == "thunderstorm_with_rain") { mode = 1; cnt = 22; clouds = 3; storm = true; }
           else if (s == "thunderstorm_with_hail") { mode = 4; cnt = 12; clouds = 3; storm = true; }
           id(weather_mode) = mode;
           id(weather_count) = cnt;

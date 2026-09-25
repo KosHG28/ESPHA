@@ -525,6 +525,22 @@ lvgl:
                     - obj: { styles: style_fx, hidden: true, clickable: false }
                     - obj: { styles: style_fx, hidden: true, clickable: false }
                     - obj: { styles: style_fx, hidden: true, clickable: false }
+                    - obj: { styles: style_fx, hidden: true, clickable: false }
+                    - obj: { styles: style_fx, hidden: true, clickable: false }
+                    - obj: { styles: style_fx, hidden: true, clickable: false }
+                    - obj: { styles: style_fx, hidden: true, clickable: false }
+                    - obj: { styles: style_fx, hidden: true, clickable: false }
+                    - obj: { styles: style_fx, hidden: true, clickable: false }
+                    - obj: { styles: style_fx, hidden: true, clickable: false }
+                    - obj: { styles: style_fx, hidden: true, clickable: false }
+                    - obj: { styles: style_fx, hidden: true, clickable: false }
+                    - obj: { styles: style_fx, hidden: true, clickable: false }
+                    - obj: { styles: style_fx, hidden: true, clickable: false }
+                    - obj: { styles: style_fx, hidden: true, clickable: false }
+                    - obj: { styles: style_fx, hidden: true, clickable: false }
+                    - obj: { styles: style_fx, hidden: true, clickable: false }
+                    - obj: { styles: style_fx, hidden: true, clickable: false }
+                    - obj: { styles: style_fx, hidden: true, clickable: false }
               # Снежинки: чётные мелкие («далеко»), нечётные крупные («близко»)
               - obj:
                   id: fx_flakes
