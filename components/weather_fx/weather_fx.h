@@ -52,7 +52,7 @@ class WeatherFx : public Component {
   void splashes_();
   void flakes_(float wind);
   void clouds_();
-  void stars_();
+  void stars_(uint32_t now);
   void lightning_(uint32_t now);
   void end_strike_();
 
@@ -67,12 +67,17 @@ class WeatherFx : public Component {
   int applied_{-1};
   int nd_{0}, nf_{0}, ncl_{0};
   bool hail_{false}, storm_{false}, stars_on_{false}, dim_{false};
-  uint32_t tick_{0};
+  // Движение считается по реально прошедшему времени: k_ — во сколько раз
+  // этот кадр длиннее опорных 50 мс. Так скорость не зависит от частоты кадров
+  uint32_t last_ms_{0};
+  float k_{1.0f};
+  float dt_ms_{50.0f};
+  uint32_t star_ms_{0};
 
   float dx_[ND]{}, dy_[ND]{};
   float fx_[NF]{}, fy_[NF]{}, fph_[NF]{};
   float sx_[NS]{}, sy_[NS]{}, svx_[NS]{}, svy_[NS]{};
-  int slife_[NS]{};
+  float slife_[NS]{};  // сколько ещё жить брызгам, мс
   float cx_[NC]{};
   float stph_[NST]{};
 

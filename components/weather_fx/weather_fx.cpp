@@ -12,6 +12,13 @@ namespace weather_fx {
 static const int CLOUD_Y[3] = {34, 78, 18};
 // Полный снос ветром — при такой скорости и сильнее, м/с
 static const float FULL_WIND = 15.0f;
+// Длина капли. Она больше шага капли за кадр (8–11 px при 33 мс), поэтому
+// старое и новое положение перекрываются и перерисовываются одним куском —
+// иначе капля на мгновение пропадала бы между «стереть» и «нарисовать»
+static const int DROP_LEN = 20;
+static const int HAIL_SIZE = 6;
+// Сколько живут брызги, мс
+static const float SPLASH_MS = 250.0f;
 
 int WeatherFx::rnd_(int lo, int hi) { return lo + (int) (random_uint32() % (uint32_t) (hi - lo)); }
 
@@ -92,10 +99,10 @@ void WeatherFx::apply_(const Params &p, bool relayout) {
       continue;
     }
     if (this->hail_) {
-      lv_obj_set_size(d, 5, 5);
+      lv_obj_set_size(d, HAIL_SIZE, HAIL_SIZE);
       lv_obj_set_style_radius(d, 3, 0);
     } else {
-      lv_obj_set_size(d, 2, 16);
+      lv_obj_set_size(d, 2, DROP_LEN);
       lv_obj_set_style_radius(d, 1, 0);
     }
     lv_obj_set_style_bg_color(d, lv_color_hex(c_drop), 0);
@@ -129,7 +136,7 @@ void WeatherFx::apply_(const Params &p, bool relayout) {
   for (int i = 0; i < NS; i++) {
     lv_obj_t *s = lv_obj_get_child(this->splash_box_, i);
     lv_obj_set_style_bg_color(s, lv_color_hex(dim ? 0x7FD4FF : 0x2A6F99), 0);
-    this->slife_[i] = 0;
+    this->slife_[i] = 0.0f;
     show_(s, false);
   }
 
@@ -205,22 +212,23 @@ static float ground(float x) {
 
 void WeatherFx::drops_(float wind) {
   for (int i = 0; i < this->nd_; i++) {
-    this->dy_[i] += this->hail_ ? 7.0f + (i % 3) : 12.0f + (i % 3) * 2.0f;
-    this->dx_[i] = wrap_x(this->dx_[i] + wind * (this->hail_ ? 3.0f : 5.0f));
-    const float h = this->hail_ ? 5.0f : 16.0f;
+    const float k = this->k_;
+    this->dy_[i] += k * (this->hail_ ? 7.0f + (i % 3) : 12.0f + (i % 3) * 2.0f);
+    this->dx_[i] = wrap_x(this->dx_[i] + k * wind * (this->hail_ ? 3.0f : 5.0f));
+    const float h = this->hail_ ? (float) HAIL_SIZE : (float) DROP_LEN;
     const float g = ground(this->dx_[i] + 1);
     if (this->dy_[i] + h > g) {
       // Брызги: две точки разлетаются вверх в стороны (не у каждой капли)
       if (!this->hail_ && (random_uint32() % 10) < 6) {
         int made = 0;
         for (int k = 0; k < NS && made < 2; k++) {
-          if (this->slife_[k])
+          if (this->slife_[k] > 0)
             continue;
           this->sx_[k] = this->dx_[i];
           this->sy_[k] = g - 3;
           this->svx_[k] = (made ? 1.3f : -1.3f) + wind;
           this->svy_[k] = -2.2f;
-          this->slife_[k] = 5;
+          this->slife_[k] = SPLASH_MS;
           lv_obj_t *s = lv_obj_get_child(this->splash_box_, k);
           lv_obj_set_pos(s, (int) this->sx_[k], (int) this->sy_[k]);
           show_(s, true);
@@ -230,24 +238,27 @@ void WeatherFx::drops_(float wind) {
       // Новая капля появляется сверху, с поправкой на снос, чтобы при
       // сильном ветре не пустела подветренная сторона
       this->dx_[i] = wrap_x(rnd_(40, 426) - wind * 60.0f);
-      this->dy_[i] = -18 - rnd_(0, 60);
+      this->dy_[i] = -DROP_LEN - 2 - rnd_(0, 60);
     }
     lv_obj_set_pos(lv_obj_get_child(this->drops_box_, i), (int) this->dx_[i], (int) this->dy_[i]);
   }
 }
 
 void WeatherFx::splashes_() {
+  const float kk = this->k_;
   for (int k = 0; k < NS; k++) {
-    if (!this->slife_[k])
+    if (this->slife_[k] <= 0)
       continue;
     lv_obj_t *s = lv_obj_get_child(this->splash_box_, k);
-    if (--this->slife_[k] == 0) {
+    this->slife_[k] -= this->dt_ms_;
+    if (this->slife_[k] <= 0) {
+      this->slife_[k] = 0.0f;
       show_(s, false);
       continue;
     }
-    this->sx_[k] += this->svx_[k];
-    this->sy_[k] += this->svy_[k];
-    this->svy_[k] += 0.7f;
+    this->sx_[k] += kk * this->svx_[k];
+    this->sy_[k] += kk * this->svy_[k];
+    this->svy_[k] += kk * 0.7f;
     lv_obj_set_pos(s, (int) this->sx_[k], (int) this->sy_[k]);
   }
 }
@@ -257,9 +268,11 @@ void WeatherFx::flakes_(float wind) {
   // глубина. У каждой свой ритм покачивания
   for (int i = 0; i < this->nf_; i++) {
     const bool big = i % 2;
-    this->fy_[i] += big ? 1.7f + (i % 3) * 0.25f : 0.8f + (i % 3) * 0.2f;
-    this->fph_[i] += (big ? 0.07f : 0.05f) + i * 0.003f;
-    this->fx_[i] = wrap_x(this->fx_[i] + cosf(this->fph_[i]) * (big ? 0.8f : 0.45f) + wind * (big ? 1.4f : 0.9f));
+    const float k = this->k_;
+    this->fy_[i] += k * (big ? 1.7f + (i % 3) * 0.25f : 0.8f + (i % 3) * 0.2f);
+    this->fph_[i] += k * ((big ? 0.07f : 0.05f) + i * 0.003f);
+    this->fx_[i] =
+        wrap_x(this->fx_[i] + k * (cosf(this->fph_[i]) * (big ? 0.8f : 0.45f) + wind * (big ? 1.4f : 0.9f)));
     if (this->fy_[i] > 470) {
       this->fy_[i] = -30 - rnd_(0, 40);
       this->fx_[i] = rnd_(30, 430);
@@ -271,18 +284,19 @@ void WeatherFx::flakes_(float wind) {
 void WeatherFx::clouds_() {
   // Облака медленно ползут вправо, у каждого своя скорость
   for (int i = 0; i < this->ncl_; i++) {
-    this->cx_[i] += 0.25f + i * 0.08f;
+    this->cx_[i] += this->k_ * (0.25f + i * 0.08f);
     if (this->cx_[i] > 466)
       this->cx_[i] = -190;
     lv_obj_set_pos(lv_obj_get_child(this->clouds_box_, i), (int) this->cx_[i], CLOUD_Y[i]);
   }
 }
 
-void WeatherFx::stars_() {
+void WeatherFx::stars_(uint32_t now) {
   // Звёзды мерцают: яркость меняется по синусу, у каждой свой ритм. Раз в
-  // 4 кадра (200 мс) — чаще глаз не заметит, а перерисовок меньше
-  if (!this->stars_on_ || (this->tick_ % 4) != 0)
+  // 200 мс — чаще глаз не заметит, а перерисовок меньше
+  if (!this->stars_on_ || now - this->star_ms_ < 200)
     return;
+  this->star_ms_ = now;
   const int hi = this->dim_ ? 0xFF : 0xC8;
   for (int i = 0; i < NST; i++) {
     this->stph_[i] += 0.25f + (i % 4) * 0.07f;
@@ -364,12 +378,20 @@ void WeatherFx::frame(const Params &p) {
   const bool any = this->nd_ || this->nf_ || this->ncl_ || this->storm_ || this->stars_on_;
   if (!any || !p.active) {
     this->end_strike_();
+    this->last_ms_ = 0;
     return;
   }
-  this->tick_++;
   const uint32_t now = millis();
+  // Сколько прошло с прошлого кадра. После паузы (другая страница, экран
+  // выключен) — как один обычный кадр, чтобы частицы не прыгали
+  uint32_t dt = this->last_ms_ ? now - this->last_ms_ : 50;
+  if (dt > 100)
+    dt = 50;
+  this->last_ms_ = now;
+  this->dt_ms_ = (float) dt;
+  this->k_ = dt / 50.0f;
   const float wind = this->wind_(p, now);
-  this->stars_();
+  this->stars_(now);
   this->drops_(wind);
   this->splashes_();
   this->flakes_(wind);
