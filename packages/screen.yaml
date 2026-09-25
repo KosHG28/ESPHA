@@ -32,6 +32,9 @@ number:
     initial_value: 10
     optimistic: true
     restore_value: true
+    # Если экран сейчас приглушён — применить новую яркость сразу
+    on_value:
+      - script.execute: apply_dim
 
   - platform: template
     id: screen_timeout
@@ -80,6 +83,21 @@ number:
       - script.execute: power_eval
 
 switch:
+  # В режиме ожидания: экран на обычной яркости, погодные эффекты горят
+  # в полную силу, а надписи на часах — полупрозрачные, чтобы выглядели так же
+  # тускло, как при «Яркости в режиме ожидания»
+  - platform: template
+    id: sw_fx_bright
+    name: Яркие эффекты в ожидании
+    icon: mdi:weather-lightning-rainy
+    entity_category: config
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    on_turn_on:
+      - script.execute: apply_dim
+    on_turn_off:
+      - script.execute: apply_dim
+
   - platform: template
     id: sw_night_off
     name: Гасить экран ночью
@@ -173,6 +191,8 @@ script:
                       id: page_printer
       - lambda: |-
           id(screen_dimmed) = false;
+          // Надписи на часах снова непрозрачные (в ожидании могли быть приглушены)
+          lv_obj_set_style_text_opa(id(root_clock), LV_OPA_COVER, 0);
           id(amoled)->set_brightness((uint8_t) (id(screen_brightness).state * 2.55f + 0.5f));
       - if:
           condition:
@@ -196,9 +216,30 @@ script:
                 then:
                   - script.execute: screen_sleep
                 else:
-                  - lambda: |-
-                      id(screen_dimmed) = true;
-                      id(amoled)->set_brightness((uint8_t) (id(screen_dim).state * 2.55f + 0.5f));
+                  - lambda: 'id(screen_dimmed) = true;'
+                  - script.execute: apply_dim
+
+  # Приглушить экран для режима ожидания. Обычно — просто яркость ожидания.
+  # С «Яркими эффектами в ожидании» — экран на обычной яркости, а надписи
+  # часов прозрачнее ровно во столько раз, во сколько яркость ожидания ниже
+  # обычной: часы выглядят так же тускло, а погодные эффекты — ярко.
+  # Если яркость ожидания 0 % — экран тёмный, как без этой настройки
+  - id: apply_dim
+    mode: restart
+    then:
+      - lambda: |-
+          if (!id(screen_dimmed) || id(screen_off))
+            return;
+          float full = id(screen_brightness).state, dim = id(screen_dim).state;
+          lv_obj_t *clock = id(root_clock);
+          if (id(sw_fx_bright).state && dim > 0 && full > dim) {
+            float k = std::max(0.08f, dim / full);
+            lv_obj_set_style_text_opa(clock, (lv_opa_t) (k * 255.0f + 0.5f), 0);
+            id(amoled)->set_brightness((uint8_t) (full * 2.55f + 0.5f));
+          } else {
+            lv_obj_set_style_text_opa(clock, LV_OPA_COVER, 0);
+            id(amoled)->set_brightness((uint8_t) (dim * 2.55f + 0.5f));
+          }
 
   # Выключить экран полностью: яркость 0 — пиксели AMOLED не горят вовсе,
   # и отрисовка на паузе — погодный фон и прочее не считаются впустую.
