@@ -12,7 +12,7 @@ namespace weather_fx {
 static const int CLOUD_Y[3] = {34, 78, 18};
 // Полный снос ветром — при такой скорости и сильнее, м/с
 static const float FULL_WIND = 15.0f;
-// Длина капли. Она больше шага капли за кадр (8–11 px при 33 мс), поэтому
+// Длина капли. Она больше шага капли за кадр (4–6 px при 16 мс), поэтому
 // старое и новое положение перекрываются и перерисовываются одним куском —
 // иначе капля на мгновение пропадала бы между «стереть» и «нарисовать»
 static const int DROP_LEN = 20;
@@ -101,11 +101,17 @@ void WeatherFx::apply_(const Params &p, bool relayout) {
     if (this->hail_) {
       lv_obj_set_size(d, HAIL_SIZE, HAIL_SIZE);
       lv_obj_set_style_radius(d, 3, 0);
+      lv_obj_set_style_bg_grad_dir(d, LV_GRAD_DIR_NONE, 0);
+      lv_obj_set_style_bg_color(d, lv_color_hex(c_drop), 0);
     } else {
+      // Капля со «шлейфом»: яркая снизу и растворяется кверху. Глаз видит
+      // летящую каплю, а не чёрточку, прыгающую с места на место
       lv_obj_set_size(d, 2, DROP_LEN);
       lv_obj_set_style_radius(d, 1, 0);
+      lv_obj_set_style_bg_grad_dir(d, LV_GRAD_DIR_VER, 0);
+      lv_obj_set_style_bg_color(d, lv_color_hex(0x000000), 0);
+      lv_obj_set_style_bg_grad_color(d, lv_color_hex(c_drop), 0);
     }
-    lv_obj_set_style_bg_color(d, lv_color_hex(c_drop), 0);
     if (relayout) {
       this->dx_[i] = rnd_(40, 426);
       this->dy_[i] = rnd_(0, 440);

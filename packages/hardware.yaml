@@ -67,6 +67,11 @@ display:
       offset_height: 0
     # Яркость AMOLED (0..255), дальше ей управляет number.screen_brightness
     brightness: 180
+    # Контроллер CO5300 принимает только участки с чётными границами (начало
+    # чётное, ширина и высота чётные) — так же делают демо Waveshare для этой
+    # платы. Без этого мелкие движущиеся детали — капли дождя — записывались
+    # криво, обрывками, и мерцали
+    draw_rounding: 2
     auto_clear_enabled: false
     update_interval: never
 
