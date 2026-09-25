@@ -12,7 +12,7 @@ namespace weather_fx {
 static const int CLOUD_Y[3] = {34, 78, 18};
 // Полный снос ветром — при такой скорости и сильнее, м/с
 static const float FULL_WIND = 15.0f;
-// Длина капли. Она больше шага капли за кадр (4–6 px при 16 мс), поэтому
+// Длина капли. Она больше шага капли за кадр (2–3 px при 16 мс), поэтому
 // старое и новое положение перекрываются и перерисовываются одним куском —
 // иначе капля на мгновение пропадала бы между «стереть» и «нарисовать»
 static const int DROP_LEN = 20;
@@ -58,11 +58,11 @@ void WeatherFx::end_strike_() {
 
 void WeatherFx::apply_(const Params &p, bool relayout) {
   const bool dim = p.dim;
-  const int cnt = std::min(std::max(p.count, 0), 16);
+  const int cnt = std::min(std::max(p.count, 0), ND);
   this->dim_ = dim;
   this->hail_ = p.mode == 4;
   this->nd_ = (p.mode == 1 || p.mode == 4) ? cnt : (p.mode == 3 ? cnt / 2 : 0);
-  this->nf_ = p.mode == 2 ? cnt : (p.mode == 3 ? cnt / 2 : 0);
+  this->nf_ = std::min(p.mode == 2 ? cnt : (p.mode == 3 ? cnt / 2 : 0), NF);
   this->ncl_ = std::min(std::max(p.clouds, 0), NC);
   this->storm_ = p.storm;
   this->stars_on_ = p.stars;
@@ -219,8 +219,9 @@ static float ground(float x) {
 void WeatherFx::drops_(float wind) {
   for (int i = 0; i < this->nd_; i++) {
     const float k = this->k_;
-    this->dy_[i] += k * (this->hail_ ? 7.0f + (i % 3) : 12.0f + (i % 3) * 2.0f);
-    this->dx_[i] = wrap_x(this->dx_[i] + k * wind * (this->hail_ ? 3.0f : 5.0f));
+    // Дождь падает неспешно (140–190 px/с), зато капель много
+    this->dy_[i] += k * (this->hail_ ? 7.0f + (i % 3) : 7.0f + (i % 3) * 1.2f);
+    this->dx_[i] = wrap_x(this->dx_[i] + k * wind * 3.0f);
     const float h = this->hail_ ? (float) HAIL_SIZE : (float) DROP_LEN;
     const float g = ground(this->dx_[i] + 1);
     if (this->dy_[i] + h > g) {
@@ -244,7 +245,7 @@ void WeatherFx::drops_(float wind) {
       // Новая капля появляется сверху, с поправкой на снос, чтобы при
       // сильном ветре не пустела подветренная сторона
       this->dx_[i] = wrap_x(rnd_(40, 426) - wind * 60.0f);
-      this->dy_[i] = -DROP_LEN - 2 - rnd_(0, 60);
+      this->dy_[i] = -DROP_LEN - 2 - rnd_(0, 120);
     }
     lv_obj_set_pos(lv_obj_get_child(this->drops_box_, i), (int) this->dx_[i], (int) this->dy_[i]);
   }
@@ -370,7 +371,7 @@ void WeatherFx::frame(const Params &p) {
   if (!this->bound_)
     return;
 
-  const int cnt = std::min(std::max(p.count, 0), 16);
+  const int cnt = std::min(std::max(p.count, 0), ND);
   const int sig = p.mode | (cnt << 4) | (std::min(std::max(p.clouds, 0), NC) << 10) | ((p.storm ? 1 : 0) << 12) |
                   ((p.dim ? 1 : 0) << 13) | ((p.stars ? 1 : 0) << 14);
   if (sig != this->applied_) {

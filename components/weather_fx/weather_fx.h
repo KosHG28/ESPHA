@@ -13,7 +13,7 @@ namespace weather_fx {
 /// Что показывать в этом кадре. Заполняет packages/weather.yaml.
 struct Params {
   int mode{0};        ///< осадки: 0 нет, 1 дождь, 2 снег, 3 мокрый снег, 4 град
-  int count{0};       ///< сколько частиц, до 16
+  int count{0};       ///< сколько частиц: капель до 32, снежинок до 16
   int clouds{0};      ///< сколько облаков, до 3
   bool storm{false};  ///< гроза: молнии
   bool stars{false};  ///< ясная ночь: звёзды
@@ -27,7 +27,7 @@ struct Params {
 class WeatherFx : public Component {
  public:
   /// Виджеты из packages/ui.yaml. Порядок детей внутри контейнеров важен:
-  /// капли и снежинки — по 16, брызги — 8, облака — 3, звёзды — 12.
+  /// капли — 32, снежинки — 16, брызги — 8, облака — 3, звёзды — 12.
   void bind(lv_obj_t *root, lv_obj_t *drops, lv_obj_t *flakes, lv_obj_t *splash, lv_obj_t *clouds,
             lv_obj_t *stars, lv_obj_t *bolt, lv_obj_t *glow);
 
@@ -37,7 +37,7 @@ class WeatherFx : public Component {
   float get_setup_priority() const override { return setup_priority::LATE; }
 
  protected:
-  static const int ND = 16;   // капли и градины
+  static const int ND = 32;   // капли и градины
   static const int NF = 16;   // снежинки
   static const int NS = 8;    // брызги
   static const int NC = 3;    // облака
