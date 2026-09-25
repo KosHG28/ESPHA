@@ -94,6 +94,9 @@ touchscreen:
       y_min: 0
       y_max: 465
     on_touch:
+      # Касание, разбудившее выключенный экран, только будит: листать
+      # страницы вслепую не нужно
+      - lambda: 'id(touch_woke) = id(screen_off);'
       - script.execute: wake_screen
       - script.execute: dots_autohide
       # Пользователь взял экран в свои руки — не уводить его на часы
@@ -112,6 +115,8 @@ touchscreen:
       - if:
           condition:
             lambda: |-
+              if (id(touch_woke))
+                return false;
               int dx = id(swipe_dx), dy = id(swipe_dy);
               int adx = dx < 0 ? -dx : dx;
               int ady = dy < 0 ? -dy : dy;
@@ -123,6 +128,8 @@ touchscreen:
       - if:
           condition:
             lambda: |-
+              if (id(touch_woke))
+                return false;
               int dx = id(swipe_dx), dy = id(swipe_dy);
               int adx = dx < 0 ? -dx : dx;
               int ady = dy < 0 ? -dy : dy;
@@ -147,6 +154,11 @@ globals:
     type: int
     restore_value: false
     initial_value: '0'
+  # Текущее касание разбудило полностью выключенный экран
+  - id: touch_woke
+    type: bool
+    restore_value: false
+    initial_value: 'false'
 
 binary_sensor:
   - platform: gpio
@@ -159,9 +171,16 @@ binary_sensor:
         pullup: true
       inverted: true
     on_click:
-      - script.execute: wake_screen
-      - script.execute: dots_autohide
-      - script.stop: printer_focus
-      - lvgl.page.next:
-          animation: OUT_LEFT
-          time: ${page_anim_time}
+      # Если экран был выключен, нажатие только будит его
+      - if:
+          condition:
+            lambda: 'return id(screen_off);'
+          then:
+            - script.execute: wake_screen
+          else:
+            - script.execute: wake_screen
+            - script.execute: dots_autohide
+            - script.stop: printer_focus
+            - lvgl.page.next:
+                animation: OUT_LEFT
+                time: ${page_anim_time}

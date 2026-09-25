@@ -21,12 +21,18 @@ text:
     mode: text
     max_length: 100
     optimistic: true
+    # Пустое значение — это поле очистилось после показа, его пропускаем.
+    # Поле очищается, чтобы тот же текст можно было отправить ещё раз
     on_value:
-      - script.execute:
-          id: show_message
-          text: !lambda 'return x;'
-          seconds: ${message_seconds}
-          color: ""
+      - if:
+          condition:
+            lambda: 'return !x.empty();'
+          then:
+            - script.execute:
+                id: show_message
+                text: !lambda 'return x;'
+                seconds: ${message_seconds}
+                color: ""
 
 api:
   actions:
@@ -100,3 +106,6 @@ script:
       - lvgl.widget.show: msg_card
       - delay: !lambda 'return (uint32_t) seconds * 1000;'
       - lvgl.widget.hide: msg_card
+      - text.set:
+          id: msg_text
+          value: ""

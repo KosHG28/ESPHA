@@ -341,6 +341,9 @@ lvgl:
           on_click:
             - script.stop: show_message
             - lvgl.widget.hide: msg_card
+            - text.set:
+                id: msg_text
+                value: ""
           widgets:
             - label:
                 id: msg_label
