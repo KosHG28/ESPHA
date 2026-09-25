@@ -187,16 +187,16 @@ script:
           else if (s == "overcast") { clouds = 3; }
           // В дождь и снег облаков нет — только сами осадки
           // Дождь густой: капель больше, чем снежинок (до 32)
-          else if (s == "light_rain") { mode = 1; cnt = 14; }
-          else if (s == "rain") { mode = 1; cnt = 22; }
-          else if (s == "heavy_rain" || s == "showers") { mode = 1; cnt = 30; }
-          else if (s == "sleet") { mode = 3; cnt = 22; }
+          else if (s == "light_rain") { mode = 1; cnt = 12; }
+          else if (s == "rain") { mode = 1; cnt = 18; }
+          else if (s == "heavy_rain" || s == "showers") { mode = 1; cnt = 24; }
+          else if (s == "sleet") { mode = 3; cnt = 18; }
           else if (s == "light_snow") { mode = 2; cnt = 8; }
           else if (s == "snow") { mode = 2; cnt = 12; }
           else if (s == "snowfall") { mode = 2; cnt = 16; }
           else if (s == "hail") { mode = 4; cnt = 12; }
           else if (s == "thunderstorm") { storm = true; clouds = 3; }
-          else if (s == "thunderstorm_with_rain") { mode = 1; cnt = 22; clouds = 3; storm = true; }
+          else if (s == "thunderstorm_with_rain") { mode = 1; cnt = 18; clouds = 3; storm = true; }
           else if (s == "thunderstorm_with_hail") { mode = 4; cnt = 12; clouds = 3; storm = true; }
           id(weather_mode) = mode;
           id(weather_count) = cnt;
@@ -225,8 +225,13 @@ interval:
           p.storm = id(weather_storm);
           p.stars = id(weather_stars);
           p.dim = id(screen_dimmed);
-          // Двигать только пока открыты часы и экран не выключен полностью
-          p.active = id(current_page) == 0 && !id(screen_off);
+          // Двигать только пока открыты часы, экран не выключен полностью
+          // и никто не трогает экран: пока палец на экране и 0,4 с после
+          // (идёт листание) все силы отдаются касанию, а дождь на миг замирает.
+          // Если отпускание почему-то не пришло — через 5 с погода идёт дальше
+          uint32_t since = millis() - id(touch_release_ms);
+          bool touching = id(touch_active) ? since < 5000 : since < 400;
+          p.active = id(current_page) == 0 && !id(screen_off) && !touching;
           p.wind_speed = id(ha_wind_speed).state;
           p.wind_bearing = id(ha_wind_bearing).state;
           p.wind_gust = id(ha_wind_gust).state;

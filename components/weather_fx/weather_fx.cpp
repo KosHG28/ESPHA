@@ -12,7 +12,7 @@ namespace weather_fx {
 static const int CLOUD_Y[3] = {34, 78, 18};
 // Полный снос ветром — при такой скорости и сильнее, м/с
 static const float FULL_WIND = 15.0f;
-// Длина капли. Она больше шага капли за кадр (2–3 px при 16 мс), поэтому
+// Длина капли. Она больше шага капли за кадр (5–6 px при 33 мс), поэтому
 // старое и новое положение перекрываются и перерисовываются одним куском —
 // иначе капля на мгновение пропадала бы между «стереть» и «нарисовать»
 static const int DROP_LEN = 20;
@@ -226,7 +226,7 @@ void WeatherFx::drops_(float wind) {
     const float g = ground(this->dx_[i] + 1);
     if (this->dy_[i] + h > g) {
       // Брызги: две точки разлетаются вверх в стороны (не у каждой капли)
-      if (!this->hail_ && (random_uint32() % 10) < 6) {
+      if (!this->hail_ && (random_uint32() % 10) < 3) {
         int made = 0;
         for (int k = 0; k < NS && made < 2; k++) {
           if (this->slife_[k] > 0)

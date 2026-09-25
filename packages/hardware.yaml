@@ -101,7 +101,10 @@ touchscreen:
     on_touch:
       # Касание, разбудившее выключенный экран, только будит: листать
       # страницы вслепую не нужно
-      - lambda: 'id(touch_woke) = id(screen_off);'
+      - lambda: |-
+          id(touch_woke) = id(screen_off);
+          id(touch_active) = true;
+          id(touch_release_ms) = millis();
       - script.execute: wake_screen
       - script.execute: dots_autohide
       # Пользователь взял экран в свои руки — не уводить его на часы
@@ -117,6 +120,10 @@ touchscreen:
             id(swipe_dy) = (int) touches[0].y - (int) touches[0].y_org;
           }
     on_release:
+      # Погодный фон ждёт ещё немного после отпускания — идёт листание
+      - lambda: |-
+          id(touch_active) = false;
+          id(touch_release_ms) = millis();
       - if:
           condition:
             lambda: |-
@@ -157,6 +164,16 @@ globals:
     initial_value: '0'
   - id: swipe_dy
     type: int
+    restore_value: false
+    initial_value: '0'
+  # Палец на экране и время последнего касания или отпускания — пока идёт
+  # касание и листание, погодный фон стоит, чтобы интерфейс отвечал без задержек
+  - id: touch_active
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  - id: touch_release_ms
+    type: uint32_t
     restore_value: false
     initial_value: '0'
   # Текущее касание разбудило полностью выключенный экран
