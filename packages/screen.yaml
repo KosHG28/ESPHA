@@ -48,9 +48,104 @@ number:
     on_value:
       - script.execute: wake_screen
 
+  # Ночное выключение: с какого и до какого часа экран гаснет полностью
+  - platform: template
+    id: night_from
+    name: "Ночь: гасить экран с"
+    icon: mdi:weather-night
+    entity_category: config
+    unit_of_measurement: ч
+    min_value: 0
+    max_value: 23
+    step: 1
+    initial_value: ${night_off_from}
+    optimistic: true
+    restore_value: true
+    on_value:
+      - script.execute: power_eval
+
+  - platform: template
+    id: night_to
+    name: "Ночь: гасить экран до"
+    icon: mdi:weather-sunset-up
+    entity_category: config
+    unit_of_measurement: ч
+    min_value: 0
+    max_value: 23
+    step: 1
+    initial_value: ${night_off_to}
+    optimistic: true
+    restore_value: true
+    on_value:
+      - script.execute: power_eval
+
+switch:
+  - platform: template
+    id: sw_night_off
+    name: Гасить экран ночью
+    icon: mdi:power-sleep
+    entity_category: config
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    on_turn_on:
+      - script.execute: power_eval
+    on_turn_off:
+      - script.execute: power_eval
+
+  - platform: template
+    id: sw_away_off
+    name: Гасить экран, когда никого нет
+    icon: mdi:home-export-outline
+    entity_category: config
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    on_turn_on:
+      - script.execute: power_eval
+    on_turn_off:
+      - script.execute: power_eval
+
+sensor:
+  # Сколько людей в зоне «Дом». 0 — никого: через away_off_delay экран
+  # гаснет полностью. Кто-то вернулся — включается сразу
+  - platform: homeassistant
+    id: ha_people_home
+    entity_id: zone.home
+    internal: true
+    on_value:
+      - if:
+          condition:
+            lambda: 'return !std::isnan(x) && x < 0.5f;'
+          then:
+            # mode: single — таймер не перезапускается от повторных нулей
+            - script.execute: away_timer
+          else:
+            - script.stop: away_timer
+            - lambda: 'id(nobody_home) = false;'
+            - script.execute: power_eval
+
 globals:
   # Экран приглушён по таймауту. По нему погодный фон берёт яркую палитру
   - id: screen_dimmed
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  # Экран выключен полностью: яркость 0, отрисовка LVGL на паузе
+  - id: screen_off
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  # Сейчас ночь или никого нет — экран должен быть выключен, когда его не трогают
+  - id: off_wanted
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  # Дома никого уже дольше away_off_delay
+  - id: nobody_home
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  # Пока экран был выключен, у принтера что-то произошло — показать при включении
+  - id: printer_pending
     type: bool
     restore_value: false
     initial_value: 'false'
@@ -61,6 +156,21 @@ script:
   - id: wake_screen
     mode: restart
     then:
+      # Экран был выключен полностью — возобновить отрисовку. Если за это
+      # время у принтера что-то произошло, сразу открыть его страницу
+      - if:
+          condition:
+            lambda: 'return id(screen_off);'
+          then:
+            - lambda: 'id(screen_off) = false;'
+            - lvgl.resume:
+            - if:
+                condition:
+                  lambda: 'return id(printer_pending);'
+                then:
+                  - lambda: 'id(printer_pending) = false;'
+                  - lvgl.page.show:
+                      id: page_printer
       - lambda: |-
           id(screen_dimmed) = false;
           id(amoled)->set_brightness((uint8_t) (id(screen_brightness).state * 2.55f + 0.5f));
@@ -73,6 +183,70 @@ script:
             # горящих пикселей, и понятнее, что панель просто спит
             - lvgl.page.show:
                 id: page_clock
-            - lambda: |-
-                id(screen_dimmed) = true;
-                id(amoled)->set_brightness((uint8_t) (id(screen_dim).state * 2.55f + 0.5f));
+            # Ночью или когда никого нет — не приглушать, а выключить совсем
+            - if:
+                condition:
+                  lambda: 'return id(off_wanted);'
+                then:
+                  - script.execute: screen_sleep
+                else:
+                  - lambda: |-
+                      id(screen_dimmed) = true;
+                      id(amoled)->set_brightness((uint8_t) (id(screen_dim).state * 2.55f + 0.5f));
+
+  # Выключить экран полностью: яркость 0 — пиксели AMOLED не горят вовсе,
+  # и отрисовка на паузе — погодный фон и прочее не считаются впустую.
+  # Будит касание, движение, кнопка BOOT или конец ночи / чьё-то возвращение
+  - id: screen_sleep
+    mode: single
+    then:
+      - lambda: |-
+          id(screen_off) = true;
+          id(screen_dimmed) = true;
+          id(amoled)->set_brightness(0);
+      - lvgl.pause:
+
+  # Дома никого: подождать away_off_delay — вдруг это сбой геопозиции или
+  # вы вышли на пару минут — и только тогда считать, что никого нет
+  - id: away_timer
+    mode: single
+    then:
+      - delay: ${away_off_delay}
+      - lambda: 'id(nobody_home) = true;'
+      - script.execute: power_eval
+
+  # Решить, должен ли экран быть выключен: ночь по расписанию или никого нет
+  # дома. Вызывается раз в минуту, при смене людей дома и настроек
+  - id: power_eval
+    mode: queued
+    max_runs: 3
+    then:
+      - lambda: |-
+          bool night = false;
+          if (id(sw_night_off).state) {
+            auto now = id(ha_time).now();
+            int a = (int) id(night_from).state, b = (int) id(night_to).state;
+            if (now.is_valid() && a != b)
+              night = a < b ? (now.hour >= a && now.hour < b) : (now.hour >= a || now.hour < b);
+          }
+          // Без связи с HA неизвестно, есть ли кто дома, — по этому правилу не гасим
+          bool away = id(sw_away_off).state && id(nobody_home) && api::global_api_server->is_connected();
+          id(off_wanted) = night || away;
+      # Пора выключить: если экран не трогали (таймер гашения уже отработал) —
+      # сразу, иначе он выключится сам по окончании таймаута
+      - if:
+          condition:
+            lambda: 'return id(off_wanted) && !id(screen_off);'
+          then:
+            - if:
+                condition:
+                  not:
+                    script.is_running: wake_screen
+                then:
+                  - script.execute: screen_sleep
+      # Ночь кончилась или кто-то пришёл — включить
+      - if:
+          condition:
+            lambda: 'return !id(off_wanted) && id(screen_off);'
+          then:
+            - script.execute: wake_screen

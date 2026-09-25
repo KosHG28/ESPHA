@@ -1,5 +1,6 @@
 # ---------------------------------------------------------------------------
-# Погодный фон на странице часов: дождь с брызгами о край экрана, снежинки разной формы,
+# Погодный фон на странице часов: дождь с брызгами о край экрана (и косой
+# при ветре), звёзды ясной ночью, снежинки разной формы,
 # град, облака и молнии в грозу. Работает и в приглушённом режиме — при
 # гашении экран возвращается на часы, а частицы переходят на яркую палитру,
 # чтобы их было видно при низкой яркости панели.
@@ -36,6 +37,16 @@ globals:
     type: bool
     restore_value: false
     initial_value: 'false'
+  # Солнце за горизонтом (по sun.sun; пока его нет — с 21 до 6)
+  - id: is_night
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  # Звёзды: ясная ночь
+  - id: weather_stars
+    type: bool
+    restore_value: false
+    initial_value: 'false'
 
 text_sensor:
   - platform: homeassistant
@@ -46,6 +57,27 @@ text_sensor:
       - script.execute: weather_apply
       - script.execute: weather_icon
 
+  # Солнце над горизонтом или нет — отсюда «ночь» для звёзд и иконки луны
+  - platform: homeassistant
+    id: ha_sun
+    entity_id: sun.sun
+    internal: true
+    on_value:
+      - script.execute: update_night
+      - script.execute: weather_icon
+
+# Ветер: при нём дождь идёт наискосок, а снег сносит вбок. Направление —
+# откуда дует, в градусах, как принято в метеорологии
+sensor:
+  - platform: homeassistant
+    id: ha_wind_speed
+    entity_id: ${weather_wind_speed_entity}
+    internal: true
+  - platform: homeassistant
+    id: ha_wind_bearing
+    entity_id: ${weather_wind_bearing_entity}
+    internal: true
+
 select:
   # «Авто» — по погоде из Home Assistant. Остальные пункты — чтобы проверить
   # эффект, не дожидаясь погоды. Новые пункты добавляются только в конец:
@@ -55,7 +87,7 @@ select:
     name: Фон погоды
     icon: mdi:weather-snowy-rainy
     entity_category: config
-    options: ["Авто", "Выкл", "Дождь", "Снег", "Гроза", "Облачно"]
+    options: ["Авто", "Выкл", "Дождь", "Снег", "Гроза", "Облачно", "Ясная ночь"]
     initial_option: "Авто"
     optimistic: true
     restore_value: true
@@ -63,15 +95,36 @@ select:
       - script.execute: weather_apply
 
 script:
+  # Пересчитать «ночь» и, если она сменилась, звёзды и иконку. Вызывается
+  # при смене sun.sun и раз в минуту из refresh_clock
+  - id: update_night
+    mode: queued
+    max_runs: 2
+    then:
+      - lambda: |-
+          bool night;
+          if (id(ha_sun).has_state() && !id(ha_sun).state.empty()) {
+            night = id(ha_sun).state == "below_horizon";
+          } else {
+            auto now = id(ha_time).now();
+            night = now.is_valid() && (now.hour >= 21 || now.hour < 6);
+          }
+          static int prev = -1;
+          id(is_night) = night;
+          if (prev == (int) night)
+            return;
+          prev = night;
+          id(weather_apply)->execute();
+          id(weather_icon)->execute();
+
   # Иконка погоды рядом с уличной температурой. Показывает настоящую погоду,
-  # а не пункт «Фона погоды». Ночью (с 21 до 6) — луна вместо солнца
+  # а не пункт «Фона погоды». Ночью — луна вместо солнца
   - id: weather_icon
     mode: restart
     then:
       - lambda: |-
           const std::string s = id(ha_weather).has_state() ? id(ha_weather).state : "";
-          auto now = id(ha_time).now();
-          bool night = now.is_valid() && (now.hour >= 21 || now.hour < 6);
+          bool night = id(is_night);
           const char *icon = "";
           uint32_t color = 0x90A4AE;
           if (s == "clear") { icon = night ? "\U000F0594" : "\U000F0599"; color = night ? 0xB0BEC5 : 0xFFB300; }
@@ -98,12 +151,13 @@ script:
             else lv_obj_add_flag(lbl, LV_OBJ_FLAG_HIDDEN);
           }
 
-  # Выбрать осадки, облака и грозу по погоде и настройке «Фон погоды»
+  # Выбрать осадки, облака, грозу и звёзды по погоде и настройке «Фон погоды»
   - id: weather_apply
     mode: restart
     then:
       - lambda: |-
-          // Номер пункта «Фона погоды»: 0 Авто, 1 Выкл, 2 Дождь, 3 Снег, 4 Гроза, 5 Облачно
+          // Номер пункта «Фона погоды»:
+          // 0 Авто, 1 Выкл, 2 Дождь, 3 Снег, 4 Гроза, 5 Облачно, 6 Ясная ночь
           size_t sel = id(weather_fx_select).active_index().value_or(0);
           std::string s;
           switch (sel) {
@@ -112,8 +166,11 @@ script:
             case 3: s = "snow"; break;
             case 4: s = "thunderstorm_with_rain"; break;
             case 5: s = "cloudy"; break;
+            case 6: s = "clear"; break;
             default: s = ""; break;
           }
+          // Звёзды — ясной или малооблачной ночью. «Ясная ночь» показывает их и днём
+          id(weather_stars) = (s == "clear" || s == "partly_cloudy") && (id(is_night) || sel == 6);
           int mode = 0, cnt = 0, clouds = 0;
           bool storm = false;
           if (s == "partly_cloudy") { clouds = 1; }
@@ -140,15 +197,17 @@ interval:
   - interval: ${weather_fx_interval}
     then:
       - lambda: |-
-          static const int ND = 16, NF = 16, NS = 8, NC = 3;
+          static const int ND = 16, NF = 16, NS = 8, NC = 3, NST = 12;
           static float dx[ND], dy[ND];                    // капли и градины
           static float fx[NF], fy[NF], fph[NF];           // снежинки
           static float sx[NS], sy[NS], svx[NS], svy[NS];  // брызги
           static int slife[NS];
           static float cx[NC];                            // облака
+          static float stph[NST];                         // фазы мерцания звёзд
+          static int tick = 0;
           static const int CLOUD_Y[NC] = {34, 78, 18};
           static int applied = -1, nd = 0, nf = 0, ncl = 0;
-          static bool storm = false, hail = false;
+          static bool storm = false, hail = false, stars = false;
           // Молния
           static lv_point_precise_t bolt_pts[10];
           static uint32_t next_strike = 0, strike_t0 = 0;
@@ -156,7 +215,7 @@ interval:
 
           lv_obj_t *root = id(weather_fx);
           lv_obj_t *drops = id(fx_drops), *flakes = id(fx_flakes), *splash = id(fx_splash);
-          lv_obj_t *clouds = id(fx_clouds);
+          lv_obj_t *clouds = id(fx_clouds), *starbox = id(fx_stars);
           lv_obj_t *bolt = id(fx_bolt)->obj, *glow = id(fx_bolt_glow)->obj;
 
           auto rnd = [](int lo, int hi) { return lo + (int) (random_uint32() % (uint32_t) (hi - lo)); };
@@ -177,7 +236,8 @@ interval:
           int mode = id(weather_mode);
           int cnt = std::min(id(weather_count), 16);
           int dim = id(screen_dimmed) ? 1 : 0;
-          int sig = mode | (cnt << 4) | (id(weather_clouds) << 10) | ((id(weather_storm) ? 1 : 0) << 12) | (dim << 13);
+          int sig = mode | (cnt << 4) | (id(weather_clouds) << 10) | ((id(weather_storm) ? 1 : 0) << 12) | (dim << 13) |
+                    ((id(weather_stars) ? 1 : 0) << 14);
           if (sig != applied) {
             // Если поменялась только яркость — перекрашиваем, но не перемешиваем
             bool relayout = applied < 0 || (sig & ~(1 << 13)) != (applied & ~(1 << 13));
@@ -187,8 +247,25 @@ interval:
             nf = mode == 2 ? cnt : (mode == 3 ? cnt / 2 : 0);
             ncl = std::min(id(weather_clouds), NC);
             storm = id(weather_storm);
+            stars = id(weather_stars);
             if (!storm) end_strike();
-            show(root, nd || nf || ncl || storm);
+            show(root, nd || nf || ncl || storm || stars);
+
+            // Звёзды — в верхней половине круга, вокруг и выше времени
+            for (int i = 0; i < NST; i++) {
+              lv_obj_t *p = lv_obj_get_child(starbox, i);
+              if (!stars) { show(p, false); continue; }
+              if (relayout) {
+                int x, y;
+                do {
+                  x = rnd(50, 416);
+                  y = rnd(30, 220);
+                } while ((x - 233) * (x - 233) + (y - 233) * (y - 233) > 215 * 215);
+                lv_obj_set_pos(p, x, y);
+                stph[i] = rnd(0, 628) / 100.0f;
+              }
+              show(p, true);
+            }
 
             // В приглушённом режиме палитра ярче: при низкой яркости панели
             // тёмные частицы сливаются с чёрным
@@ -222,7 +299,7 @@ interval:
               show(p, false);
             }
             // Свечение молнии: в приглушённом режиме ярче
-            lv_obj_set_style_line_color(glow, lv_color_hex(dim ? 0x8AB4FF : 0x4A7BD6), 0);
+            lv_obj_set_style_line_color(glow, lv_color_hex(dim ? 0xFFC107 : 0xFF9800), 0);
 
             // Облака: при пасмурной погоде и грозе — темнее
             bool heavy = ncl >= 3 || storm;
@@ -238,11 +315,37 @@ interval:
             }
           }
 
-          // ---- Анимация: только пока открыты часы ----
-          bool any = nd || nf || ncl || storm;
-          if (!any || id(current_page) != 0) {
+          // ---- Анимация: только пока открыты часы и экран не выключен ----
+          bool any = nd || nf || ncl || storm || stars;
+          if (!any || id(current_page) != 0 || id(screen_off)) {
             end_strike();
             return;
+          }
+          tick++;
+
+          // Ветер: -1…1, плюс — сносит вправо. Направление в метеорологии —
+          // откуда дует, поэтому западный ветер (270°) несёт осадки вправо.
+          // Полный снос — при 15 м/с и сильнее
+          float wind = 0;
+          float ws = id(ha_wind_speed).state, wb = id(ha_wind_bearing).state;
+          if (!std::isnan(ws) && !std::isnan(wb))
+            wind = -sinf(wb * 0.0174533f) * std::min(ws, 15.0f) / 15.0f;
+          auto wrap_x = [](float x) {
+            if (x < 20) return x + 426;
+            if (x > 446) return x - 426;
+            return x;
+          };
+
+          // Звёзды мерцают: яркость меняется по синусу, у каждой свой ритм.
+          // Раз в 4 кадра (200 мс) — чаще глаз не заметит, а перерисовок меньше
+          if (stars && (tick % 4) == 0) {
+            for (int i = 0; i < NST; i++) {
+              stph[i] += 0.25f + (i % 4) * 0.07f;
+              float k = 0.35f + 0.65f * (0.5f + 0.5f * sinf(stph[i]));
+              int hi = dim ? 0xFF : 0xC8;
+              int v = (int) (hi * k);
+              lv_obj_set_style_bg_color(lv_obj_get_child(starbox, i), lv_color_make(v, v, std::min(255, v + 16)), 0);
+            }
           }
 
           // Капля разбивается о нижний край круглого экрана
@@ -253,6 +356,7 @@ interval:
 
           for (int i = 0; i < nd; i++) {
             dy[i] += hail ? 7.0f + (i % 3) : 12.0f + (i % 3) * 2.0f;
+            dx[i] = wrap_x(dx[i] + wind * (hail ? 3.0f : 5.0f));
             float h = hail ? 5.0f : 16.0f;
             float g = ground(dx[i] + 1);
             if (dy[i] + h > g) {
@@ -294,7 +398,7 @@ interval:
             bool big = i % 2;
             fy[i] += big ? 1.7f + (i % 3) * 0.25f : 0.8f + (i % 3) * 0.2f;
             fph[i] += (big ? 0.07f : 0.05f) + i * 0.003f;
-            fx[i] += cosf(fph[i]) * (big ? 0.8f : 0.45f);
+            fx[i] = wrap_x(fx[i] + cosf(fph[i]) * (big ? 0.8f : 0.45f) + wind * (big ? 1.4f : 0.9f));
             if (fy[i] > 470) {
               fy[i] = -30 - rnd(0, 40);
               fx[i] = rnd(30, 430);

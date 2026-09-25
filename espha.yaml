@@ -40,6 +40,25 @@ substitutions:
   # так легче читать время
   time_minutes_color: "0x8FB3CC"
 
+  # Цвет температуры: ниже slotN_cold — холодный цвет, выше slotN_hot —
+  # тёплый, между ними белый. slot1 — на улице, slot2 — в комнате
+  slot1_cold: "0"
+  slot1_hot: "25"
+  slot2_cold: "20"
+  slot2_hot: "26"
+  temp_cold_color: "0x7CC4FF"
+  temp_hot_color: "0xFFA040"
+
+  # Входная дверь: пока открыта (on), на часах горит значок
+  door_entity: binary_sensor.vhoddver_contact
+
+  # Выключение экрана. Ночные часы по умолчанию — дальше их меняют
+  # сущности «Ночь: гасить экран с / до» в Home Assistant
+  night_off_from: "1"
+  night_off_to: "6"
+  # Сколько ждать после того, как дома никого не осталось (zone.home = 0)
+  away_off_delay: 10min
+
   # Через сколько секунд без касаний прятать точки страниц
   page_dots_timeout: 5s
 
@@ -91,6 +110,10 @@ substitutions:
   # дождя или снега на странице часов идут капли или снежинки.
   # Включить, выключить или проверить эффект — сущностью «Фон погоды».
   weather_condition_entity: sensor.yandex_pogoda_condition_yandex
+  # Ветер: скорость в м/с и направление в градусах (откуда дует).
+  # Если таких сущностей нет, дождь и снег просто идут без сноса
+  weather_wind_speed_entity: sensor.yandex_pogoda_wind_speed
+  weather_wind_bearing_entity: sensor.yandex_pogoda_wind_bearing
 
   # Период кадра погодного фона. 50ms — 20 кадров в секунду
   weather_fx_interval: 50ms
@@ -114,6 +137,8 @@ esphome:
         - script.execute: wake_screen
         - script.execute: refresh_clock
         - component.update: i2c_devices
+        # Заставку прячет подключение к HA; без HA — через минуту, часы идут по RTC
+        - script.execute: splash_timeout
         - lvgl.arc.update:
             id: arc_bright
             value: !lambda 'return (int) id(screen_brightness).state;'
@@ -173,6 +198,10 @@ wifi:
   # Без энергосбережения данные из Home Assistant доходят без задержки.
   # Плата обычно питается от USB, так что расход не важен.
   power_save_mode: none
+  on_connect:
+    - lvgl.label.update:
+        id: splash_text
+        text: "Подключение к Home Assistant..."
   # Точка доступа-запаска, если сохранённая сеть недоступна
   ap:
 

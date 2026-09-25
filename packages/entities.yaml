@@ -30,7 +30,7 @@ time:
           - script.execute: refresh_clock
 
 script:
-  # Раз в минуту: время, дата, иконка погоды (днём и ночью она разная)
+  # Раз в минуту: время, иконка погоды, ночь и расписание экрана
   - id: refresh_clock
     mode: restart
     then:
@@ -55,23 +55,102 @@ script:
             snprintf(buf, sizeof(buf), "%02d", now.minute);
             return std::string(buf);
       - script.execute: weather_icon
-      - lvgl.label.update:
-          id: lbl_date
-          text: !lambda |-
-            static const char *const WD[] = {"воскресенье", "понедельник", "вторник",
-                                             "среда", "четверг", "пятница", "суббота"};
-            static const char *const MON[] = {"января", "февраля", "марта", "апреля",
-                                              "мая", "июня", "июля", "августа",
-                                              "сентября", "октября", "ноября", "декабря"};
-            auto now = id(ha_time).now();
-            if (!now.is_valid())
-              return std::string("нет связи с Home Assistant");
-            char buf[64];
-            snprintf(buf, sizeof(buf), "%s, %d %s", WD[now.day_of_week - 1], now.day_of_month,
-                     MON[now.month - 1]);
-            return std::string(buf);
+      # Ночь (для звёзд и луны) и ночное выключение экрана
+      - script.execute: update_night
+      - script.execute: power_eval
       # «сегодня» в строке о последней печати в полночь должно стать «вчера»
       - script.execute: refresh_printer_last
+
+  # Цвет температуры по значению: холодно — голубой, норма — белый, жарко —
+  # оранжевый. Пороги — подстановки slotN_cold / slotN_hot в espha.yaml.
+  # В холодный или жаркий цвет — сразу за порогом, обратно в белый — только
+  # отойдя от порога на 0,3°, чтобы цвет не дёргался на границе.
+  # force: перекрасить, даже если цвет не менялся (после восстановления связи,
+  # когда надписи были серыми)
+  - id: color_temps
+    parameters:
+      force: bool
+    mode: queued
+    max_runs: 3
+    then:
+      - if:
+          condition:
+            api.connected:
+          then:
+            - lambda: |-
+                static int z1 = 1, z2 = 1, shown1 = -1, shown2 = -1;
+                auto zone = [](float v, int z, float cold, float hot) -> int {
+                  const float H = 0.3f;
+                  if (std::isnan(v)) return 1;
+                  if (z == 0 && v >= cold + H) z = 1;
+                  if (z == 2 && v <= hot - H) z = 1;
+                  if (z == 1) {
+                    if (v < cold) z = 0;
+                    else if (v > hot) z = 2;
+                  }
+                  return z;
+                };
+                auto color = [](int z) -> lv_color_t {
+                  if (z == 0) return lv_color_hex(${temp_cold_color});
+                  if (z == 2) return lv_color_hex(${temp_hot_color});
+                  return lv_color_hex(0xFFFFFF);
+                };
+                z1 = zone(id(ha_slot1).state, z1, ${slot1_cold}, ${slot1_hot});
+                z2 = zone(id(ha_slot2).state, z2, ${slot2_cold}, ${slot2_hot});
+                if (force || z1 != shown1) {
+                  shown1 = z1;
+                  lv_obj_set_style_text_color(id(lbl_slot1), color(z1), 0);
+                  lv_obj_set_style_text_color(id(lbl_slot1_card), color(z1), 0);
+                }
+                if (force || z2 != shown2) {
+                  shown2 = z2;
+                  lv_obj_set_style_text_color(id(lbl_slot2), color(z2), 0);
+                  lv_obj_set_style_text_color(id(lbl_slot2_card), color(z2), 0);
+                }
+
+  # Восход и закат: «↑ 6:42   ↓ 18:55». Время приходит из sun.sun в UTC в виде
+  # 2026-09-25T03:42:10.123+00:00 и переводится в местное
+  - id: refresh_sun
+    mode: restart
+    then:
+      - if:
+          condition:
+            api.connected:
+          then:
+            - lvgl.label.update:
+                id: lbl_sun
+                text: !lambda |-
+                  auto local_hm = [](const std::string &iso, int &h, int &m) -> bool {
+                    int Y, Mo, D, hh, mm, ss;
+                    if (sscanf(iso.c_str(), "%d-%d-%dT%d:%d:%d", &Y, &Mo, &D, &hh, &mm, &ss) != 6)
+                      return false;
+                    // Смещение пояса в конце строки: +00:00, +03:00 или Z
+                    int off = 0;
+                    size_t p = iso.find_last_of("+-");
+                    if (p != std::string::npos && p > 10) {
+                      int oh = 0, om = 0;
+                      if (sscanf(iso.c_str() + p + 1, "%d:%d", &oh, &om) >= 1)
+                        off = (oh * 60 + om) * 60 * (iso[p] == '-' ? -1 : 1);
+                    }
+                    // Дни от 1970-01-01 по григорианскому календарю
+                    int y = Y - (Mo <= 2);
+                    int era = (y >= 0 ? y : y - 399) / 400;
+                    int yoe = y - era * 400;
+                    int doy = (153 * (Mo + (Mo > 2 ? -3 : 9)) + 2) / 5 + D - 1;
+                    int doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+                    long days = (long) era * 146097 + doe - 719468;
+                    time_t t = (time_t) (days * 86400L + hh * 3600 + mm * 60 + ss - off);
+                    auto lt = ESPTime::from_epoch_local(t);
+                    h = lt.hour;
+                    m = lt.minute;
+                    return true;
+                  };
+                  int rh, rm, sh, sm;
+                  if (!local_hm(id(ha_sun_rising).state, rh, rm) || !local_hm(id(ha_sun_setting).state, sh, sm))
+                    return std::string("");
+                  char buf[64];
+                  snprintf(buf, sizeof(buf), "\U000F059C %d:%02d     \U000F059B %d:%02d", rh, rm, sh, sm);
+                  return std::string(buf);
 
 sensor:
   # ---- слоты с данными из Home Assistant --------------------------------
@@ -91,6 +170,9 @@ sensor:
             char buf[24];
             snprintf(buf, sizeof(buf), "${slot1_format}", x);
             return std::string(buf);
+      - script.execute:
+          id: color_temps
+          force: false
 
   - platform: homeassistant
     id: ha_slot2
@@ -107,6 +189,9 @@ sensor:
             char buf[24];
             snprintf(buf, sizeof(buf), "${slot2_format}", x);
             return std::string(buf);
+      - script.execute:
+          id: color_temps
+          force: false
 
   # ---- диагностика самого устройства ------------------------------------
   - platform: wifi_signal
@@ -148,6 +233,22 @@ sensor:
     update_interval: 60s
 
 text_sensor:
+  # Ближайшие восход и закат — атрибуты sun.sun
+  - platform: homeassistant
+    id: ha_sun_rising
+    entity_id: sun.sun
+    attribute: next_rising
+    internal: true
+    on_value:
+      - script.execute: refresh_sun
+  - platform: homeassistant
+    id: ha_sun_setting
+    entity_id: sun.sun
+    attribute: next_setting
+    internal: true
+    on_value:
+      - script.execute: refresh_sun
+
   # Диагностика: что реально отвечает на шине I2C.
   # 0x15 — тач CST820, 0x38 — тач FT3168, 0x51 — часы PCF85063,
   # 0x6B — акселерометр QMI8658.
@@ -188,6 +289,17 @@ text_sensor:
         - lvgl.label.update:
             id: lbl_sys_ssid
             text: !lambda 'return x.empty() ? std::string("--") : x;'
+
+binary_sensor:
+  # Входная дверь: пока открыта (on), на часах горит оранжевый значок
+  - platform: homeassistant
+    id: ha_door
+    entity_id: ${door_entity}
+    internal: true
+    on_state:
+      - lvgl.widget.update:
+          id: lbl_door
+          hidden: !lambda 'return !x;'
 
 button:
   - platform: template

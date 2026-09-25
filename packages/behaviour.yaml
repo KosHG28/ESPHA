@@ -60,14 +60,27 @@ script:
       - delay: ${page_dots_timeout}
       - lvgl.widget.hide: page_dots
 
+  - id: splash_timeout
+    mode: single
+    then:
+      - delay: 60s
+      - lvgl.widget.hide: splash
+
   # Вспышка во весь экран о важном событии: экран будится на полную яркость
   # и несколько раз мигает цветом. Цвет и надпись задаёт вызывающая сторона.
+  # Если экран выключен (ночь или никого нет), вспышка не показывается:
+  # будить некого. Страница принтера откроется, когда экран включат
   - id: flash_screen
     parameters:
       color: int
       text: string
     mode: restart
     then:
+      - if:
+          condition:
+            lambda: 'return id(screen_off);'
+          then:
+            - script.stop: flash_screen
       - script.execute: wake_screen
       - lvgl.label.update:
           id: alert_text
@@ -109,8 +122,10 @@ api:
              lbl_time_h, lbl_time_m, lbl_print_pct]
         text_color: 0x555C63
     - lvgl.label.update:
-        id: lbl_date
+        id: lbl_sun
         text: "нет связи с Home Assistant"
+    # Без связи неизвестно, есть ли кто дома, — вернуть обычный режим
+    - script.execute: power_eval
   on_client_connected:
     - lvgl.widget.update:
         id: [lbl_slot1, lbl_slot1_card, lbl_slot2, lbl_slot2_card,
@@ -121,3 +136,9 @@ api:
         text_color: ${time_minutes_color}
     - script.execute: refresh_clock
     - script.execute: printer_arm
+    - script.execute: refresh_sun
+    - script.execute:
+        id: color_temps
+        force: true
+    - script.execute: power_eval
+    - lvgl.widget.hide: splash
