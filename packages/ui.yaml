@@ -64,7 +64,8 @@ font:
     size: 38
     bpp: 4
     glyphsets: [GF_Latin_Kernel, GF_Cyrillic_Core]
-    glyphs: ["°"]
+    # «»—…№ — для сообщений из Home Assistant
+    glyphs: ["°", "«", "»", "—", "…", "№"]
     ignore_missing_glyphs: true
 
   - file: "gfonts://Roboto@400"
@@ -72,7 +73,8 @@ font:
     size: 26
     bpp: 4
     glyphsets: [GF_Latin_Kernel, GF_Cyrillic_Core]
-    glyphs: ["°"]
+    # «»—…№ — для сообщений из Home Assistant
+    glyphs: ["°", "«", "»", "—", "…", "№"]
     ignore_missing_glyphs: true
 
   - file: "gfonts://Roboto@400"
@@ -320,6 +322,35 @@ lvgl:
                 styles: style_caption
                 align: CENTER
                 y: 44
+
+      # Сообщение из Home Assistant: карточка поверх часов. Показывает её
+      # скрипт show_message (packages/message.yaml). Касание закрывает
+      - obj:
+          id: msg_card
+          align: CENTER
+          width: 380
+          height: SIZE_CONTENT
+          radius: 28
+          bg_color: 0x14181D
+          bg_opa: COVER
+          border_width: 3
+          border_color: 0x03A9F4
+          pad_all: 22
+          hidden: true
+          scrollable: false
+          on_click:
+            - script.stop: show_message
+            - lvgl.widget.hide: msg_card
+          widgets:
+            - label:
+                id: msg_label
+                text: ""
+                text_font: font_m
+                text_color: 0xFFFFFF
+                text_align: CENTER
+                align: CENTER
+                width: 330
+                long_mode: WRAP
 
       # Полноэкранная вспышка о событии. Обычно скрыта; показывается скриптом
       # flash_screen. Не кликабельна, чтобы не перехватывать касания.

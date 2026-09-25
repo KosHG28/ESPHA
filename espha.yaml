@@ -61,6 +61,9 @@ substitutions:
   # Сколько ждать после того, как дома никого не осталось (zone.home = 0)
   away_off_delay: 10min
 
+  # Сколько секунд показывать сообщение из Home Assistant
+  message_seconds: "25"
+
   # Через сколько секунд без касаний прятать точки страниц
   page_dots_timeout: 5s
 
@@ -169,6 +172,7 @@ packages:
   entities: !include packages/entities.yaml
   printer: !include packages/printer.yaml
   weather: !include packages/weather.yaml
+  message: !include packages/message.yaml
   ui: !include packages/ui.yaml
   imu: !include packages/imu.yaml
   behaviour: !include packages/behaviour.yaml

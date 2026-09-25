@@ -1,0 +1,102 @@
+# ---------------------------------------------------------------------------
+# Сообщения из Home Assistant на экране.
+#
+# Два способа отправить:
+#   - поле «Сообщение на экран» на странице устройства в HA — вписать текст и
+#     нажать Enter;
+#   - действия в автоматизациях:
+#       esphome.<имя_устройства>_show_message         — message
+#       esphome.<имя_устройства>_show_message_custom  — message, seconds, color
+#
+# Экран просыпается (даже ночью и когда никого нет), переключается на часы, и
+# поверх них появляется карточка с текстом на ${message_seconds} секунд.
+# Касание карточки закрывает её, новое сообщение заменяет предыдущее.
+# ---------------------------------------------------------------------------
+
+text:
+  - platform: template
+    id: msg_text
+    name: Сообщение на экран
+    icon: mdi:message-text-outline
+    mode: text
+    max_length: 100
+    optimistic: true
+    on_value:
+      - script.execute:
+          id: show_message
+          text: !lambda 'return x;'
+          seconds: ${message_seconds}
+          color: ""
+
+api:
+  actions:
+    - action: show_message
+      variables:
+        message: string
+      then:
+        - script.execute:
+            id: show_message
+            text: !lambda 'return message;'
+            seconds: ${message_seconds}
+            color: ""
+    # seconds — сколько показывать (0 — по умолчанию), color — цвет рамки:
+    # red / orange / yellow / green / blue / white, по-русски или #RRGGBB
+    - action: show_message_custom
+      variables:
+        message: string
+        seconds: int
+        color: string
+      then:
+        - script.execute:
+            id: show_message
+            text: !lambda 'return message;'
+            seconds: !lambda 'return seconds > 0 ? seconds : ${message_seconds};'
+            color: !lambda 'return color;'
+
+script:
+  - id: show_message
+    parameters:
+      text: string
+      seconds: int
+      color: string
+    mode: restart
+    then:
+      # Пустой текст — просто убрать карточку
+      - if:
+          condition:
+            lambda: 'return text.empty();'
+          then:
+            - lvgl.widget.hide: msg_card
+            - script.stop: show_message
+      - lambda: |-
+          // Короткое сообщение — крупнее, длинное — помельче, чтобы влезло
+          lv_obj_t *lbl = id(msg_label);
+          lv_label_set_text(lbl, text.c_str());
+          size_t chars = 0;
+          for (unsigned char c : text)
+            if ((c & 0xC0) != 0x80) chars++;  // считаем символы, а не байты UTF-8
+          lv_obj_set_style_text_font(lbl, chars <= 24 ? id(font_l)->get_lv_font() : id(font_m)->get_lv_font(), 0);
+
+          // Цвет рамки: название по-английски или по-русски, либо #RRGGBB
+          std::string c = color;
+          for (auto &ch : c) ch = tolower((unsigned char) ch);
+          uint32_t rgb = 0x03A9F4;
+          if (c == "red" || c == "красный") rgb = 0xFF3333;
+          else if (c == "orange" || c == "оранжевый") rgb = 0xFF9800;
+          else if (c == "yellow" || c == "жёлтый" || c == "желтый") rgb = 0xFFD54F;
+          else if (c == "green" || c == "зелёный" || c == "зеленый") rgb = 0x22DD44;
+          else if (c == "white" || c == "белый") rgb = 0xFFFFFF;
+          else if (c == "blue" || c == "синий") rgb = 0x03A9F4;
+          else if (!c.empty()) {
+            if (c[0] == '#') c.erase(0, 1);
+            if (c.size() == 6 && c.find_first_not_of("0123456789abcdef") == std::string::npos)
+              rgb = strtoul(c.c_str(), nullptr, 16);
+          }
+          lv_obj_set_style_border_color(id(msg_card), lv_color_hex(rgb), 0);
+      # Разбудить экран даже ночью и когда никого нет — раз написали, значит нужно
+      - script.execute: wake_screen
+      - lvgl.page.show:
+          id: page_clock
+      - lvgl.widget.show: msg_card
+      - delay: !lambda 'return (uint32_t) seconds * 1000;'
+      - lvgl.widget.hide: msg_card
