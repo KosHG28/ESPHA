@@ -255,8 +255,10 @@ interval:
           static bool bound = false;
           if (!bound) {
             bound = true;
-            id(wfx)->bind(id(fx_root), id(fx_drops), id(fx_flakes), id(fx_splash), id(fx_clouds), id(fx_stars),
-                          id(fx_bolt)->obj, id(fx_bolt_glow)->obj);
+            // Капли, снежинки, брызги и звёзды рисует холст компонента —
+            // объектами LVGL здесь только облака и молния
+            id(wfx)->bind(id(fx_root), id(fx_clouds), id(fx_bolt)->obj, id(fx_bolt_glow)->obj,
+                          id(font_flake_s)->get_lv_font(), id(font_flake_l)->get_lv_font());
             // За крупными цифрами времени частицы не рисуются: перерисовывать
             // кусок цифры 101 px ради пролетающей капли — самое дорогое.
             // Прямоугольники цифр часов и минут в экранных координатах (с
