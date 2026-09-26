@@ -24,6 +24,13 @@ static const int HAIL_SIZE = 6;
 static const float SPLASH_MS = 250.0f;
 // Снежинки: три формы Noto Sans Symbols 2 и две Material Design Icons
 static const uint32_t FLAKE_CP[5] = {0x2744, 0x2745, 0x2746, 0xF0717, 0xF0F2A};
+// Листья: обычный и кленовый, из Material Design Icons
+static const uint32_t LEAF_CP[2] = {0xF032A, 0xF0C93};
+// Осенние цвета: оранжевый, тёмно-оранжевый, красный, жёлтый
+static const uint32_t LEAF_COLORS[4] = {0xE67E22, 0xD35400, 0xC0392B, 0xF1C40F};
+static const uint32_t LEAF_COLORS_DIM[4] = {0xFFA24D, 0xFF7A26, 0xFF5A4A, 0xFFE04D};
+
+static uint32_t glyph_cp(int set, int i) { return set ? LEAF_CP[(i / 2) % 2] : FLAKE_CP[i % 5]; }
 // Солнце — справа в «шапке» круга, мимо значка двери посередине
 static const int SUN_X = 300, SUN_Y = 74, SUN_R = 40;
 // Созвездие вписывается в «шапку» над строкой погоды: центр и размеры
@@ -102,21 +109,23 @@ void WeatherFx::bind(lv_obj_t *root, lv_obj_t *clouds, lv_obj_t *bolt, lv_obj_t 
   // серединой знака по горизонтали и линией основания по вертикали, так что
   // знак лежит выше и левее точки. Участок к перерисовке должен закрывать его
   // целиком — иначе при сдвиге края знака не стираются и тянутся шлейфом
-  for (int i = 0; i < NF; i++) {
-    const lv_font_t *f = (i % 2) ? flake_l : flake_s;
-    lv_font_glyph_dsc_t g;
-    const int lh = lv_font_get_line_height(f);
-    if (lv_font_get_glyph_dsc(f, &g, FLAKE_CP[i % 5], 0) && g.box_w > 0 && g.box_h > 0) {
-      this->fox_[i] = g.ofs_x - g.adv_w / 2 - 2;
-      this->foy_[i] = -g.box_h - g.ofs_y - 2;
-      this->fw_[i] = g.box_w + 4;
-      this->fh_[i] = g.box_h + 4;
-    } else {
-      // Нет данных о знаке — с большим запасом вокруг точки
-      this->fox_[i] = -lh;
-      this->foy_[i] = -lh;
-      this->fw_[i] = 2 * lh;
-      this->fh_[i] = 2 * lh;
+  for (int set = 0; set < 2; set++) {
+    for (int i = 0; i < NF; i++) {
+      const lv_font_t *f = (i % 2) ? flake_l : flake_s;
+      lv_font_glyph_dsc_t g;
+      const int lh = lv_font_get_line_height(f);
+      if (lv_font_get_glyph_dsc(f, &g, glyph_cp(set, i), 0) && g.box_w > 0 && g.box_h > 0) {
+        this->fox_[set][i] = g.ofs_x - g.adv_w / 2 - 2;
+        this->foy_[set][i] = -g.box_h - g.ofs_y - 2;
+        this->fw_[set][i] = g.box_w + 4;
+        this->fh_[set][i] = g.box_h + 4;
+      } else {
+        // Нет данных о знаке — с большим запасом вокруг точки
+        this->fox_[set][i] = -lh;
+        this->foy_[set][i] = -lh;
+        this->fw_[set][i] = 2 * lh;
+        this->fh_[set][i] = 2 * lh;
+      }
     }
   }
   this->bound_ = true;
@@ -368,19 +377,23 @@ void WeatherFx::paint_front(lv_layer_t *layer) {
     lv_draw_fill(layer, &fill, &abs);
   }
 
-  // Снежинки
+  // Снежинки или листья
   lv_draw_letter_dsc_t let;
   lv_draw_letter_dsc_init(&let);
   let.opa = LV_OPA_COVER;
+  const int set = this->leaves_ ? 1 : 0;
   for (int i = 0; i < NF; i++) {
     if (!place(this->fs_[i]))
       continue;
     const bool big = i % 2;
     let.font = big ? this->font_l_ : this->font_s_;
-    let.color = big ? this->c_flake_l_ : this->c_flake_s_;
-    let.unicode = FLAKE_CP[i % 5];
+    if (set)
+      let.color = big ? this->c_leaf_[(i / 2) % 4] : this->c_leaf_s_[(i / 2) % 4];
+    else
+      let.color = big ? this->c_flake_l_ : this->c_flake_s_;
+    let.unicode = glyph_cp(set, i);
     // Обратно из прямоугольника знака к точке рисования
-    lv_point_t pt = {abs.x1 - this->fox_[i], abs.y1 - this->foy_[i]};
+    lv_point_t pt = {abs.x1 - this->fox_[set][i], abs.y1 - this->foy_[set][i]};
     lv_draw_letter(layer, &let, &pt);
   }
 
@@ -443,7 +456,8 @@ void WeatherFx::apply_(const Params &p, bool relayout) {
   // Град всегда падает
   this->glass_on_ = !this->hail_ && p.rain_style == 0;
   this->nd_ = (p.mode == 1 || p.mode == 4) ? cnt : (p.mode == 3 ? cnt / 2 : 0);
-  this->nf_ = std::min(p.mode == 2 ? cnt : (p.mode == 3 ? cnt / 2 : 0), NF);
+  this->nf_ = std::min(p.mode == 2 || p.mode == 5 ? cnt : (p.mode == 3 ? cnt / 2 : 0), NF);
+  this->leaves_ = p.mode == 5;
   this->ncl_ = std::min(std::max(p.clouds, 0), NC);
   this->storm_ = p.storm;
   if (p.stars && !this->stars_on_)
@@ -474,6 +488,11 @@ void WeatherFx::apply_(const Params &p, bool relayout) {
   this->c_splash_ = lv_color_hex(dim ? 0x7FD4FF : 0x2A6F99);
   this->c_flake_s_ = lv_color_hex(dim ? 0xAEB8C2 : 0x59636D);
   this->c_flake_l_ = lv_color_hex(dim ? 0xFFFFFF : 0x9AA4AE);
+  // Листья: ближние — яркие, дальние — притушенные
+  for (int k = 0; k < 4; k++) {
+    this->c_leaf_[k] = lv_color_hex(dim ? LEAF_COLORS_DIM[k] : LEAF_COLORS[k]);
+    this->c_leaf_s_[k] = lv_color_mix(this->c_leaf_[k], lv_color_black(), dim ? 190 : 140);
+  }
 
   if (relayout) {
     // Новая погода — всё с чистого листа
@@ -708,17 +727,26 @@ void WeatherFx::flakes_(float wind, float ks) {
     const float k = big ? this->k_ : ks;
     if (k <= 0)
       continue;
-    this->fy_[i] += k * (big ? 1.7f + (i % 3) * 0.25f : 0.8f + (i % 3) * 0.2f);
-    this->fph_[i] += k * ((big ? 0.07f : 0.05f) + i * 0.003f);
-    this->fx_[i] =
-        wrap_x(this->fx_[i] + k * (cosf(this->fph_[i]) * (big ? 0.8f : 0.45f) + wind * (big ? 1.4f : 0.9f)));
+    if (this->leaves_) {
+      // Листья падают медленнее, раскачиваются шире и сильнее летят по ветру
+      this->fy_[i] += k * (big ? 1.1f + (i % 3) * 0.2f : 0.6f + (i % 3) * 0.15f);
+      this->fph_[i] += k * ((big ? 0.10f : 0.08f) + i * 0.004f);
+      this->fx_[i] =
+          wrap_x(this->fx_[i] + k * (cosf(this->fph_[i]) * (big ? 1.5f : 0.9f) + wind * (big ? 2.6f : 1.8f)));
+    } else {
+      this->fy_[i] += k * (big ? 1.7f + (i % 3) * 0.25f : 0.8f + (i % 3) * 0.2f);
+      this->fph_[i] += k * ((big ? 0.07f : 0.05f) + i * 0.003f);
+      this->fx_[i] =
+          wrap_x(this->fx_[i] + k * (cosf(this->fph_[i]) * (big ? 0.8f : 0.45f) + wind * (big ? 1.4f : 0.9f)));
+    }
     if (this->fy_[i] > 470) {
       this->fy_[i] = -30 - rnd_(0, 40);
       this->fx_[i] = rnd_(30, 430);
     }
-    const int x = (int) this->fx_[i] + this->fox_[i], y = (int) this->fy_[i] + this->foy_[i];
-    this->mark_(this->fs_[i], !this->excluded_(x, y, this->fw_[i], this->fh_[i]), x, y, this->fw_[i],
-                this->fh_[i]);
+    const int set = this->leaves_ ? 1 : 0;
+    const int w = this->fw_[set][i], h = this->fh_[set][i];
+    const int x = (int) this->fx_[i] + this->fox_[set][i], y = (int) this->fy_[i] + this->foy_[set][i];
+    this->mark_(this->fs_[i], !this->excluded_(x, y, w, h), x, y, w, h);
   }
 }
 

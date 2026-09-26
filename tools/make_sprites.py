@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
-"""Рисует пиксельные спрайты «гостей» экрана (кот, птица, улитка, снеговик)
-и записывает их в components/critters/sprites.h как изображения LVGL
-(ARGB8888). Запуск: python3 tools/make_sprites.py [папка_для_png]
+"""Рисует пиксельные спрайты «гостей» экрана (кот, птица, улитка, снеговик,
+праздничный колпак) и записывает их в components/critters/sprites.h как
+изображения LVGL (ARGB8888). Запуск: python3 tools/make_sprites.py [папка_для_png]
+
+Колпак — отдельная картинка: в праздники она едет поверх кота. Для каждого
+кадра кота записывается точка на макушке между ушами (HAT_ANCHORS), куда
+ставится середина нижнего края колпака.
 
 Спрайты рисуются примитивами без сглаживания в маленькой сетке и
 увеличиваются в SCALE раз «по пикселям» — получается пиксель-арт.
@@ -169,6 +173,32 @@ def snowman(arms_up):
     return im
 
 
+def party_hat():
+    """Праздничный колпак: розовый конус с жёлтыми полосками и помпоном."""
+    im = canvas(8, 10)
+    d = ImageDraw.Draw(im)
+    d.polygon([(4, 2), (1, 9), (7, 9)], fill=(236, 64, 122, 255))
+    d.line([3, 5, 5, 5], fill=(255, 213, 79, 255))
+    d.line([2, 7, 6, 7], fill=(255, 213, 79, 255))
+    d.ellipse([3, 0, 5, 2], fill=(255, 255, 255, 255))
+    return im
+
+
+# Макушка кота в каждом кадре (в клетках исходной сетки 26×16): середина между
+# кончиками ушей и верх головы. Для отражённых кадров x = 26 − x
+def hat_anchors():
+    a = {}
+    for p in range(4):
+        bob = [0, -1, 0, 1][p]
+        a[f"cat_run_r{p}"] = (21.0, 3 + bob)
+        a[f"cat_run_l{p}"] = (26 - 21.0, 3 + bob)
+    for name in ("cat_sit", "cat_blink"):
+        a[f"{name}_r"] = (16.0, 2)
+        a[f"{name}_l"] = (26 - 16.0, 2)
+    a["cat_sleep"] = (20.0, 6)
+    return a
+
+
 def scaled(im, k):
     return im.resize((im.width * k, im.height * k), Image.NEAREST)
 
@@ -192,6 +222,7 @@ def sprites():
         out[f"bird_l{up}"] = mirrored(bird(up))
         out[f"snail_l{up}"] = mirrored(snail(up))
         out[f"snowman{up}"] = snowman(up)
+    out["cat_hat"] = party_hat()
     return {k: scaled(v, SCALE_CAT if k.startswith("cat") else SCALE_OTHER) for k, v in out.items()}
 
 
@@ -224,6 +255,13 @@ def main():
         for k, v in sp.items():
             v.save(dst / f"{k}.png")
     body = "\n".join(c_array(f"spr_{k}", v) for k, v in sp.items())
+    rows = [f"    {{&spr_{k}, {round(x * SCALE_CAT)}, {round(y * SCALE_CAT)}}},"
+            for k, (x, y) in hat_anchors().items()]
+    body += (
+        "\n// Куда ставить колпак: середина его нижнего края, в пикселях спрайта\n"
+        "struct HatAnchor {\n  const lv_image_dsc_t *img;\n  int16_t x, y;\n};\n"
+        "static const HatAnchor HAT_ANCHORS[] = {\n" + "\n".join(rows) + "\n};\n"
+    )
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(
         "// Сгенерировано tools/make_sprites.py — не править вручную.\n"

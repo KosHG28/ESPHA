@@ -21,8 +21,12 @@ enum Show : uint8_t {
 
 class Critters : public Component {
  public:
-  /// Картинка и надпись «z z z» на верхнем слое LVGL (packages/critters.yaml)
-  void bind(lv_obj_t *img, lv_obj_t *zzz);
+  /// Картинка гостя, надпись «z z z» и колпак на верхнем слое LVGL
+  /// (packages/critters.yaml)
+  void bind(lv_obj_t *img, lv_obj_t *zzz, lv_obj_t *hat);
+
+  /// Праздник (Новый год, день рождения): кот приходит чаще и в колпаке
+  void set_festive(bool festive);
 
   /// Вызвать гостя сейчас. SHOW_NONE — случайный, с учётом ночи и зимы
   void start(Show show);
@@ -45,7 +49,8 @@ class Critters : public Component {
   void place_(const lv_image_dsc_t *img, int x, int y);
   static int rnd_(int lo, int hi);
 
-  lv_obj_t *img_{nullptr}, *zzz_{nullptr};
+  lv_obj_t *img_{nullptr}, *zzz_{nullptr}, *hat_{nullptr};
+  bool festive_{false};
   const lv_image_dsc_t *shown_img_{nullptr};
   Show show_{SHOW_NONE};
   bool winter_{false};
