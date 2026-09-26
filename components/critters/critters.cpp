@@ -19,6 +19,10 @@ static const float BIRD_SPEED = 0.20f;
 static const float SNAIL_SPEED = 0.016f;
 static const float SNOWMAN_SPEED = 0.04f;
 static const uint32_t SLEEP_MS = 120000;  // кот спит 2 минуты
+static const uint32_t OWL_MS = 20000;     // сова сидит 20 секунд
+static const uint32_t PUMPKIN_MS = 120000;  // тыква стоит 2 минуты
+static const float BUTTERFLY_SPEED = 0.06f;
+static const float HEDGEHOG_SPEED = 0.03f;
 static const int OFF_L = -110, OFF_R = 480;  // за краем экрана
 static const int CENTER_X = 233 - CAT_W / 2;
 static const uint32_t MEOW_MS = 1600;  // сколько кот сидит и мяукает после касания
@@ -165,8 +169,30 @@ void Critters::start(Show show) {
       this->y_ = SKY_Y + rnd_(0, 30);
       break;
     case SHOW_SNAIL:
+      if (this->winter_)
+        this->show_ = SHOW_SNOWMAN;
       this->right_ = false;  // улитка нарисована ползущей влево
-      this->y_ = this->winter_ ? GROUND - 66 : GROUND - 36;
+      this->y_ = this->show_ == SHOW_SNOWMAN ? GROUND - 66 : GROUND - 36;
+      break;
+    case SHOW_SNOWMAN:
+      this->right_ = false;
+      this->y_ = GROUND - 66;
+      break;
+    case SHOW_HEDGEHOG:
+      this->right_ = false;  // ёжик нарисован идущим влево
+      this->y_ = GROUND - 39;
+      break;
+    case SHOW_BUTTERFLY:
+      this->y_ = 250 + rnd_(0, 60);
+      break;
+    case SHOW_OWL:
+      // На ветке у левого края круга, чуть выше середины
+      this->x_ = 20;
+      this->y_ = 170;
+      break;
+    case SHOW_PUMPKIN:
+      this->x_ = 233 - 24;
+      this->y_ = GROUND - 42;
       break;
     case SHOW_CAT_SLEEP:
       this->x_ = CENTER_X;
@@ -176,7 +202,7 @@ void Critters::start(Show show) {
       this->y_ = GROUND - CAT_H;
       break;
   }
-  if (show != SHOW_CAT_SLEEP)
+  if (show != SHOW_CAT_SLEEP && show != SHOW_OWL && show != SHOW_PUMPKIN)
     this->x_ = this->right_ ? OFF_L : OFF_R;
   lv_obj_clear_flag(this->img_, LV_OBJ_FLAG_HIDDEN);
 }
@@ -264,10 +290,18 @@ void Critters::frame(bool can_show, bool night, bool winter) {
     } else if (r < 70) {
       this->start_cat();
       return;
-    } else if (r < 85)
-      s = SHOW_BIRD;
-    else
-      s = SHOW_SNAIL;
+    } else if (r < 85) {
+      // Ночью вместо птицы — сова, летом днём — иногда бабочка
+      const bool summer = this->month_ >= 6 && this->month_ <= 8;
+      s = night ? SHOW_OWL : (summer && rnd_(0, 2) ? SHOW_BUTTERFLY : SHOW_BIRD);
+    } else {
+      // Осенью вместо улитки — ёжик, зимой — снеговик
+      const bool autumn = this->month_ >= 9 && this->month_ <= 11;
+      s = autumn ? SHOW_HEDGEHOG : SHOW_SNAIL;
+    }
+    // На Хэллоуин чаще всего выходит тыква
+    if (this->month_ == 10 && this->day_ == 31 && !this->festive_ && rnd_(0, 10) < 6)
+      s = SHOW_PUMPKIN;
     this->start(s);
     return;
   }
@@ -354,8 +388,9 @@ void Critters::frame(bool can_show, bool night, bool winter) {
         this->stop_();
       break;
     }
-    case SHOW_SNAIL: {
-      if (this->winter_) {
+    case SHOW_SNAIL:
+    case SHOW_SNOWMAN: {
+      if (this->show_ == SHOW_SNOWMAN) {
         // Снеговик: переваливается и машет руками
         this->x_ -= SNOWMAN_SPEED * dt;
         bool up = (t / 400) % 2;
@@ -367,6 +402,41 @@ void Critters::frame(bool can_show, bool night, bool winter) {
         this->place_(up ? &spr_snail_l1 : &spr_snail_l0, (int) this->x_, (int) this->y_);
       }
       if (this->x_ < OFF_L)
+        this->stop_();
+      break;
+    }
+    case SHOW_OWL: {
+      // Сидит, моргает раз в пару секунд и один раз ухает
+      const bool blink = (t % 2600) > 2400;
+      this->place_(blink ? &spr_owl1 : &spr_owl0, (int) this->x_, (int) this->y_);
+      this->say_(t > 3000 && t < 5500 ? "угу" : nullptr);
+      if (this->said_ && this->zzz_)
+        lv_obj_set_pos(this->zzz_, (int) this->x_ + 40, (int) this->y_ - 30);
+      if (t > OWL_MS)
+        this->stop_();
+      break;
+    }
+    case SHOW_BUTTERFLY: {
+      // Порхает: крылья хлопают, полёт волной и чуть вверх-вниз
+      this->x_ += dir * BUTTERFLY_SPEED * dt;
+      const float yy = this->y_ + 30.0f * sinf(t * 0.0025f) + 6.0f * sinf(t * 0.013f);
+      this->place_((t / 110) % 2 ? &spr_butterfly1 : &spr_butterfly0, (int) this->x_, (int) yy);
+      if (off_screen())
+        this->stop_();
+      break;
+    }
+    case SHOW_HEDGEHOG: {
+      this->x_ -= HEDGEHOG_SPEED * dt;
+      this->place_((t / 260) % 2 ? &spr_hedgehog1 : &spr_hedgehog0, (int) this->x_, (int) this->y_);
+      if (this->x_ < OFF_L)
+        this->stop_();
+      break;
+    }
+    case SHOW_PUMPKIN: {
+      // Глаза и рот то горят, то гаснут — как свеча внутри
+      const bool lit = ((t / 180) % 7) != 3 && ((t / 180) % 11) != 5;
+      this->place_(lit ? &spr_pumpkin1 : &spr_pumpkin0, (int) this->x_, (int) this->y_);
+      if (t > PUMPKIN_MS)
         this->stop_();
       break;
     }

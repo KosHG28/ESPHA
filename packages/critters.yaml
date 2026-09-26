@@ -15,7 +15,11 @@
 # пролетает метеор. Когда печать закончилась, кот прибегает посмотреть на
 # принтер и мурчит.
 # Позвать кота: кнопка «Позвать кота» в Home Assistant или пять быстрых
-# касаний по странице часов.
+# касаний по странице часов. Любого гостя — выбор «Позвать гостя».
+#
+# Сезонные гости: ночью вместо птицы прилетает сова и сидит на ветке у края,
+# летом днём иногда порхает бабочка, осенью вместо улитки идёт ёжик с листом
+# на спине, на Хэллоуин (31 октября) внизу стоит тыква с мерцающими глазами.
 #
 # Анимацию ведёт компонент components/critters (C++), спрайты рисует
 # tools/make_sprites.py. Гость — одна маленькая картинка, так что за кадр
@@ -69,12 +73,41 @@ interval:
             checked = millis();
             auto now = id(ha_time).now();
             winter = now.is_valid() && (now.month == 12 || now.month <= 2);
+            if (now.is_valid())
+              id(crit)->set_date(now.month, now.day_of_month);
           }
           id(crit)->set_festive(id(festive_day));
           // Дождь, мокрый снег и град — кот под зонтиком; снег — ловит снежинку
           const int m = id(weather_mode);
           id(crit)->set_weather(m == 1 || m == 3 || m == 4 ? 1 : (m == 2 ? 2 : 0), id(weather_stars));
           id(crit)->frame(!id(screen_off), id(is_night), winter);
+
+select:
+  # Позвать любого гостя сейчас — посмотреть, не дожидаясь случая
+  - platform: template
+    id: guest_select
+    name: Позвать гостя
+    icon: mdi:paw
+    options: ["—", "Кот", "Птица", "Улитка", "Снеговик", "Сова", "Бабочка", "Ёжик", "Тыква"]
+    initial_option: "—"
+    optimistic: true
+    on_value:
+      - if:
+          condition:
+            lambda: 'return i > 0;'
+          then:
+            - script.execute: wake_screen
+            - lambda: |-
+                using namespace critters;
+                static const Show SHOWS[] = {SHOW_NONE, SHOW_CAT_RUN, SHOW_BIRD, SHOW_SNAIL, SHOW_SNOWMAN,
+                                             SHOW_OWL, SHOW_BUTTERFLY, SHOW_HEDGEHOG, SHOW_PUMPKIN};
+                if (i == 1)
+                  id(crit)->start_cat();
+                else if (i < sizeof(SHOWS) / sizeof(SHOWS[0]))
+                  id(crit)->start(SHOWS[i]);
+            - select.set:
+                id: guest_select
+                option: "—"
 
 button:
   - platform: template

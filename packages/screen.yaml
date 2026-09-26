@@ -98,6 +98,34 @@ switch:
     on_turn_off:
       - script.execute: apply_dim
 
+  # Ночью (солнце за горизонтом) цифры времени тёплого янтарного цвета —
+  # меньше режут глаза в темноте
+  - platform: template
+    id: sw_warm_night
+    name: Тёплые часы ночью
+    icon: mdi:weather-night
+    entity_category: config
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    on_turn_on:
+      - script.execute: clock_colors
+    on_turn_off:
+      - script.execute: clock_colors
+
+  # Яркость по солнцу: днём — как в «Яркости экрана», вечером и ночью тусклее,
+  # до 45 % от неё, по высоте солнца из sun.sun
+  - platform: template
+    id: sw_sun_bri
+    name: Яркость по солнцу (вечером тусклее)
+    icon: mdi:theme-light-dark
+    entity_category: config
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    on_turn_on:
+      - script.execute: sun_brightness
+    on_turn_off:
+      - script.execute: sun_brightness
+
   - platform: template
     id: sw_night_off
     name: Гасить экран ночью
@@ -123,6 +151,17 @@ switch:
       - script.execute: power_eval
 
 sensor:
+  # Высота солнца над горизонтом, градусы — для «Яркости по солнцу»
+  - platform: homeassistant
+    id: ha_sun_elev
+    entity_id: sun.sun
+    attribute: elevation
+    internal: true
+    filters:
+      - delta: 0.5
+    on_value:
+      - script.execute: sun_brightness
+
   # Сколько людей в зоне «Дом». 0 — никого: через away_off_delay экран
   # гаснет полностью. Кто-то вернулся — включается сразу
   - platform: homeassistant
@@ -173,6 +212,11 @@ globals:
     type: int
     restore_value: false
     initial_value: '180'
+  # Множитель яркости по высоте солнца: 1 днём … 0,45 ночью
+  - id: bri_factor
+    type: float
+    restore_value: false
+    initial_value: '1.0'
   # За сколько миллисекунд разгораться при пробуждении
   - id: wake_fade_ms
     type: int
@@ -214,7 +258,8 @@ script:
       # ожидании могли быть приглушены)
       - lambda: |-
           id(screen_dimmed) = false;
-          id(fade_screen)->execute((int) (id(screen_brightness).state * 2.55f + 0.5f), 255, id(wake_fade_ms));
+          const float pct = std::max(5.0f, id(screen_brightness).state * id(bri_factor));
+          id(fade_screen)->execute((int) (pct * 2.55f + 0.5f), 255, id(wake_fade_ms));
       - if:
           condition:
             lambda: 'return id(screen_timeout).state > 0;'
@@ -251,7 +296,8 @@ script:
       - lambda: |-
           if (!id(screen_dimmed) || id(screen_off))
             return;
-          float full = id(screen_brightness).state, dim = id(screen_dim).state;
+          float full = std::max(5.0f, id(screen_brightness).state * id(bri_factor));
+          float dim = std::min(id(screen_dim).state, full);
           // Затухает плавно, за секунду
           if (id(sw_fx_bright).state && dim > 0 && full > dim) {
             float k = std::max(0.08f, dim / full);
@@ -348,6 +394,41 @@ script:
             });
             lv_anim_start(&c);
           }
+
+  # Пересчитать множитель яркости по солнцу и плавно, за 3 секунды, перейти
+  # к новой яркости, если экран сейчас горит
+  - id: sun_brightness
+    mode: restart
+    then:
+      - lambda: |-
+          float f = 1.0f;
+          const float e = id(ha_sun_elev).state;
+          if (id(sw_sun_bri).state && !std::isnan(e))
+            f = e >= 8.0f ? 1.0f : (e <= -6.0f ? 0.45f : 0.45f + 0.55f * (e + 6.0f) / 14.0f);
+          if (std::fabs(f - id(bri_factor)) < 0.01f)
+            return;
+          id(bri_factor) = f;
+          if (id(screen_off))
+            return;
+          if (id(screen_dimmed)) {
+            id(apply_dim)->execute();
+          } else {
+            const float pct = std::max(5.0f, id(screen_brightness).state * f);
+            id(fade_screen)->execute((int) (pct * 2.55f + 0.5f), 255, 3000);
+          }
+
+  # Цвет цифр времени: ночью с «Тёплыми часами» — янтарный, иначе обычный.
+  # Без связи с HA цифры серые (их красит behaviour.yaml) — не трогаем
+  - id: clock_colors
+    mode: queued
+    max_runs: 2
+    then:
+      - lambda: |-
+          if (!api::global_api_server->is_connected())
+            return;
+          const bool warm = id(sw_warm_night).state && id(is_night);
+          lv_obj_set_style_text_color(id(lbl_time_h), lv_color_hex(warm ? 0xFFD2A0 : 0xFFFFFF), 0);
+          lv_obj_set_style_text_color(id(lbl_time_m), lv_color_hex(warm ? 0xDDA66A : ${time_minutes_color}), 0);
 
   # Плавный переход яркости панели (bri, 0..255) и прозрачности надписей на
   # часах (opa, 0..255) за ms миллисекунд. Идёт анимацией LVGL, в такт с

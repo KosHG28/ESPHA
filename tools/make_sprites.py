@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Рисует пиксельные спрайты «гостей» экрана (кот, птица, улитка, снеговик,
+сова, бабочка, ёжик, тыква,
 праздничный колпак, зонтик, снежинка) и записывает их в components/critters/sprites.h как
 изображения LVGL (ARGB8888). Запуск: python3 tools/make_sprites.py [папка_для_png]
 
@@ -239,6 +240,104 @@ def hat_anchors():
     return a
 
 
+def owl(blink):
+    """Сова сидит на ветке: большие жёлтые глаза, ушки-перья."""
+    im = canvas(14, 18)
+    d = ImageDraw.Draw(im)
+    body = (140, 110, 80, 255)
+    dark = (95, 72, 50, 255)
+    belly = (205, 180, 140, 255)
+    d.ellipse([1, 3, 12, 16], fill=body)
+    d.polygon([(1, 5), (2, 0), (5, 3)], fill=body)
+    d.polygon([(12, 5), (11, 0), (8, 3)], fill=body)
+    d.ellipse([4, 9, 9, 16], fill=belly)
+    for y in (11, 13):
+        d.point((5, y), fill=dark)
+        d.point((8, y), fill=dark)
+    if blink:
+        d.line([2, 6, 5, 6], fill=dark)
+        d.line([8, 6, 11, 6], fill=dark)
+    else:
+        d.ellipse([2, 4, 6, 8], fill=(255, 214, 79, 255))
+        d.ellipse([7, 4, 11, 8], fill=(255, 214, 79, 255))
+        d.point((4, 6), fill=EYE)
+        d.point((9, 6), fill=EYE)
+    d.polygon([(6, 8), (7, 8), (6, 10)], fill=(255, 150, 40, 255))
+    # ветка и лапки
+    d.line([0, 17, 13, 17], fill=(110, 80, 50, 255))
+    d.point((5, 16), fill=(255, 150, 40, 255))
+    d.point((8, 16), fill=(255, 150, 40, 255))
+    return im
+
+
+def butterfly(open_):
+    """Бабочка: крылья раскрыты или сложены."""
+    im = canvas(14, 10)
+    d = ImageDraw.Draw(im)
+    w1 = (255, 145, 0, 255)
+    w2 = (156, 39, 176, 255)
+    if open_:
+        d.ellipse([0, 0, 6, 5], fill=w1)
+        d.ellipse([7, 0, 13, 5], fill=w1)
+        d.ellipse([1, 5, 6, 9], fill=w2)
+        d.ellipse([7, 5, 12, 9], fill=w2)
+        d.point((3, 2), fill=(255, 235, 150, 255))
+        d.point((10, 2), fill=(255, 235, 150, 255))
+    else:
+        d.ellipse([4, 0, 6, 6], fill=w1)
+        d.ellipse([7, 0, 9, 6], fill=w1)
+        d.ellipse([4, 5, 6, 8], fill=w2)
+        d.ellipse([7, 5, 9, 8], fill=w2)
+    d.line([6, 2, 6, 8], fill=(40, 30, 30, 255))
+    d.line([7, 2, 7, 8], fill=(40, 30, 30, 255))
+    d.point((5, 0), fill=(40, 30, 30, 255))
+    d.point((8, 0), fill=(40, 30, 30, 255))
+    return im
+
+
+def hedgehog(step):
+    """Ёжик идёт влево, на иголках — осенний лист."""
+    im = canvas(20, 13)
+    d = ImageDraw.Draw(im)
+    spikes = (110, 85, 65, 255)
+    tip = (70, 55, 45, 255)
+    face = (205, 170, 130, 255)
+    d.ellipse([4, 3, 19, 11], fill=spikes)
+    for x in range(5, 19, 2):
+        d.point((x, 3), fill=tip)
+        d.point((x + 1, 2), fill=tip)
+    d.line([19, 6, 19, 9], fill=tip)
+    d.polygon([(5, 6), (0, 9), (5, 11)], fill=face)
+    d.point((0, 9), fill=EYE)
+    d.point((3, 7), fill=EYE)
+    # лист на спине
+    d.polygon([(10, 1), (14, 0), (15, 3), (11, 3)], fill=(230, 110, 30, 255))
+    d.line([11, 3, 14, 0], fill=(180, 70, 20, 255))
+    feet = [(7, 12), (15, 12)] if step else [(8, 12), (14, 12)]
+    for x, y in feet:
+        d.point((x, y), fill=face)
+        d.point((x + 1, y), fill=face)
+    return im
+
+
+def pumpkin(lit):
+    """Тыква на Хэллоуин: светящиеся или тёмные глаза и рот."""
+    im = canvas(16, 14)
+    d = ImageDraw.Draw(im)
+    orange = (245, 124, 0, 255)
+    ridge = (200, 90, 0, 255)
+    glow = (255, 230, 90, 255) if lit else (120, 50, 0, 255)
+    d.ellipse([0, 2, 15, 13], fill=orange)
+    d.line([5, 3, 4, 12], fill=ridge)
+    d.line([10, 3, 11, 12], fill=ridge)
+    d.rectangle([7, 0, 8, 2], fill=(90, 140, 40, 255))
+    d.polygon([(3, 5), (6, 5), (4, 8)], fill=glow)
+    d.polygon([(9, 5), (12, 5), (11, 8)], fill=glow)
+    d.polygon([(3, 9), (12, 9), (10, 11), (5, 11)], fill=glow)
+    d.point((7, 10), fill=orange)
+    return im
+
+
 def scaled(im, k):
     return im.resize((im.width * k, im.height * k), Image.NEAREST)
 
@@ -266,6 +365,11 @@ def sprites():
         out[f"bird_l{up}"] = mirrored(bird(up))
         out[f"snail_l{up}"] = mirrored(snail(up))
         out[f"snowman{up}"] = snowman(up)
+    for f in (0, 1):
+        out[f"owl{f}"] = owl(f)
+        out[f"butterfly{f}"] = butterfly(f == 0)
+        out[f"hedgehog{f}"] = hedgehog(f)
+        out[f"pumpkin{f}"] = pumpkin(f == 1)
     out["cat_hat"] = party_hat()
     out["cat_umbrella"] = umbrella()
     out["flake"] = snowflake()
