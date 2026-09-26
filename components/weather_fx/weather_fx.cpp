@@ -60,11 +60,26 @@ void WeatherFx::bind(lv_obj_t *root, lv_obj_t *clouds, lv_obj_t *bolt, lv_obj_t 
   lv_obj_add_event_cb(pt, paint_cb, LV_EVENT_DRAW_MAIN, this);
   this->paint_ = pt;
 
-  // Размеры знаков снежинок — для отметки участков к перерисовке
+  // Где именно рисуется знак снежинки. lv_draw_letter считает точку
+  // серединой знака по горизонтали и линией основания по вертикали, так что
+  // знак лежит выше и левее точки. Участок к перерисовке должен закрывать его
+  // целиком — иначе при сдвиге края знака не стираются и тянутся шлейфом
   for (int i = 0; i < NF; i++) {
     const lv_font_t *f = (i % 2) ? flake_l : flake_s;
-    this->fw_[i] = lv_font_get_glyph_width(f, FLAKE_CP[i % 5], 0) + 2;
-    this->fh_[i] = lv_font_get_line_height(f) + 2;
+    lv_font_glyph_dsc_t g;
+    const int lh = lv_font_get_line_height(f);
+    if (lv_font_get_glyph_dsc(f, &g, FLAKE_CP[i % 5], 0) && g.box_w > 0 && g.box_h > 0) {
+      this->fox_[i] = g.ofs_x - g.adv_w / 2 - 2;
+      this->foy_[i] = -g.box_h - g.ofs_y - 2;
+      this->fw_[i] = g.box_w + 4;
+      this->fh_[i] = g.box_h + 4;
+    } else {
+      // Нет данных о знаке — с большим запасом вокруг точки
+      this->fox_[i] = -lh;
+      this->foy_[i] = -lh;
+      this->fw_[i] = 2 * lh;
+      this->fh_[i] = 2 * lh;
+    }
   }
   this->bound_ = true;
   this->applied_ = -1;
@@ -212,7 +227,8 @@ void WeatherFx::paint(lv_layer_t *layer) {
     let.font = big ? this->font_l_ : this->font_s_;
     let.color = big ? this->c_flake_l_ : this->c_flake_s_;
     let.unicode = FLAKE_CP[i % 5];
-    lv_point_t pt = {abs.x1 + 1, abs.y1 + 1};
+    // Обратно из прямоугольника знака к точке рисования
+    lv_point_t pt = {abs.x1 - this->fox_[i], abs.y1 - this->foy_[i]};
     lv_draw_letter(layer, &let, &pt);
   }
 }
@@ -414,13 +430,12 @@ void WeatherFx::drops_(float wind) {
   }
 }
 
-void WeatherFx::glass_() {
-  const float k = this->k_;
+void WeatherFx::glass_(float k, float dt) {
   for (int i = 0; i < this->nd_; i++) {
     const int sz = 4 + 2 * (i % 3);
     if (this->gst_[i] == 0) {
       // Ждёт своей очереди
-      this->glife_[i] -= this->dt_ms_;
+      this->glife_[i] -= dt;
       if (this->glife_[i] > 0)
         continue;
       int x, y, tries = 0;
@@ -439,7 +454,7 @@ void WeatherFx::glass_() {
       this->mark_(this->ds_[i], true, x, y, sz, sz);
       continue;
     }
-    this->gt_[i] += this->dt_ms_;
+    this->gt_[i] += dt;
     bool gone = this->gt_[i] > this->glife_[i];
     if (!gone && this->gslide_[i] > 0 && this->gt_[i] > this->gslide_[i]) {
       // Сползает ~25 px/с — медленно, без мерцания
@@ -475,12 +490,15 @@ void WeatherFx::splashes_() {
   }
 }
 
-void WeatherFx::flakes_(float wind) {
+void WeatherFx::flakes_(float wind, float ks) {
   // Крупные снежинки падают быстрее и качаются сильнее — так получается
-  // глубина. У каждой свой ритм покачивания
+  // глубина. У каждой свой ритм покачивания. Мелкие медленные, их двигаем
+  // только на редких тиках (ks > 0)
   for (int i = 0; i < this->nf_; i++) {
     const bool big = i % 2;
-    const float k = this->k_;
+    const float k = big ? this->k_ : ks;
+    if (k <= 0)
+      continue;
     this->fy_[i] += k * (big ? 1.7f + (i % 3) * 0.25f : 0.8f + (i % 3) * 0.2f);
     this->fph_[i] += k * ((big ? 0.07f : 0.05f) + i * 0.003f);
     this->fx_[i] =
@@ -489,18 +507,19 @@ void WeatherFx::flakes_(float wind) {
       this->fy_[i] = -30 - rnd_(0, 40);
       this->fx_[i] = rnd_(30, 430);
     }
-    const int x = (int) this->fx_[i], y = (int) this->fy_[i];
+    const int x = (int) this->fx_[i] + this->fox_[i], y = (int) this->fy_[i] + this->foy_[i];
     this->mark_(this->fs_[i], !this->excluded_(x, y, this->fw_[i], this->fh_[i]), x, y, this->fw_[i],
                 this->fh_[i]);
   }
 }
 
 void WeatherFx::clouds_() {
-  // Облака медленно ползут вправо, у каждого своя скорость. Сдвигаем только
-  // когда меняется целый пиксель — иначе LVGL зря пересчитывает раскладку
+  // Облака медленно ползут вправо (2–3 px/с), у каждого своя скорость.
+  // Сдвигаем только когда меняется целый пиксель: каждый сдвиг перерисовывает
+  // всё облако целиком, поэтому чем медленнее, тем дешевле
   for (int i = 0; i < this->ncl_; i++) {
     const int before = (int) this->cx_[i];
-    this->cx_[i] += this->k_ * (0.25f + i * 0.08f);
+    this->cx_[i] += this->k_ * (0.10f + i * 0.03f);
     if (this->cx_[i] > 466)
       this->cx_[i] = -190;
     if ((int) this->cx_[i] != before)
@@ -685,15 +704,22 @@ void WeatherFx::frame(const Params &p) {
   this->last_ms_ = now;
   this->dt_ms_ = (float) dt;
   this->k_ = dt / 50.0f;
+  this->slow_ms_ += dt;
+  float ks = 0;
+  if (this->slow_ms_ >= 60) {
+    ks = this->slow_ms_ / 50.0f;
+    this->slow_ms_ = 0;
+  }
   const float wind = this->wind_(p, now);
   this->stars_(now);
   if (this->glass_on_) {
-    this->glass_();
+    if (ks > 0)
+      this->glass_(ks, ks * 50.0f);
   } else {
     this->drops_(wind);
     this->splashes_();
   }
-  this->flakes_(wind);
+  this->flakes_(wind, ks);
   this->clouds_();
   this->lightning_(now);
 }
