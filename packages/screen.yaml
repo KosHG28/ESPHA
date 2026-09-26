@@ -293,9 +293,9 @@ script:
           static Fade f;
           lv_anim_delete(&f, nullptr);
           f.b0 = id(bri_now);
-          f.b1 = std::max(0, std::min(255, bri));
+          f.b1 = std::max<int>(0, std::min<int>(255, bri));
           f.o0 = lv_obj_get_style_text_opa(id(root_clock), LV_PART_MAIN);
-          f.o1 = std::max(0, std::min(255, opa));
+          f.o1 = std::max<int>(0, std::min<int>(255, opa));
           if (f.b0 == f.b1 && f.o0 == f.o1)
             return;
           auto step = [](void *var, int32_t v) {

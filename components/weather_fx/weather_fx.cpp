@@ -388,9 +388,9 @@ void WeatherFx::paint_front(lv_layer_t *layer) {
   if (this->gar_on_) {
     // Провод рисуем, только если участок задевает кольцо
     const int cx = 233 + oc.x1, cy = 233 + oc.y1;
-    const int nx = std::max(clip.x1 - cx, std::max(0, cx - clip.x2)), ny = std::max(clip.y1 - cy, std::max(0, cy - clip.y2));
-    const int fx = std::max(std::abs(clip.x1 - cx), std::abs(clip.x2 - cx));
-    const int fy = std::max(std::abs(clip.y1 - cy), std::abs(clip.y2 - cy));
+    const int x1 = clip.x1 - cx, x2 = clip.x2 - cx, y1 = clip.y1 - cy, y2 = clip.y2 - cy;
+    const int nx = std::max(x1, std::max(0, -x2)), ny = std::max(y1, std::max(0, -y2));
+    const int fx = std::max(std::abs(x1), std::abs(x2)), fy = std::max(std::abs(y1), std::abs(y2));
     if (nx * nx + ny * ny <= (GAR_R + 5) * (GAR_R + 5) && fx * fx + fy * fy >= (GAR_R - 4) * (GAR_R - 4)) {
       lv_draw_arc_dsc_t arc;
       lv_draw_arc_dsc_init(&arc);
@@ -954,10 +954,11 @@ void WeatherFx::layout_con_(int idx, const float (*pts)[2], int n) {
     this->csx_[i] = ox[i];
     this->csy_[i] = oy[i];
     this->csz_[i] = sz[i];
-    a.x1 = std::min(a.x1, ox[i] - 6);
-    a.y1 = std::min(a.y1, oy[i] - 6);
-    a.x2 = std::max(a.x2, ox[i] + 6);
-    a.y2 = std::max(a.y2, oy[i] + 6);
+    // int32_t на ESP32 — long, поэтому тип указан явно
+    a.x1 = std::min<int32_t>(a.x1, ox[i] - 6);
+    a.y1 = std::min<int32_t>(a.y1, oy[i] - 6);
+    a.x2 = std::max<int32_t>(a.x2, ox[i] + 6);
+    a.y2 = std::max<int32_t>(a.y2, oy[i] + 6);
   }
   // Пунктир: чёрточки по 5 px через 5 px, с отступом от звёзд
   this->ndash_ = 0;
