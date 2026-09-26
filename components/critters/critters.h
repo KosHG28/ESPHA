@@ -66,9 +66,18 @@ class Critters : public Component {
   /// садится, говорит «мяу» и бежит дальше. Спящий кот просыпается и убегает
   void poke();
 
-  /// Один кадр. can_show — экран включён (не погашен совсем), night — солнце
-  /// за горизонтом, winter — декабрь…февраль. Раз в 1–3 часа гость приходит сам
+  /// Состояние для гостей: can_show — экран включён (не погашен совсем),
+  /// night — солнце за горизонтом, winter — декабрь…февраль. Сам кадр
+  /// считается в таймере LVGL — один шаг на перерисовку экрана
+  void set_state(bool can_show, bool night, bool winter) {
+    this->can_show_ = can_show;
+    this->night_ = night;
+    this->winter_in_ = winter;
+  }
+
+  /// Один кадр. Раз в 1–3 часа гость приходит сам
   void frame(bool can_show, bool night, bool winter);
+  void tick() { this->frame(this->can_show_, this->night_, this->winter_in_); }
 
   bool active() const { return this->show_ != SHOW_NONE; }
   float get_setup_priority() const override { return setup_priority::LATE; }
@@ -89,6 +98,7 @@ class Critters : public Component {
   bool festive_{false}, stars_{false}, meteor_req_{false}, meteor_sent_{false};
   int weather_{0};
   int month_{0}, day_{0};
+  bool can_show_{false}, night_{false}, winter_in_{false};
   Variant variant_{VAR_PLAIN};
   const lv_image_dsc_t *shown_img_{nullptr};
   Show show_{SHOW_NONE};

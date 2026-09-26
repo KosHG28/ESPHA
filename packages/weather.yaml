@@ -386,7 +386,7 @@ interval:
           p.wind_gust = id(ha_wind_gust).state;
           // «Стиль дождя»: 0 — капли на стекле, 1 — падающий
           p.rain_style = (int) id(rain_style_select).active_index().value_or(0);
-          id(wfx)->frame(p);
+          id(wfx)->set_params(p);
           // Кот смотрит в небо — пусть пролетит метеор
           if (id(crit)->take_meteor())
             id(wfx)->launch_meteor();

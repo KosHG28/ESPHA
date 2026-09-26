@@ -41,7 +41,9 @@ globals:
     initial_value: '0'
 
 interval:
-  - interval: 33ms
+  # Состояние для гостей (экран, ночь, погода, праздник). Кадры анимации идут
+  # в таймере LVGL, по одному на перерисовку экрана
+  - interval: 100ms
     then:
       - lambda: |-
           static bool bound = false;
@@ -80,7 +82,7 @@ interval:
           // Дождь, мокрый снег и град — кот под зонтиком; снег — ловит снежинку
           const int m = id(weather_mode);
           id(crit)->set_weather(m == 1 || m == 3 || m == 4 ? 1 : (m == 2 ? 2 : 0), id(weather_stars));
-          id(crit)->frame(!id(screen_off), id(is_night), winter);
+          id(crit)->set_state(!id(screen_off), id(is_night), winter);
 
 select:
   # Позвать любого гостя сейчас — посмотреть, не дожидаясь случая
