@@ -4,6 +4,7 @@
 
 #include "esphome/core/hal.h"
 #include "esphome/core/helpers.h"
+#include "sky.h"
 
 namespace esphome {
 namespace weather_fx {
@@ -23,6 +24,20 @@ static const int HAIL_SIZE = 6;
 static const float SPLASH_MS = 250.0f;
 // Снежинки: три формы Noto Sans Symbols 2 и две Material Design Icons
 static const uint32_t FLAKE_CP[5] = {0x2744, 0x2745, 0x2746, 0xF0717, 0xF0F2A};
+// Солнце — справа в «шапке» круга, мимо значка двери посередине
+static const int SUN_X = 300, SUN_Y = 74, SUN_R = 40;
+// Созвездие вписывается в «шапку» над строкой погоды: центр и размеры
+// прямоугольника, подпись — над ним
+static const float BOX_CX = 233.0f, BOX_CY = 82.0f, BOX_W = 280.0f, BOX_H = 60.0f;
+static const int CAP_Y = 24, CAP_W = 220;
+// Созвездие видно, если его середина не ниже 25° над горизонтом
+static const float CON_MIN_ALT = 0.4226f;  // sin 25°
+// Сменять созвездие раз в 10 минут, пересчитывать поворот раз в 5
+static const int CON_SLOT_S = 600, CON_RECALC_MIN = 5;
+// Гирлянда: радиус, цвета лампочек
+static const int GAR_R = 221;
+static const uint32_t GAR_PAL[4] = {0xFF3B30, 0xFFD60A, 0x30D158, 0x0A84FF};
+static const float PI_F = 3.14159265f;
 
 int WeatherFx::rnd_(int lo, int hi) { return lo + (int) (random_uint32() % (uint32_t) (hi - lo)); }
 
@@ -33,32 +48,55 @@ void WeatherFx::show_(lv_obj_t *o, bool v) {
     lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
 }
 
-static void paint_cb(lv_event_t *e) {
+static void paint_front_cb(lv_event_t *e) {
   auto *self = static_cast<WeatherFx *>(lv_event_get_user_data(e));
-  self->paint(lv_event_get_layer(e));
+  self->paint_front(lv_event_get_layer(e));
+}
+
+static void paint_back_cb(lv_event_t *e) {
+  auto *self = static_cast<WeatherFx *>(lv_event_get_user_data(e));
+  self->paint_back(lv_event_get_layer(e));
+}
+
+static bool hit(const lv_area_t &a, const lv_area_t &clip) {
+  return a.x1 <= clip.x2 && a.x2 >= clip.x1 && a.y1 <= clip.y2 && a.y2 >= clip.y1;
 }
 
 void WeatherFx::bind(lv_obj_t *root, lv_obj_t *clouds, lv_obj_t *bolt, lv_obj_t *glow, const lv_font_t *flake_s,
-                     const lv_font_t *flake_l) {
+                     const lv_font_t *flake_l, const lv_font_t *caption) {
   this->root_ = root;
   this->clouds_box_ = clouds;
   this->bolt_ = bolt;
   this->glow_ = glow;
   this->font_s_ = flake_s;
   this->font_l_ = flake_l;
-  if (!root || !clouds || !bolt || !glow || !flake_s || !flake_l ||
+  this->font_cap_ = caption;
+  if (!root || !clouds || !bolt || !glow || !flake_s || !flake_l || !caption ||
       lv_obj_get_child_count(clouds) < (uint32_t) NC)
     return;
 
-  // Холст во весь слой погоды, поверх облаков: на нём рисуются все частицы
-  lv_obj_t *pt = lv_obj_create(root);
-  lv_obj_remove_style_all(pt);
-  lv_obj_set_size(pt, 466, 466);
-  lv_obj_set_pos(pt, 0, 0);
-  lv_obj_clear_flag(pt, LV_OBJ_FLAG_CLICKABLE);
-  lv_obj_clear_flag(pt, LV_OBJ_FLAG_SCROLLABLE);
-  lv_obj_add_event_cb(pt, paint_cb, LV_EVENT_DRAW_MAIN, this);
-  this->paint_ = pt;
+  // Два холста во весь слой погоды: передний — поверх облаков (осадки,
+  // гирлянда), задний — под ними (небо)
+  auto canvas = [root, this](lv_event_cb_t cb) {
+    lv_obj_t *pt = lv_obj_create(root);
+    lv_obj_remove_style_all(pt);
+    lv_obj_set_size(pt, 466, 466);
+    lv_obj_set_pos(pt, 0, 0);
+    lv_obj_clear_flag(pt, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_clear_flag(pt, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_event_cb(pt, cb, LV_EVENT_DRAW_MAIN, this);
+    return pt;
+  };
+  this->paint_ = canvas(paint_front_cb);
+  this->back_ = canvas(paint_back_cb);
+  lv_obj_move_to_index(this->back_, 0);
+
+  // Лампочки гирлянды — по кругу у самого края экрана
+  for (int i = 0; i < NG; i++) {
+    const float a = (i + 0.5f) * 2.0f * PI_F / NG;
+    this->gx_[i] = 233 + (int) lroundf(GAR_R * cosf(a));
+    this->gy_[i] = 233 + (int) lroundf(GAR_R * sinf(a));
+  }
 
   // Где именно рисуется знак снежинки. lv_draw_letter считает точку
   // серединой знака по горизонтали и линией основания по вертикали, так что
@@ -145,9 +183,132 @@ void WeatherFx::hide_all_() {
     this->mark_(s, false, 0, 0, 1, 1);
   for (auto &l : this->slife_)
     l = 0;
+  this->mark_(this->met_spot_, false, 0, 0, 1, 1);
+  this->met_on_ = false;
 }
 
-void WeatherFx::paint(lv_layer_t *layer) {
+void WeatherFx::paint_back(lv_layer_t *layer) {
+  lv_area_t oc;
+  lv_obj_get_coords(this->back_, &oc);
+  const lv_area_t &clip = layer->_clip_area;
+  lv_area_t abs;
+  auto to_abs = [&](const lv_area_t &a) {
+    abs = {(int32_t) (a.x1 + oc.x1), (int32_t) (a.y1 + oc.y1), (int32_t) (a.x2 + oc.x1), (int32_t) (a.y2 + oc.y1)};
+    return hit(abs, clip);
+  };
+  auto place = [&](const Spot &s) { return s.on && to_abs(s.a); };
+
+  lv_draw_fill_dsc_t fill;
+  lv_draw_fill_dsc_init(&fill);
+  fill.opa = LV_OPA_COVER;
+  lv_draw_line_dsc_t ln;
+  lv_draw_line_dsc_init(&ln);
+  ln.opa = LV_OPA_COVER;
+  const bool dim = this->dim_;
+
+  // Солнце: мягкий ореол, диск и медленно вращающиеся лучи
+  if (place(this->sun_spot_)) {
+    const int cx = SUN_X + oc.x1, cy = SUN_Y + oc.y1;
+    auto disc = [&](int r, uint32_t c, lv_opa_t o) {
+      lv_area_t a = {cx - r, cy - r, cx + r, cy + r};
+      fill.radius = LV_RADIUS_CIRCLE;
+      fill.color = lv_color_hex(c);
+      fill.opa = o;
+      lv_draw_fill(layer, &fill, &a);
+    };
+    disc(30, 0xFFA000, dim ? 44 : 30);
+    disc(24, 0xFFB300, dim ? 70 : 50);
+    ln.width = 3;
+    ln.round_start = 1;
+    ln.round_end = 1;
+    ln.color = lv_color_hex(dim ? 0xFFCA28 : 0xFFB300);
+    for (int k = 0; k < 12; k++) {
+      const float a = this->sun_ang_ + k * (2.0f * PI_F / 12);
+      const float r0 = 24.0f, r1 = (k % 2) ? 31.0f : 36.0f;
+      const float c = cosf(a), sn = sinf(a);
+      ln.p1.x = (lv_value_precise_t) (cx + r0 * c);
+      ln.p1.y = (lv_value_precise_t) (cy + r0 * sn);
+      ln.p2.x = (lv_value_precise_t) (cx + r1 * c);
+      ln.p2.y = (lv_value_precise_t) (cy + r1 * sn);
+      lv_draw_line(layer, &ln);
+    }
+    disc(17, dim ? 0xFFD54F : 0xFFC21A, LV_OPA_COVER);
+    fill.opa = LV_OPA_COVER;
+    ln.round_start = 0;
+    ln.round_end = 0;
+  }
+
+  // Мерцающие звёзды
+  fill.radius = 1;
+  for (int i = 0; i < NST; i++) {
+    if (!place(this->sts_[i]))
+      continue;
+    fill.color = this->stc_[i];
+    lv_draw_fill(layer, &fill, &abs);
+  }
+
+  // Созвездие: пунктир, звёзды и подпись
+  if (this->con_on_) {
+    if (to_abs(this->con_area_)) {
+      ln.width = 2;
+      ln.color = lv_color_hex(dim ? 0x6A7FA8 : 0x34435E);
+      for (int i = 0; i < this->ndash_; i++) {
+        const lv_point_precise_t *d = this->dash_[i];
+        lv_area_t b = {(int32_t) std::min(d[0].x, d[1].x) + oc.x1 - 2, (int32_t) std::min(d[0].y, d[1].y) + oc.y1 - 2,
+                       (int32_t) std::max(d[0].x, d[1].x) + oc.x1 + 2, (int32_t) std::max(d[0].y, d[1].y) + oc.y1 + 2};
+        if (!hit(b, clip))
+          continue;
+        ln.p1 = {d[0].x + oc.x1, d[0].y + oc.y1};
+        ln.p2 = {d[1].x + oc.x1, d[1].y + oc.y1};
+        lv_draw_line(layer, &ln);
+      }
+      fill.radius = LV_RADIUS_CIRCLE;
+      fill.color = lv_color_hex(dim ? 0xFFF6DC : 0xD8D0B8);
+      for (int i = 0; i < this->cn_; i++) {
+        const int r = this->csz_[i] / 2;
+        lv_area_t a = {this->csx_[i] - r + oc.x1, this->csy_[i] - r + oc.y1, this->csx_[i] - r + this->csz_[i] - 1 + oc.x1,
+                       this->csy_[i] - r + this->csz_[i] - 1 + oc.y1};
+        if (hit(a, clip))
+          lv_draw_fill(layer, &fill, &a);
+      }
+    }
+    if (to_abs(this->cap_area_)) {
+      lv_draw_label_dsc_t lb;
+      lv_draw_label_dsc_init(&lb);
+      lb.text = this->con_name_;
+      lb.font = this->font_cap_;
+      lb.color = lv_color_hex(dim ? 0x8898B8 : 0x4C5A74);
+      lb.align = LV_TEXT_ALIGN_CENTER;
+      lb.opa = LV_OPA_COVER;
+      lv_draw_label(layer, &lb, &abs);
+    }
+  }
+
+  // Метеор: хвост из трёх отрезков — от тусклого к яркому, и яркая голова
+  if (place(this->met_spot_)) {
+    ln.width = 2;
+    ln.round_start = 1;
+    ln.round_end = 1;
+    ln.color = lv_color_hex(0xE8F0FF);
+    const float hx = this->met_hx_ + oc.x1, hy = this->met_hy_ + oc.y1;
+    const float tx = this->met_tx_ + oc.x1, ty = this->met_ty_ + oc.y1;
+    static const lv_opa_t SEG[3] = {60, 140, 255};
+    for (int k = 0; k < 3; k++) {
+      const float a = k / 3.0f, b = (k + 1) / 3.0f;
+      ln.p1 = {(lv_value_precise_t) (tx + (hx - tx) * a), (lv_value_precise_t) (ty + (hy - ty) * a)};
+      ln.p2 = {(lv_value_precise_t) (tx + (hx - tx) * b), (lv_value_precise_t) (ty + (hy - ty) * b)};
+      ln.opa = (lv_opa_t) (SEG[k] * this->met_opa_ / 255);
+      lv_draw_line(layer, &ln);
+    }
+    fill.radius = LV_RADIUS_CIRCLE;
+    fill.color = lv_color_white();
+    fill.opa = this->met_opa_;
+    lv_area_t h = {(int32_t) hx - 2, (int32_t) hy - 2, (int32_t) hx + 2, (int32_t) hy + 2};
+    lv_draw_fill(layer, &fill, &h);
+  }
+}
+
+void WeatherFx::paint_front(lv_layer_t *layer) {
   lv_area_t oc;
   lv_obj_get_coords(this->paint_, &oc);
   const lv_area_t &clip = layer->_clip_area;
@@ -158,21 +319,12 @@ void WeatherFx::paint(lv_layer_t *layer) {
       return false;
     abs = {(int32_t) (s.a.x1 + oc.x1), (int32_t) (s.a.y1 + oc.y1), (int32_t) (s.a.x2 + oc.x1),
            (int32_t) (s.a.y2 + oc.y1)};
-    return abs.x1 <= clip.x2 && abs.x2 >= clip.x1 && abs.y1 <= clip.y2 && abs.y2 >= clip.y1;
+    return hit(abs, clip);
   };
 
   lv_draw_fill_dsc_t fill;
   lv_draw_fill_dsc_init(&fill);
   fill.opa = LV_OPA_COVER;
-
-  // Звёзды
-  fill.radius = 1;
-  for (int i = 0; i < NST; i++) {
-    if (!place(this->sts_[i]))
-      continue;
-    fill.color = this->stc_[i];
-    lv_draw_fill(layer, &fill, &abs);
-  }
 
   // Капли и градины
   for (int i = 0; i < ND; i++) {
@@ -231,6 +383,45 @@ void WeatherFx::paint(lv_layer_t *layer) {
     lv_point_t pt = {abs.x1 - this->fox_[i], abs.y1 - this->foy_[i]};
     lv_draw_letter(layer, &let, &pt);
   }
+
+  // Гирлянда: тёмно-зелёный провод по краю и перемигивающиеся лампочки
+  if (this->gar_on_) {
+    // Провод рисуем, только если участок задевает кольцо
+    const int cx = 233 + oc.x1, cy = 233 + oc.y1;
+    const int nx = std::max(clip.x1 - cx, std::max(0, cx - clip.x2)), ny = std::max(clip.y1 - cy, std::max(0, cy - clip.y2));
+    const int fx = std::max(std::abs(clip.x1 - cx), std::abs(clip.x2 - cx));
+    const int fy = std::max(std::abs(clip.y1 - cy), std::abs(clip.y2 - cy));
+    if (nx * nx + ny * ny <= (GAR_R + 5) * (GAR_R + 5) && fx * fx + fy * fy >= (GAR_R - 4) * (GAR_R - 4)) {
+      lv_draw_arc_dsc_t arc;
+      lv_draw_arc_dsc_init(&arc);
+      arc.center = {cx, cy};
+      arc.radius = GAR_R + 1;
+      arc.width = 2;
+      arc.start_angle = 0;
+      arc.end_angle = 360;
+      arc.color = lv_color_hex(0x1E4A2A);
+      arc.opa = LV_OPA_COVER;
+      lv_draw_arc(layer, &arc);
+    }
+    fill.radius = LV_RADIUS_CIRCLE;
+    for (int i = 0; i < NG; i++) {
+      if (!place(this->gs_[i]))
+        continue;
+      const lv_color_t c = lv_color_hex(GAR_PAL[i % 4]);
+      const bool lit = (i + this->gar_step_) % 3 != 0;
+      const int x = this->gx_[i] + oc.x1, y = this->gy_[i] + oc.y1;
+      if (lit) {
+        lv_area_t g = {x - 7, y - 7, x + 7, y + 7};
+        fill.color = c;
+        fill.opa = 70;
+        lv_draw_fill(layer, &fill, &g);
+      }
+      lv_area_t b = {x - 4, y - 4, x + 4, y + 4};
+      fill.color = lit ? c : lv_color_mix(c, lv_color_black(), 70);
+      fill.opa = LV_OPA_COVER;
+      lv_draw_fill(layer, &fill, &b);
+    }
+  }
 }
 
 void WeatherFx::end_strike_() {
@@ -255,10 +446,19 @@ void WeatherFx::apply_(const Params &p, bool relayout) {
   this->nf_ = std::min(p.mode == 2 ? cnt : (p.mode == 3 ? cnt / 2 : 0), NF);
   this->ncl_ = std::min(std::max(p.clouds, 0), NC);
   this->storm_ = p.storm;
+  if (p.stars && !this->stars_on_)
+    this->con_force_ = true;
   this->stars_on_ = p.stars;
+  this->sun_on_ = p.sun;
+  // Провод гирлянды идёт по всему кругу — при включении и выключении
+  // перерисовать слой целиком
+  if (p.garland != this->gar_on_)
+    lv_obj_invalidate(this->paint_);
+  this->gar_on_ = p.garland;
   if (!this->storm_)
     this->end_strike_();
-  show_(this->root_, this->nd_ || this->nf_ || this->ncl_ || this->storm_ || this->stars_on_);
+  show_(this->root_,
+        this->nd_ || this->nf_ || this->ncl_ || this->storm_ || this->stars_on_ || this->sun_on_ || this->gar_on_);
 
   // В приглушённом режиме палитра ярче: при низкой яркости панели тёмные
   // частицы сливаются с чёрным
@@ -290,7 +490,7 @@ void WeatherFx::apply_(const Params &p, bool relayout) {
       this->fph_[i] = rnd_(0, 628) / 100.0f;
     }
     // Звёзды — в верхней половине круга, вокруг и выше времени, но не на
-    // месте Большой Медведицы
+    // месте созвездия
     for (int i = 0; i < NST; i++) {
       int x, y;
       do {
@@ -304,13 +504,10 @@ void WeatherFx::apply_(const Params &p, bool relayout) {
       this->stc_[i] = lv_color_hex(0x808890);
     }
   } else {
-    // Поменялась только яркость — перекрасить то, что на экране
-    for (auto &s : this->ds_)
-      if (s.on)
-        this->invalidate_(s.a);
-    for (auto &s : this->fs_)
-      if (s.on)
-        this->invalidate_(s.a);
+    // Поменялись яркость, солнце или гирлянда — перерисовать слой целиком,
+    // это разовая перерисовка
+    lv_obj_invalidate(this->back_);
+    lv_obj_invalidate(this->paint_);
   }
   if (this->stars_on_) {
     for (int i = 0; i < NST; i++)
@@ -325,7 +522,19 @@ void WeatherFx::apply_(const Params &p, bool relayout) {
   for (int i = this->nf_; i < NF; i++)
     this->mark_(this->fs_[i], false, 0, 0, 1, 1);
 
-  this->show_dipper_(this->stars_on_, dim);
+  // Созвездие гаснет вместе со звёздами; зажигает его sky_()
+  if (!this->stars_on_ && this->con_on_) {
+    this->invalidate_(this->con_area_);
+    this->invalidate_(this->cap_area_);
+    this->con_on_ = false;
+  }
+  if (!this->stars_on_ && this->met_on_) {
+    this->mark_(this->met_spot_, false, 0, 0, 1, 1);
+    this->met_on_ = false;
+  }
+  this->mark_(this->sun_spot_, this->sun_on_, SUN_X - SUN_R, SUN_Y - SUN_R, 2 * SUN_R + 1, 2 * SUN_R + 1);
+  for (int i = 0; i < NG; i++)
+    this->mark_(this->gs_[i], this->gar_on_, this->gx_[i] - 8, this->gy_[i] - 8, 17, 17);
 
   // Молния жёлтая; свечение в приглушённом режиме ярче
   lv_obj_set_style_line_color(this->glow_, lv_color_hex(dim ? 0xFFC107 : 0xFF9800), 0);
@@ -597,81 +806,331 @@ void WeatherFx::lightning_(uint32_t now) {
   }
 }
 
-// Большая Медведица: ковш и ручка во всю «шапку» круга над строкой погоды
-// (она начинается на 113 px). Экранные координаты; все звёзды не дальше
-// 225 px от центра, чтобы не уходить за край круга
-static const int DIPPER[7][2] = {
-    {95, 103},   // Бенетнаш (конец ручки)
-    {161, 79},   // Мицар
-    {214, 93},   // Алиот
-    {271, 100},  // Мегрец
-    {277, 34},   // Дубхе
-    {358, 48},   // Мерак
-    {352, 111},  // Фекда
+// Большая Медведица на случай, когда время или место неизвестны: так она
+// выглядит, если смотреть на север осенним вечером. x вправо, y вверх
+static const float DIPPER[7][2] = {
+    {-138, -103}, {-72, -79}, {-19, -93}, {38, -100}, {44, -34}, {125, -48}, {119, -111},
 };
-static const int DIPPER_LINKS[7][2] = {{0, 1}, {1, 2}, {2, 3}, {3, 6}, {6, 5}, {5, 4}, {4, 3}};
+static const uint8_t DIPPER_ORDER[7] = {6, 5, 4, 3, 0, 1, 2};  // в порядке каталога
 
-void WeatherFx::build_dipper_() {
-  // Все объекты — внутри своего прозрачного слоя, который прячется целиком.
-  // Он неподвижен, поэтому обычные объекты LVGL здесь ничего не стоят
-  lv_obj_t *box = lv_obj_create(this->root_);
-  lv_obj_remove_style_all(box);
-  lv_obj_set_size(box, 466, 466);
-  lv_obj_set_pos(box, 0, 0);
-  lv_obj_clear_flag(box, LV_OBJ_FLAG_CLICKABLE);
-  lv_obj_clear_flag(box, LV_OBJ_FLAG_SCROLLABLE);
-  lv_obj_add_flag(box, LV_OBJ_FLAG_HIDDEN);
-  lv_obj_move_to_index(box, 0);
-  this->dip_box_ = box;
+struct V3 {
+  float e, n, u;  // восток, север, зенит
+};
 
-  // Пунктир: чёрточки по 5 px через 5 px, с отступом от звёзд
-  this->ndash_ = 0;
-  for (const auto &l : DIPPER_LINKS) {
-    const float x0 = DIPPER[l[0]][0], y0 = DIPPER[l[0]][1];
-    const float x1 = DIPPER[l[1]][0], y1 = DIPPER[l[1]][1];
-    const float len = sqrtf((x1 - x0) * (x1 - x0) + (y1 - y0) * (y1 - y0));
-    const float ux = (x1 - x0) / len, uy = (y1 - y0) / len;
-    for (float s = 8.0f; s + 5.0f < len - 8.0f && this->ndash_ < NDASH; s += 10.0f) {
-      lv_point_precise_t *pt = this->dash_pts_[this->ndash_];
-      pt[0].x = (lv_value_precise_t) (x0 + ux * s);
-      pt[0].y = (lv_value_precise_t) (y0 + uy * s);
-      pt[1].x = (lv_value_precise_t) (x0 + ux * (s + 5.0f));
-      pt[1].y = (lv_value_precise_t) (y0 + uy * (s + 5.0f));
-      lv_obj_t *ln = lv_line_create(box);
-      lv_obj_remove_style_all(ln);
-      lv_line_set_points(ln, pt, 2);
-      lv_obj_set_style_line_width(ln, 2, 0);
-      lv_obj_clear_flag(ln, LV_OBJ_FLAG_CLICKABLE);
-      this->dash_[this->ndash_++] = ln;
-    }
+static float dot(const V3 &a, const V3 &b) { return a.e * b.e + a.n * b.n + a.u * b.u; }
+
+static V3 norm(const V3 &a) {
+  const float l = sqrtf(dot(a, a));
+  return l > 1e-6f ? V3{a.e / l, a.n / l, a.u / l} : V3{0, 0, 1};
+}
+
+// Направление на звезду в системе «восток — север — зенит». lst — местное
+// звёздное время в радианах, sphi и cphi — синус и косинус широты
+static V3 star_dir(const SkyStar &s, float lst, float sphi, float cphi) {
+  const float ha = lst - s.ra * (PI_F / 12.0f);
+  const float dec = s.dec * (PI_F / 180.0f);
+  const float sd = sinf(dec), cd = cosf(dec), sh = sinf(ha), ch = cosf(ha);
+  return {-cd * sh, sd * cphi - cd * sphi * ch, sd * sphi + cd * cphi * ch};
+}
+
+// Как фигура выглядит, если смотреть прямо на неё: проекция на плоскость
+// взгляда, «вверх» — к зениту. Возвращает высоту середины (синус) и самой
+// низкой звезды
+static void project(const SkyCon &c, float lst, float sphi, float cphi, float (*pts)[2], float &mid_u, float &low_u) {
+  V3 v[10];
+  V3 m{0, 0, 0};
+  low_u = 1.0f;
+  for (int i = 0; i < c.n; i++) {
+    v[i] = star_dir(SKY_STARS[c.first + i], lst, sphi, cphi);
+    m = {m.e + v[i].e, m.n + v[i].n, m.u + v[i].u};
+    low_u = std::min(low_u, v[i].u);
   }
-  // Звёзды ковша — крупнее и ярче случайных
-  for (int i = 0; i < NDIP; i++) {
-    lv_obj_t *st = lv_obj_create(box);
-    lv_obj_remove_style_all(st);
-    const int sz = (i == 1 || i == 2 || i == 4) ? 8 : 6;  // Мицар, Алиот, Дубхе — ярче
-    lv_obj_set_size(st, sz, sz);
-    lv_obj_set_pos(st, DIPPER[i][0] - sz / 2, DIPPER[i][1] - sz / 2);
-    lv_obj_set_style_radius(st, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_bg_opa(st, LV_OPA_COVER, 0);
-    lv_obj_clear_flag(st, LV_OBJ_FLAG_CLICKABLE);
-    this->dip_star_[i] = st;
+  const V3 d = norm(m);
+  mid_u = d.u;
+  // «Вверх» — к зениту; если фигура почти в зените — к северу
+  V3 up = {-d.u * d.e, -d.u * d.n, 1.0f - d.u * d.u};
+  if (dot(up, up) < 0.0025f)
+    up = {-d.n * d.e, 1.0f - d.n * d.n, -d.n * d.u};
+  up = norm(up);
+  const V3 right = {d.n * up.u - d.u * up.n, d.u * up.e - d.e * up.u, d.e * up.n - d.n * up.e};
+  for (int i = 0; i < c.n; i++) {
+    const float k = std::max(dot(v[i], d), 0.2f);
+    pts[i][0] = dot(v[i], right) / k;
+    pts[i][1] = dot(v[i], up) / k;
   }
 }
 
-void WeatherFx::show_dipper_(bool on, bool dim) {
-  if (!this->dip_box_) {
-    if (!on)
+// Размер звезды на экране по звёздной величине
+static int star_size(float mag) { return mag < 0.7f ? 10 : (mag < 2.0f ? 8 : (mag < 3.0f ? 6 : 4)); }
+
+// Вписать фигуру, повёрнутую на ang, в «шапку» круга: по центру
+// прямоугольника, с сохранением пропорций и так, чтобы ни одна звезда не
+// вышла за край круга. Возвращает больший из размеров фигуры в пикселях
+static float fit(const float (*src)[2], const int *sz, int n, float ang, int *ox, int *oy) {
+  float pts[10][2];
+  const float ca = cosf(ang), sa = sinf(ang);
+  float x0 = 1e9f, x1 = -1e9f, y0 = 1e9f, y1 = -1e9f;
+  for (int i = 0; i < n; i++) {
+    pts[i][0] = src[i][0] * ca - src[i][1] * sa;
+    pts[i][1] = src[i][0] * sa + src[i][1] * ca;
+    x0 = std::min(x0, pts[i][0]);
+    x1 = std::max(x1, pts[i][0]);
+    y0 = std::min(y0, pts[i][1]);
+    y1 = std::max(y1, pts[i][1]);
+  }
+  const float bw = std::max(x1 - x0, 1e-4f), bh = std::max(y1 - y0, 1e-4f);
+  const float mx = (x0 + x1) / 2, my = (y0 + y1) / 2;
+  float k = std::min(BOX_W / bw, BOX_H / bh);
+  for (int it = 0; it < 40; it++) {
+    bool ok = true;
+    for (int i = 0; i < n; i++) {
+      const float x = BOX_CX + (pts[i][0] - mx) * k, y = BOX_CY - (pts[i][1] - my) * k;
+      ox[i] = (int) lroundf(x);
+      oy[i] = (int) lroundf(y);
+      const float dx = x - 233.0f, dy = y - 233.0f;
+      if (sqrtf(dx * dx + dy * dy) + sz[i] / 2 + 3 > 224.0f)
+        ok = false;
+    }
+    if (ok)
+      break;
+    k *= 0.94f;
+  }
+  return std::max(bw, bh) * k;
+}
+
+// «Шапка» над строкой погоды широкая и низкая: фигура, которая сейчас стоит
+// в небе «вертикально», в ней получилась бы мелкой. Поэтому её можно
+// повернуть — но на наименьший угол, при котором она выходит почти такой же
+// крупной, как в самом удачном повороте. Возвращает этот угол, в size —
+// размер в пикселях
+static float best_turn(const float (*pts)[2], const int *sz, int n, float &size) {
+  static const int STEPS = 24;  // через 15°
+  float span[STEPS];
+  int ox[10], oy[10];
+  float top = 0;
+  for (int i = 0; i < STEPS; i++) {
+    span[i] = fit(pts, sz, n, i * (2.0f * PI_F / STEPS), ox, oy);
+    top = std::max(top, span[i]);
+  }
+  for (int d = 0; d <= STEPS / 2; d++) {
+    for (int sgn = 0; sgn < 2; sgn++) {
+      const int i = ((sgn ? -d : d) + STEPS) % STEPS;
+      if (span[i] >= 0.85f * top) {
+        size = span[i];
+        return i * (2.0f * PI_F / STEPS);
+      }
+    }
+  }
+  size = span[0];
+  return 0;
+}
+
+void WeatherFx::layout_con_(int idx, const float (*pts)[2], int n) {
+  const SkyCon &c = SKY_CONS[idx];
+  n = std::min(n, (int) NCS);
+  int sz[NCS], ox[NCS], oy[NCS];
+  for (int i = 0; i < n; i++)
+    sz[i] = star_size(SKY_STARS[c.first + i].mag);
+  float size;
+  fit(pts, sz, n, best_turn(pts, sz, n, size), ox, oy);
+
+  // Если фигура та же и почти не повернулась — не перерисовывать
+  bool same = this->con_on_ && this->con_idx_ == idx && this->cn_ == n;
+  for (int i = 0; same && i < n; i++)
+    same = std::abs(ox[i] - this->csx_[i]) <= 1 && std::abs(oy[i] - this->csy_[i]) <= 1;
+  if (same)
+    return;
+
+  if (this->con_on_) {
+    this->invalidate_(this->con_area_);
+    if (this->con_idx_ != idx)
+      this->invalidate_(this->cap_area_);
+  }
+  this->con_idx_ = idx;
+  this->con_name_ = c.name;
+  this->cn_ = n;
+  lv_area_t a = {10000, 10000, -10000, -10000};
+  for (int i = 0; i < n; i++) {
+    this->csx_[i] = ox[i];
+    this->csy_[i] = oy[i];
+    this->csz_[i] = sz[i];
+    a.x1 = std::min(a.x1, ox[i] - 6);
+    a.y1 = std::min(a.y1, oy[i] - 6);
+    a.x2 = std::max(a.x2, ox[i] + 6);
+    a.y2 = std::max(a.y2, oy[i] + 6);
+  }
+  // Пунктир: чёрточки по 5 px через 5 px, с отступом от звёзд
+  this->ndash_ = 0;
+  for (int l = 0; l < c.nl; l++) {
+    const int s0 = SKY_LINKS[c.lfirst + l][0], s1 = SKY_LINKS[c.lfirst + l][1];
+    if (s0 >= n || s1 >= n)
+      continue;
+    const float x0 = ox[s0], y0 = oy[s0], x1 = ox[s1], y1 = oy[s1];
+    const float len = sqrtf((x1 - x0) * (x1 - x0) + (y1 - y0) * (y1 - y0));
+    if (len < 1.0f)
+      continue;
+    const float ux = (x1 - x0) / len, uy = (y1 - y0) / len;
+    const float g0 = sz[s0] / 2 + 4.0f, g1 = sz[s1] / 2 + 4.0f;
+    for (float d = g0; d + 5.0f <= len - g1 && this->ndash_ < NDASH; d += 10.0f) {
+      lv_point_precise_t *pt = this->dash_[this->ndash_++];
+      pt[0].x = (lv_value_precise_t) (x0 + ux * d);
+      pt[0].y = (lv_value_precise_t) (y0 + uy * d);
+      pt[1].x = (lv_value_precise_t) (x0 + ux * (d + 5.0f));
+      pt[1].y = (lv_value_precise_t) (y0 + uy * (d + 5.0f));
+    }
+  }
+  this->con_area_ = a;
+  this->cap_area_ = {233 - CAP_W / 2, CAP_Y, 233 + CAP_W / 2, CAP_Y + lv_font_get_line_height(this->font_cap_)};
+  this->con_on_ = true;
+  this->invalidate_(this->con_area_);
+  this->invalidate_(this->cap_area_);
+}
+
+void WeatherFx::sky_(const Params &p) {
+  if (!this->stars_on_)
+    return;
+  const bool known = p.utc > 1600000000u && !std::isnan(p.lat) && !std::isnan(p.lon);
+  const int64_t minute = known ? (int64_t) (p.utc / 60) : -1;
+  if (!this->con_force_) {
+    if (known && this->con_min_ >= 0 && minute >= this->con_min_ && minute - this->con_min_ < CON_RECALC_MIN)
       return;
-    this->build_dipper_();
+    if (!known && this->con_min_ == -1)
+      return;
   }
-  if (on) {
-    for (int i = 0; i < NDIP; i++)
-      lv_obj_set_style_bg_color(this->dip_star_[i], lv_color_hex(dim ? 0xFFF6DC : 0xD8D0B8), 0);
-    for (int i = 0; i < this->ndash_; i++)
-      lv_obj_set_style_line_color(this->dash_[i], lv_color_hex(dim ? 0x6A7FA8 : 0x34435E), 0);
+  this->con_force_ = false;
+  this->con_min_ = minute;
+
+  float pts[NCS][2];
+  if (!known) {
+    for (int i = 0; i < 7; i++) {
+      pts[DIPPER_ORDER[i]][0] = DIPPER[i][0];
+      pts[DIPPER_ORDER[i]][1] = DIPPER[i][1];
+    }
+    this->layout_con_(0, pts, 7);
+    return;
   }
-  show_(this->dip_box_, on);
+
+  // Местное звёздное время по часам и долготе
+  const double d = p.utc / 86400.0 + 2440587.5 - 2451545.0;
+  double gmst = fmod(280.46061837 + 360.98564736629 * d + p.lon, 360.0);
+  if (gmst < 0)
+    gmst += 360.0;
+  const float lst = (float) (gmst * M_PI / 180.0);
+  const float phi = p.lat * (PI_F / 180.0f), sphi = sinf(phi), cphi = cosf(phi);
+
+  // Какие фигуры сейчас над горизонтом и хорошо видны. Совсем мелкие на
+  // экране (Лира в неудачном повороте) — только если больше показать нечего
+  int good[SKY_NCON], ngood = 0, seen[SKY_NCON], nseen = 0, best = 0;
+  float best_u = -2.0f;
+  for (int i = 0; i < SKY_NCON; i++) {
+    float mid_u, low_u;
+    project(SKY_CONS[i], lst, sphi, cphi, pts, mid_u, low_u);
+    if (mid_u > best_u) {
+      best_u = mid_u;
+      best = i;
+    }
+    if (mid_u < CON_MIN_ALT || low_u < 0.14f)  // вся фигура выше ~8°
+      continue;
+    seen[nseen++] = i;
+    int sz[NCS];
+    for (int k = 0; k < SKY_CONS[i].n; k++)
+      sz[k] = star_size(SKY_STARS[SKY_CONS[i].first + k].mag);
+    float size;
+    best_turn(pts, sz, SKY_CONS[i].n, size);
+    if (size >= 120.0f)
+      good[ngood++] = i;
+  }
+  const int *list = ngood ? good : seen;
+  const int nlist = ngood ? ngood : nseen;
+  int pick = best;
+  if (nlist) {
+    // Каждые 10 минут — следующее из видимых; в пределах этих 10 минут —
+    // то же, что уже на экране, если оно всё ещё в списке
+    const int64_t slot = p.utc / CON_SLOT_S;
+    bool keep = false;
+    for (int i = 0; i < nlist; i++)
+      keep |= list[i] == this->con_idx_;
+    pick = (keep && slot == this->con_slot_) ? this->con_idx_ : list[slot % nlist];
+    this->con_slot_ = slot;
+  }
+  float mid_u, low_u;
+  project(SKY_CONS[pick], lst, sphi, cphi, pts, mid_u, low_u);
+  this->layout_con_(pick, pts, SKY_CONS[pick].n);
+}
+
+void WeatherFx::meteor_(uint32_t now) {
+  if (!this->stars_on_) {
+    this->next_met_ = 0;
+    return;
+  }
+  if (!this->met_on_) {
+    if (this->next_met_ == 0)
+      this->next_met_ = now + rnd_(15000, 45000);
+    if ((int32_t) (now - this->next_met_) < 0)
+      return;
+    // Пролетает по верхней части неба наискосок вниз, влево или вправо
+    const bool right = rnd_(0, 2);
+    const float a = rnd_(12, 33) * (PI_F / 180.0f);
+    const float sp = rnd_(32, 43) / 100.0f;  // px/мс
+    this->met_vx_ = (right ? sp : -sp) * cosf(a);
+    this->met_vy_ = sp * sinf(a);
+    this->met_x0_ = right ? rnd_(90, 250) : rnd_(216, 376);
+    this->met_y0_ = rnd_(30, 71);
+    // Не ниже 150 px — к цифрам времени не подлетает
+    this->met_len_ = std::min((uint32_t) rnd_(450, 651), (uint32_t) ((150.0f - this->met_y0_) / this->met_vy_));
+    this->met_t0_ = now;
+    this->met_on_ = true;
+  }
+  const uint32_t t = now - this->met_t0_;
+  if (t >= this->met_len_) {
+    this->mark_(this->met_spot_, false, 0, 0, 1, 1);
+    this->met_on_ = false;
+    this->next_met_ = now + rnd_(30000, 90000);
+    return;
+  }
+  const float sp = sqrtf(this->met_vx_ * this->met_vx_ + this->met_vy_ * this->met_vy_);
+  const float tail = std::min(60.0f, sp * t);
+  this->met_hx_ = this->met_x0_ + this->met_vx_ * t;
+  this->met_hy_ = this->met_y0_ + this->met_vy_ * t;
+  this->met_tx_ = this->met_hx_ - this->met_vx_ / sp * tail;
+  this->met_ty_ = this->met_hy_ - this->met_vy_ / sp * tail;
+  // Вспыхивает за 80 мс и гаснет за последние 150 мс
+  float o = 1.0f;
+  if (t < 80)
+    o = t / 80.0f;
+  if (t + 150 > this->met_len_)
+    o = std::min(o, (this->met_len_ - t) / 150.0f);
+  this->met_opa_ = (lv_opa_t) (255 * o);
+  const int x = (int) std::min(this->met_hx_, this->met_tx_) - 4, y = (int) std::min(this->met_hy_, this->met_ty_) - 4;
+  const int w = (int) std::abs(this->met_hx_ - this->met_tx_) + 9, h = (int) std::abs(this->met_hy_ - this->met_ty_) + 9;
+  // Меняется яркость — перерисовать, даже если рамка та же
+  if (this->met_spot_.on)
+    this->invalidate_(this->met_spot_.a);
+  this->mark_(this->met_spot_, true, x, y, w, h);
+}
+
+void WeatherFx::sun_(uint32_t now) {
+  // Лучи поворачиваются на оборот за две минуты, шаг — 4 раза в секунду
+  if (!this->sun_on_ || now - this->sun_ms_ < 250)
+    return;
+  const uint32_t dt = this->sun_ms_ ? std::min<uint32_t>(now - this->sun_ms_, 1000) : 250;
+  this->sun_ms_ = now;
+  this->sun_ang_ += dt * (2.0f * PI_F / 120000.0f);
+  if (this->sun_ang_ > 2.0f * PI_F)
+    this->sun_ang_ -= 2.0f * PI_F;
+  if (this->sun_spot_.on)
+    this->invalidate_(this->sun_spot_.a);
+}
+
+void WeatherFx::garland_(uint32_t now) {
+  // Лампочки перемигиваются: каждый шаг гаснет каждая третья, по кругу
+  if (!this->gar_on_ || now - this->gar_ms_ < 600)
+    return;
+  this->gar_ms_ = now;
+  this->gar_step_ = (this->gar_step_ + 1) % 3;
+  for (auto &g : this->gs_)
+    if (g.on)
+      this->invalidate_(g.a);
 }
 
 void WeatherFx::frame(const Params &p) {
@@ -680,16 +1139,19 @@ void WeatherFx::frame(const Params &p) {
 
   const int cnt = std::min(std::max(p.count, 0), ND);
   const int sig = p.mode | (cnt << 4) | (std::min(std::max(p.clouds, 0), NC) << 10) | ((p.storm ? 1 : 0) << 12) |
-                  ((p.dim ? 1 : 0) << 13) | ((p.stars ? 1 : 0) << 14) | ((p.rain_style ? 1 : 0) << 15);
+                  ((p.dim ? 1 : 0) << 13) | ((p.stars ? 1 : 0) << 14) | ((p.rain_style ? 1 : 0) << 15) |
+                  ((p.sun ? 1 : 0) << 16) | ((p.garland ? 1 : 0) << 17);
   if (sig != this->applied_) {
-    // Если поменялась только яркость — перекрашиваем, но не перемешиваем
-    const int no_dim = ~(1 << 13);
-    const bool relayout = this->applied_ < 0 || (sig & no_dim) != (this->applied_ & no_dim);
+    // Если поменялись только яркость, солнце или гирлянда — перекрашиваем,
+    // но осадки не перемешиваем
+    const int keep = ~((1 << 13) | (1 << 16) | (1 << 17));
+    const bool relayout = this->applied_ < 0 || (sig & keep) != (this->applied_ & keep);
     this->applied_ = sig;
     this->apply_(p, relayout);
   }
 
-  const bool any = this->nd_ || this->nf_ || this->ncl_ || this->storm_ || this->stars_on_;
+  const bool any =
+      this->nd_ || this->nf_ || this->ncl_ || this->storm_ || this->stars_on_ || this->sun_on_ || this->gar_on_;
   if (!any || !p.active) {
     this->end_strike_();
     this->last_ms_ = 0;
@@ -711,7 +1173,11 @@ void WeatherFx::frame(const Params &p) {
     this->slow_ms_ = 0;
   }
   const float wind = this->wind_(p, now);
+  this->sky_(p);
   this->stars_(now);
+  this->meteor_(now);
+  this->sun_(now);
+  this->garland_(now);
   if (this->glass_on_) {
     if (ks > 0)
       this->glass_(ks, ks * 50.0f);

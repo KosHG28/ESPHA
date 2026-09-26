@@ -21,6 +21,7 @@ static const float SNOWMAN_SPEED = 0.04f;
 static const uint32_t SLEEP_MS = 120000;  // кот спит 2 минуты
 static const int OFF_L = -110, OFF_R = 480;  // за краем экрана
 static const int CENTER_X = 233 - CAT_W / 2;
+static const uint32_t MEOW_MS = 1600;  // сколько кот сидит и мяукает после касания
 
 int Critters::rnd_(int lo, int hi) { return lo + (int) (random_uint32() % (uint32_t) (hi - lo)); }
 
@@ -54,6 +55,28 @@ void Critters::stop_() {
 
 void Critters::start_cat() { this->start(rnd_(0, 2) ? SHOW_CAT_RUN : SHOW_CAT_VISIT); }
 
+void Critters::poke() {
+  if (!this->img_)
+    return;
+  const bool cat = this->show_ == SHOW_CAT_RUN || this->show_ == SHOW_CAT_VISIT || this->show_ == SHOW_CAT_SLEEP;
+  // Уже мяукает или ещё не выбежал на экран — не замечает
+  if (!cat || (this->show_ == SHOW_CAT_VISIT && this->stage_ == 3))
+    return;
+  if (this->x_ < -CAT_W / 2 || this->x_ > 466 - CAT_W / 2)
+    return;
+  if (this->show_ == SHOW_CAT_SLEEP)
+    this->right_ = rnd_(0, 2);  // проснулся — убежит в случайную сторону
+  this->show_ = SHOW_CAT_VISIT;
+  this->stage_ = 3;
+  this->stage_t0_ = millis();
+  if (this->zzz_) {
+    lv_label_set_text(this->zzz_, "мяу!");
+    lv_obj_set_pos(this->zzz_, (int) this->x_ + CAT_W / 2 - 40, (int) this->y_ - 48);
+    lv_obj_clear_flag(this->zzz_, LV_OBJ_FLAG_HIDDEN);
+    this->zzz_f_ = -1;
+  }
+}
+
 void Critters::start(Show show) {
   if (!this->img_)
     return;
@@ -63,6 +86,7 @@ void Critters::start(Show show) {
   this->stage_t0_ = this->t0_;
   this->right_ = rnd_(0, 2);
   this->shown_img_ = nullptr;
+  this->zzz_f_ = -1;
   switch (show) {
     case SHOW_BIRD:
       this->y_ = SKY_Y + rnd_(0, 30);
@@ -163,6 +187,19 @@ void Critters::frame(bool can_show, bool night, bool winter) {
           this->stage_ = 2;
           this->stage_t0_ = now;
         }
+      } else if (this->stage_ == 3) {
+        // Заметил касание: сидит, смотрит, моргает, над ним «мяу!»
+        bool blink = st > 600 && st < 750;
+        const lv_image_dsc_t *img = this->right_ ? (blink ? &spr_cat_blink_r : &spr_cat_sit_r)
+                                                 : (blink ? &spr_cat_blink_l : &spr_cat_sit_l);
+        this->place_(img, (int) this->x_, (int) this->y_);
+        if (st > MEOW_MS) {
+          // И бежит дальше, куда бежал
+          if (this->zzz_)
+            lv_obj_add_flag(this->zzz_, LV_OBJ_FLAG_HIDDEN);
+          this->stage_ = 2;
+          this->stage_t0_ = now;
+        }
       } else {
         this->x_ += (this->right_ ? 1.0f : -1.0f) * CAT_SPEED * 1.2f * dt;
         int f = (st / 80) % 4;
@@ -205,9 +242,8 @@ void Critters::frame(bool can_show, bool night, bool winter) {
         // «z», «z z», «z z z» по кругу, чуть поднимаясь
         static const char *Z[3] = {"z", "z z", "z z z"};
         int f = (t / 800) % 3;
-        static int last_f = -1;
-        if (f != last_f) {
-          last_f = f;
+        if (f != this->zzz_f_) {
+          this->zzz_f_ = f;
           lv_label_set_text(this->zzz_, Z[f]);
           lv_obj_set_pos(this->zzz_, (int) this->x_ + 70, (int) this->y_ - 34 - f * 4);
           lv_obj_clear_flag(this->zzz_, LV_OBJ_FLAG_HIDDEN);

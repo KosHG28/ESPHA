@@ -54,12 +54,45 @@ script:
             char buf[4];
             snprintf(buf, sizeof(buf), "%02d", now.minute);
             return std::string(buf);
+      # Новая цифра мягко проявляется за полсекунды. Только если часы на
+      # экране и он не выключен — иначе смотреть некому
+      - lambda: |-
+          auto now = id(ha_time).now();
+          if (!now.is_valid())
+            return;
+          static int last_h = -1, last_m = -1;
+          const bool changed_m = last_m >= 0 && now.minute != last_m;
+          const bool changed_h = last_h >= 0 && now.hour != last_h;
+          last_h = now.hour;
+          last_m = now.minute;
+          if (id(screen_off) || id(current_page) != 0)
+            return;
+          auto fade_in = [](lv_obj_t *o) {
+            lv_anim_delete(o, nullptr);
+            lv_obj_set_style_opa(o, LV_OPA_TRANSP, 0);
+            lv_anim_t a;
+            lv_anim_init(&a);
+            lv_anim_set_var(&a, o);
+            lv_anim_set_values(&a, LV_OPA_TRANSP, LV_OPA_COVER);
+            lv_anim_set_duration(&a, 500);
+            lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
+            lv_anim_set_exec_cb(&a, [](void *obj, int32_t v) {
+              lv_obj_set_style_opa((lv_obj_t *) obj, (lv_opa_t) v, 0);
+            });
+            lv_anim_start(&a);
+          };
+          if (changed_m)
+            fade_in(id(lbl_time_m));
+          if (changed_h)
+            fade_in(id(lbl_time_h));
       - script.execute: weather_icon
       # Ночь (для звёзд и луны) и ночное выключение экрана
       - script.execute: update_night
       - script.execute: power_eval
       # «сегодня» в строке о последней печати в полночь должно стать «вчера»
       - script.execute: refresh_printer_last
+      # Новый год и дни рождения
+      - script.execute: holiday_check
 
   # Цвет температуры по значению: холодно — голубой, норма — белый, жарко —
   # оранжевый. Пороги — подстановки slotN_cold / slotN_hot в espha.yaml.
@@ -151,6 +184,9 @@ script:
                     m = lt.minute;
                     return true;
                   };
+                  // В день рождения вместо солнца — поздравление
+                  if (!id(birthday_line).empty())
+                    return "\U000F00EB " + id(birthday_line);
                   const bool night = id(is_night);
                   int h, m;
                   if (!local_hm(night ? id(ha_sun_rising).state : id(ha_sun_setting).state, h, m))
@@ -161,6 +197,10 @@ script:
                   else
                     snprintf(buf, sizeof(buf), "\U000F059B закат %d:%02d", h, m);
                   return std::string(buf);
+            # Поздравление — золотым, солнце — серым
+            - lambda: |-
+                lv_obj_set_style_text_color(id(lbl_sun),
+                    lv_color_hex(id(birthday_line).empty() ? 0x8A9199 : 0xFFC107), 0);
 
   # Дверь открыта уже door_alarm_delay: тревога
   - id: door_timer

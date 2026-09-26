@@ -167,6 +167,17 @@ globals:
     type: bool
     restore_value: false
     initial_value: 'false'
+  # Яркость, которая сейчас выставлена панели (0..255), — от неё идёт плавный
+  # переход. 180 — яркость из настройки дисплея при запуске
+  - id: bri_now
+    type: int
+    restore_value: false
+    initial_value: '180'
+  # За сколько миллисекунд разгораться при пробуждении
+  - id: wake_fade_ms
+    type: int
+    restore_value: false
+    initial_value: '200'
 
 script:
   # Полная яркость, затем — через screen_timeout секунд — приглушение.
@@ -174,6 +185,10 @@ script:
   - id: wake_screen
     mode: restart
     then:
+      # Разбудили посреди плавного гашения — не доводить его до конца
+      - script.stop: screen_sleep
+      # Из полной темноты экран разгорается чуть дольше, из ожидания — быстро
+      - lambda: 'id(wake_fade_ms) = id(screen_off) ? 400 : 200;'
       # Экран был выключен полностью — возобновить отрисовку. Если за это
       # время у принтера что-то произошло, сразу открыть его страницу
       - if:
@@ -193,11 +208,11 @@ script:
                       then:
                         - lvgl.page.show:
                             id: page_printer
+      # Плавно к полной яркости; надписи на часах снова непрозрачные (в
+      # ожидании могли быть приглушены)
       - lambda: |-
           id(screen_dimmed) = false;
-          // Надписи на часах снова непрозрачные (в ожидании могли быть приглушены)
-          lv_obj_set_style_text_opa(id(root_clock), LV_OPA_COVER, 0);
-          id(amoled)->set_brightness((uint8_t) (id(screen_brightness).state * 2.55f + 0.5f));
+          id(fade_screen)->execute((int) (id(screen_brightness).state * 2.55f + 0.5f), 255, id(wake_fade_ms));
       - if:
           condition:
             lambda: 'return id(screen_timeout).state > 0;'
@@ -235,14 +250,12 @@ script:
           if (!id(screen_dimmed) || id(screen_off))
             return;
           float full = id(screen_brightness).state, dim = id(screen_dim).state;
-          lv_obj_t *clock = id(root_clock);
+          // Затухает плавно, за секунду
           if (id(sw_fx_bright).state && dim > 0 && full > dim) {
             float k = std::max(0.08f, dim / full);
-            lv_obj_set_style_text_opa(clock, (lv_opa_t) (k * 255.0f + 0.5f), 0);
-            id(amoled)->set_brightness((uint8_t) (full * 2.55f + 0.5f));
+            id(fade_screen)->execute((int) (full * 2.55f + 0.5f), (int) (k * 255.0f + 0.5f), 1000);
           } else {
-            lv_obj_set_style_text_opa(clock, LV_OPA_COVER, 0);
-            id(amoled)->set_brightness((uint8_t) (dim * 2.55f + 0.5f));
+            id(fade_screen)->execute((int) (dim * 2.55f + 0.5f), 255, 1000);
           }
 
   # Выключить экран полностью: яркость 0 — пиксели AMOLED не горят вовсе,
@@ -251,11 +264,63 @@ script:
   - id: screen_sleep
     mode: single
     then:
+      # Сначала плавно гаснет, и только потом отрисовка встаёт на паузу —
+      # на паузе переход не шёл бы
       - lambda: |-
           id(screen_off) = true;
           id(screen_dimmed) = true;
+          id(fade_screen)->execute(0, (int) lv_obj_get_style_text_opa(id(root_clock), LV_PART_MAIN), 600);
+      - delay: 650ms
+      - lambda: |-
+          id(bri_now) = 0;
           id(amoled)->set_brightness(0);
       - lvgl.pause:
+
+  # Плавный переход яркости панели (bri, 0..255) и прозрачности надписей на
+  # часах (opa, 0..255) за ms миллисекунд. Идёт анимацией LVGL, в такт с
+  # перерисовкой экрана
+  - id: fade_screen
+    parameters:
+      bri: int
+      opa: int
+      ms: int
+    mode: restart
+    then:
+      - lambda: |-
+          struct Fade {
+            int b0, b1, o0, o1;
+          };
+          static Fade f;
+          lv_anim_delete(&f, nullptr);
+          f.b0 = id(bri_now);
+          f.b1 = std::max(0, std::min(255, bri));
+          f.o0 = lv_obj_get_style_text_opa(id(root_clock), LV_PART_MAIN);
+          f.o1 = std::max(0, std::min(255, opa));
+          if (f.b0 == f.b1 && f.o0 == f.o1)
+            return;
+          auto step = [](void *var, int32_t v) {
+            auto *p = (Fade *) var;
+            const int b = p->b0 + (p->b1 - p->b0) * v / 256;
+            const int o = p->o0 + (p->o1 - p->o0) * v / 256;
+            if (b != id(bri_now)) {
+              id(bri_now) = b;
+              id(amoled)->set_brightness((uint8_t) b);
+            }
+            if (o != lv_obj_get_style_text_opa(id(root_clock), LV_PART_MAIN))
+              lv_obj_set_style_text_opa(id(root_clock), (lv_opa_t) o, 0);
+          };
+          if (ms <= 0) {
+            step(&f, 256);
+            return;
+          }
+          lv_anim_t a;
+          lv_anim_init(&a);
+          lv_anim_set_var(&a, &f);
+          lv_anim_set_values(&a, 0, 256);
+          lv_anim_set_duration(&a, ms);
+          lv_anim_set_path_cb(&a, lv_anim_path_ease_in_out);
+          lv_anim_set_exec_cb(&a, step);
+          lv_anim_start(&a);
 
   # Дома никого: подождать away_off_delay — вдруг это сбой геопозиции или
   # вы вышли на пару минут — и только тогда считать, что никого нет

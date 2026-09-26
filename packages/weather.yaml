@@ -1,7 +1,8 @@
 # ---------------------------------------------------------------------------
 # Погодный фон на странице часов: дождь с брызгами о край экрана (и косой
-# при ветре), звёзды ясной ночью, снежинки разной формы,
-# град, облака и молнии в грозу. Работает и в приглушённом режиме — при
+# при ветре), снежинки разной формы, град, облака и молнии в грозу. Ясной
+# ночью — мерцающие звёзды, созвездие, которое сейчас видно над домом, и
+# изредка метеор; ясным днём — солнце с медленно вращающимися лучами. Работает и в приглушённом режиме — при
 # гашении экран возвращается на часы, а частицы переходят на яркую палитру,
 # чтобы их было видно при низкой яркости панели.
 #
@@ -49,6 +50,11 @@ globals:
     type: bool
     restore_value: false
     initial_value: 'false'
+  # Солнце: ясный день
+  - id: weather_sun
+    type: bool
+    restore_value: false
+    initial_value: 'false'
 
 text_sensor:
   - platform: homeassistant
@@ -87,6 +93,20 @@ sensor:
     entity_id: ${weather_wind_gust_entity}
     internal: true
 
+  # Где дом — из зоны «Дом» Home Assistant. По ним и по времени считается,
+  # какие созвездия сейчас над горизонтом. Пока HA не ответил — координаты
+  # из home_latitude / home_longitude в espha.yaml
+  - platform: homeassistant
+    id: ha_home_lat
+    entity_id: zone.home
+    attribute: latitude
+    internal: true
+  - platform: homeassistant
+    id: ha_home_lon
+    entity_id: zone.home
+    attribute: longitude
+    internal: true
+
 select:
   # Как рисовать дождь. «Капли на стекле» — капли появляются и медленно
   # сползают: нет быстрого движения, значит нет мерцания и нагрузки.
@@ -109,7 +129,7 @@ select:
     name: Фон погоды
     icon: mdi:weather-snowy-rainy
     entity_category: config
-    options: ["Авто", "Выкл", "Дождь", "Снег", "Гроза", "Облачно", "Ясная ночь"]
+    options: ["Авто", "Выкл", "Дождь", "Снег", "Гроза", "Облачно", "Ясная ночь", "Ясный день"]
     initial_option: "Авто"
     optimistic: true
     restore_value: true
@@ -206,7 +226,8 @@ script:
     then:
       - lambda: |-
           // Номер пункта «Фона погоды»:
-          // 0 Авто, 1 Выкл, 2 Дождь, 3 Снег, 4 Гроза, 5 Облачно, 6 Ясная ночь
+          // 0 Авто, 1 Выкл, 2 Дождь, 3 Снег, 4 Гроза, 5 Облачно, 6 Ясная ночь,
+          // 7 Ясный день
           size_t sel = id(weather_fx_select).active_index().value_or(0);
           std::string s;
           switch (sel) {
@@ -216,10 +237,15 @@ script:
             case 4: s = "thunderstorm_with_rain"; break;
             case 5: s = "cloudy"; break;
             case 6: s = "clear"; break;
+            case 7: s = "clear"; break;
             default: s = ""; break;
           }
-          // Звёзды — ясной или малооблачной ночью. «Ясная ночь» показывает их и днём
-          id(weather_stars) = (s == "clear" || s == "partly_cloudy") && (id(is_night) || sel == 6);
+          // Звёзды — ясной или малооблачной ночью, солнце — таким же днём.
+          // «Ясная ночь» и «Ясный день» показывают своё в любое время
+          const bool fair = s == "clear" || s == "partly_cloudy";
+          const bool night = sel == 6 ? true : (sel == 7 ? false : id(is_night));
+          id(weather_stars) = fair && night;
+          id(weather_sun) = fair && !night;
           int mode = 0, cnt = 0, clouds = 0;
           bool storm = false;
           if (s == "partly_cloudy") { clouds = 1; }
@@ -258,7 +284,8 @@ interval:
             // Капли, снежинки, брызги и звёзды рисует холст компонента —
             // объектами LVGL здесь только облака и молния
             id(wfx)->bind(id(fx_root), id(fx_clouds), id(fx_bolt)->obj, id(fx_bolt_glow)->obj,
-                          id(font_flake_s)->get_lv_font(), id(font_flake_l)->get_lv_font());
+                          id(font_flake_s)->get_lv_font(), id(font_flake_l)->get_lv_font(),
+                          id(font_con)->get_lv_font());
             // За крупными цифрами времени частицы не рисуются: перерисовывать
             // кусок цифры 101 px ради пролетающей капли — самое дорогое.
             // Прямоугольники цифр часов и минут в экранных координатах (с
@@ -272,7 +299,13 @@ interval:
           p.clouds = id(weather_clouds);
           p.storm = id(weather_storm);
           p.stars = id(weather_stars);
+          p.sun = id(weather_sun);
+          p.garland = id(fx_garland);
           p.dim = id(screen_dimmed);
+          // Для созвездия: координаты дома и время
+          p.lat = std::isnan(id(ha_home_lat).state) ? ${home_latitude} : id(ha_home_lat).state;
+          p.lon = std::isnan(id(ha_home_lon).state) ? ${home_longitude} : id(ha_home_lon).state;
+          p.utc = (uint32_t) id(ha_time).timestamp_now();
           // Двигать только пока открыты часы, экран не выключен полностью
           // и никто не трогает экран: пока палец на экране и 0,4 с после
           // (идёт листание) все силы отдаются касанию, а дождь на миг замирает.
