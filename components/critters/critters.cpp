@@ -9,15 +9,18 @@
 namespace esphome {
 namespace critters {
 
-// Геометрия — экранные координаты, центр круга 233,233, радиус 233
-static const int GROUND_Y = 372;   // верх спрайта кота/улитки у нижнего края
-static const int SKY_Y = 56;       // птица летит по верху
-static const float CAT_SPEED = 0.16f;    // px/мс — ~160 px/с
-static const float BIRD_SPEED = 0.18f;
-static const float SNAIL_SPEED = 0.014f;
-static const float SNOWMAN_SPEED = 0.035f;
+// Геометрия — экранные координаты, центр круга 233,233, радиус 233.
+// Спрайты: кот 104×64, птица 48×30, улитка 60×36, снеговик 48×66
+static const int GROUND = 400;          // низ спрайтов у нижнего края круга
+static const int CAT_W = 104, CAT_H = 64;
+static const int SKY_Y = 60;            // птица летит по верху
+static const float CAT_SPEED = 0.20f;   // px/мс — ~200 px/с
+static const float BIRD_SPEED = 0.20f;
+static const float SNAIL_SPEED = 0.016f;
+static const float SNOWMAN_SPEED = 0.04f;
 static const uint32_t SLEEP_MS = 120000;  // кот спит 2 минуты
-static const int OFF_L = -60, OFF_R = 480;  // за краем экрана
+static const int OFF_L = -110, OFF_R = 480;  // за краем экрана
+static const int CENTER_X = 233 - CAT_W / 2;
 
 int Critters::rnd_(int lo, int hi) { return lo + (int) (random_uint32() % (uint32_t) (hi - lo)); }
 
@@ -66,14 +69,14 @@ void Critters::start(Show show) {
       break;
     case SHOW_SNAIL:
       this->right_ = false;  // улитка нарисована ползущей влево
-      this->y_ = this->winter_ ? GROUND_Y - 14 : GROUND_Y + 8;
+      this->y_ = this->winter_ ? GROUND - 66 : GROUND - 36;
       break;
     case SHOW_CAT_SLEEP:
-      this->x_ = 233 - 26;
-      this->y_ = GROUND_Y;
+      this->x_ = CENTER_X;
+      this->y_ = GROUND - CAT_H;
       break;
     default:
-      this->y_ = GROUND_Y;
+      this->y_ = GROUND - CAT_H;
       break;
   }
   if (show != SHOW_CAT_SLEEP)
@@ -144,7 +147,7 @@ void Critters::frame(bool can_show, bool night, bool winter) {
         this->x_ += dir * CAT_SPEED * dt;
         int f = (t / 90) % 4;
         this->place_(this->right_ ? R[f] : L[f], (int) this->x_, (int) this->y_);
-        if ((this->right_ && this->x_ >= 233 - 26) || (!this->right_ && this->x_ <= 233 - 26)) {
+        if ((this->right_ && this->x_ >= CENTER_X) || (!this->right_ && this->x_ <= CENTER_X)) {
           this->stage_ = 1;
           this->stage_t0_ = now;
         }
@@ -206,7 +209,7 @@ void Critters::frame(bool can_show, bool night, bool winter) {
         if (f != last_f) {
           last_f = f;
           lv_label_set_text(this->zzz_, Z[f]);
-          lv_obj_set_pos(this->zzz_, (int) this->x_ + 34, (int) this->y_ - 22 - f * 3);
+          lv_obj_set_pos(this->zzz_, (int) this->x_ + 70, (int) this->y_ - 34 - f * 4);
           lv_obj_clear_flag(this->zzz_, LV_OBJ_FLAG_HIDDEN);
         }
       }

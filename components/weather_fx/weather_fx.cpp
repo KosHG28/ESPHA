@@ -281,7 +281,7 @@ void WeatherFx::apply_(const Params &p, bool relayout) {
         x = rnd_(50, 416);
         y = rnd_(30, 220);
       } while ((x - 233) * (x - 233) + (y - 233) * (y - 233) > 215 * 215 ||
-               (x > 118 && x < 342 && y > 8 && y < 92));
+               (x > 82 && x < 372 && y > 22 && y < 122));
       this->stx_[i] = x;
       this->sty_[i] = y;
       this->stph_[i] = rnd_(0, 628) / 100.0f;
@@ -578,15 +578,17 @@ void WeatherFx::lightning_(uint32_t now) {
   }
 }
 
-// Большая Медведица: ковш и ручка, экранные координаты над погодой
+// Большая Медведица: ковш и ручка во всю «шапку» круга над строкой погоды
+// (она начинается на 113 px). Экранные координаты; все звёзды не дальше
+// 225 px от центра, чтобы не уходить за край круга
 static const int DIPPER[7][2] = {
-    {133, 70},  // Бенетнаш (конец ручки)
-    {182, 52},  // Мицар
-    {221, 63},  // Алиот
-    {263, 68},  // Мегрец
-    {268, 19},  // Дубхе
-    {328, 29},  // Мерак
-    {323, 76},  // Фекда
+    {95, 103},   // Бенетнаш (конец ручки)
+    {161, 79},   // Мицар
+    {214, 93},   // Алиот
+    {271, 100},  // Мегрец
+    {277, 34},   // Дубхе
+    {358, 48},   // Мерак
+    {352, 111},  // Фекда
 };
 static const int DIPPER_LINKS[7][2] = {{0, 1}, {1, 2}, {2, 3}, {3, 6}, {6, 5}, {5, 4}, {4, 3}};
 
@@ -603,23 +605,23 @@ void WeatherFx::build_dipper_() {
   lv_obj_move_to_index(box, 0);
   this->dip_box_ = box;
 
-  // Пунктир: чёрточки по 4 px через 4 px, с отступом от звёзд
+  // Пунктир: чёрточки по 5 px через 5 px, с отступом от звёзд
   this->ndash_ = 0;
   for (const auto &l : DIPPER_LINKS) {
     const float x0 = DIPPER[l[0]][0], y0 = DIPPER[l[0]][1];
     const float x1 = DIPPER[l[1]][0], y1 = DIPPER[l[1]][1];
     const float len = sqrtf((x1 - x0) * (x1 - x0) + (y1 - y0) * (y1 - y0));
     const float ux = (x1 - x0) / len, uy = (y1 - y0) / len;
-    for (float s = 6.0f; s + 4.0f < len - 6.0f && this->ndash_ < NDASH; s += 8.0f) {
+    for (float s = 8.0f; s + 5.0f < len - 8.0f && this->ndash_ < NDASH; s += 10.0f) {
       lv_point_precise_t *pt = this->dash_pts_[this->ndash_];
       pt[0].x = (lv_value_precise_t) (x0 + ux * s);
       pt[0].y = (lv_value_precise_t) (y0 + uy * s);
-      pt[1].x = (lv_value_precise_t) (x0 + ux * (s + 4.0f));
-      pt[1].y = (lv_value_precise_t) (y0 + uy * (s + 4.0f));
+      pt[1].x = (lv_value_precise_t) (x0 + ux * (s + 5.0f));
+      pt[1].y = (lv_value_precise_t) (y0 + uy * (s + 5.0f));
       lv_obj_t *ln = lv_line_create(box);
       lv_obj_remove_style_all(ln);
       lv_line_set_points(ln, pt, 2);
-      lv_obj_set_style_line_width(ln, 1, 0);
+      lv_obj_set_style_line_width(ln, 2, 0);
       lv_obj_clear_flag(ln, LV_OBJ_FLAG_CLICKABLE);
       this->dash_[this->ndash_++] = ln;
     }
@@ -628,7 +630,7 @@ void WeatherFx::build_dipper_() {
   for (int i = 0; i < NDIP; i++) {
     lv_obj_t *st = lv_obj_create(box);
     lv_obj_remove_style_all(st);
-    const int sz = (i == 1 || i == 2 || i == 4) ? 5 : 4;  // Мицар, Алиот, Дубхе — ярче
+    const int sz = (i == 1 || i == 2 || i == 4) ? 8 : 6;  // Мицар, Алиот, Дубхе — ярче
     lv_obj_set_size(st, sz, sz);
     lv_obj_set_pos(st, DIPPER[i][0] - sz / 2, DIPPER[i][1] - sz / 2);
     lv_obj_set_style_radius(st, LV_RADIUS_CIRCLE, 0);
