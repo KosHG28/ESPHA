@@ -70,6 +70,7 @@ script:
           auto fade_in = [](lv_obj_t *o) {
             lv_anim_delete(o, nullptr);
             lv_obj_set_style_opa(o, LV_OPA_TRANSP, 0);
+            lv_obj_set_style_translate_y(o, 0, 0);  // если прервали каскад пробуждения
             lv_anim_t a;
             lv_anim_init(&a);
             lv_anim_set_var(&a, o);

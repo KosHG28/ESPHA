@@ -187,8 +187,9 @@ script:
     then:
       # Разбудили посреди плавного гашения — не доводить его до конца
       - script.stop: screen_sleep
-      # Из полной темноты экран разгорается чуть дольше, из ожидания — быстро
-      - lambda: 'id(wake_fade_ms) = id(screen_off) ? 400 : 200;'
+      # Из полной темноты экран разгорается дольше — вместе с раскрытием
+      # «зрачка», из ожидания — быстро
+      - lambda: 'id(wake_fade_ms) = id(screen_off) ? 550 : 220;'
       # Экран был выключен полностью — возобновить отрисовку. Если за это
       # время у принтера что-то произошло, сразу открыть его страницу
       - if:
@@ -208,6 +209,7 @@ script:
                       then:
                         - lvgl.page.show:
                             id: page_printer
+            - script.execute: wake_reveal
       # Плавно к полной яркости; надписи на часах снова непрозрачные (в
       # ожидании могли быть приглушены)
       - lambda: |-
@@ -276,6 +278,77 @@ script:
           id(amoled)->set_brightness(0);
       - lvgl.pause:
 
+  # Пробуждение из полной темноты: картинка раскрывается от центра к краям,
+  # как зрачок, — чёрное кольцо на верхнем слое сужается к краю круга. На
+  # часах надписи появляются по очереди и чуть всплывают: сначала время,
+  # затем погода, строка солнца и комнатная температура
+  - id: wake_reveal
+    mode: restart
+    then:
+      - lambda: |-
+          static lv_obj_t *iris = nullptr;
+          if (!iris) {
+            iris = lv_obj_create(lv_display_get_layer_top(lv_display_get_default()));
+            lv_obj_remove_style_all(iris);
+            lv_obj_set_size(iris, 466, 466);
+            lv_obj_set_pos(iris, 0, 0);
+            lv_obj_set_style_radius(iris, LV_RADIUS_CIRCLE, 0);
+            lv_obj_set_style_border_color(iris, lv_color_black(), 0);
+            lv_obj_set_style_border_opa(iris, LV_OPA_COVER, 0);
+            lv_obj_clear_flag(iris, LV_OBJ_FLAG_CLICKABLE);
+          }
+          lv_obj_move_foreground(iris);
+          lv_obj_clear_flag(iris, LV_OBJ_FLAG_HIDDEN);
+          lv_anim_delete(iris, nullptr);
+          lv_anim_t a;
+          lv_anim_init(&a);
+          lv_anim_set_var(&a, iris);
+          lv_anim_set_values(&a, 233, 0);
+          lv_anim_set_duration(&a, 550);
+          lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
+          lv_anim_set_early_apply(&a, true);
+          lv_anim_set_exec_cb(&a, [](void *o, int32_t v) {
+            lv_obj_set_style_border_width((lv_obj_t *) o, v, 0);
+          });
+          lv_anim_set_completed_cb(&a, [](lv_anim_t *an) {
+            lv_obj_add_flag((lv_obj_t *) an->var, LV_OBJ_FLAG_HIDDEN);
+          });
+          lv_anim_start(&a);
+
+          // Каскад надписей — только если открыты часы
+          if (id(current_page) != 0)
+            return;
+          struct Step {
+            lv_obj_t *obj;
+            uint32_t delay;
+          };
+          const Step steps[] = {
+              {id(lbl_time_h), 60},
+              {id(lbl_time_m), 110},
+              {lv_obj_get_parent(id(lbl_slot1)), 200},
+              {id(lbl_door), 200},
+              {id(lbl_wstatus), 270},
+              {id(lbl_sun), 330},
+              {id(lbl_slot2), 390},
+          };
+          for (const auto &st : steps) {
+            lv_anim_delete(st.obj, nullptr);
+            lv_anim_t c;
+            lv_anim_init(&c);
+            lv_anim_set_var(&c, st.obj);
+            lv_anim_set_values(&c, 0, 256);
+            lv_anim_set_duration(&c, 420);
+            lv_anim_set_delay(&c, st.delay);
+            lv_anim_set_path_cb(&c, lv_anim_path_ease_out);
+            lv_anim_set_early_apply(&c, true);
+            // Прозрачность 0 → 100 % и подъём на 14 px снизу
+            lv_anim_set_exec_cb(&c, [](void *o, int32_t v) {
+              lv_obj_set_style_opa((lv_obj_t *) o, (lv_opa_t) (v >= 256 ? 255 : v), 0);
+              lv_obj_set_style_translate_y((lv_obj_t *) o, 14 * (256 - v) / 256, 0);
+            });
+            lv_anim_start(&c);
+          }
+
   # Плавный переход яркости панели (bri, 0..255) и прозрачности надписей на
   # часах (opa, 0..255) за ms миллисекунд. Идёт анимацией LVGL, в такт с
   # перерисовкой экрана
@@ -287,8 +360,13 @@ script:
     mode: restart
     then:
       - lambda: |-
+          // Яркость меняется равномерно для глаза, а не для панели: глаз
+          // чувствует яркость примерно как степень 1/2.2, поэтому переход идёт
+          // по «светлоте», а в панель уходит её степень 2.2. Иначе в начале
+          // разгорания экран словно вспыхивает, а в конце почти не меняется
           struct Fade {
             int b0, b1, o0, o1;
+            float l0, l1;
           };
           static Fade f;
           lv_anim_delete(&f, nullptr);
@@ -298,9 +376,12 @@ script:
           f.o1 = std::max<int>(0, std::min<int>(255, opa));
           if (f.b0 == f.b1 && f.o0 == f.o1)
             return;
+          f.l0 = powf(f.b0 / 255.0f, 1.0f / 2.2f);
+          f.l1 = powf(f.b1 / 255.0f, 1.0f / 2.2f);
           auto step = [](void *var, int32_t v) {
             auto *p = (Fade *) var;
-            const int b = p->b0 + (p->b1 - p->b0) * v / 256;
+            const float l = p->l0 + (p->l1 - p->l0) * v / 256.0f;
+            const int b = v >= 256 ? p->b1 : (int) (255.0f * powf(l, 2.2f) + 0.5f);
             const int o = p->o0 + (p->o1 - p->o0) * v / 256;
             if (b != id(bri_now)) {
               id(bri_now) = b;
