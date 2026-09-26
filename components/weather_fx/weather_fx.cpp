@@ -79,6 +79,11 @@ static void paint_back_cb(lv_event_t *e) {
   self->paint_back(lv_event_get_layer(e));
 }
 
+static void frame_timer_cb(lv_timer_t *t) {
+  auto *self = static_cast<WeatherFx *>(lv_timer_get_user_data(t));
+  self->frame(self->params_for_timer());
+}
+
 static bool hit(const lv_area_t &a, const lv_area_t &clip) {
   return a.x1 <= clip.x2 && a.x2 >= clip.x1 && a.y1 <= clip.y2 && a.y2 >= clip.y1;
 }
@@ -144,6 +149,14 @@ void WeatherFx::bind(lv_obj_t *root, lv_obj_t *clouds, lv_obj_t *bolt, lv_obj_t 
   }
   this->bound_ = true;
   this->applied_ = -1;
+
+  // Кадр анимации — таймер LVGL с периодом перерисовки экрана. Он стоит в
+  // списке таймеров раньше таймера перерисовки, поэтому шаг анимации и
+  // отрисовка идут в одном проходе: ровно один шаг на кадр. Отдельный таймер
+  // ESPHome с тем же периодом «плавал» относительно перерисовки — иногда два
+  // шага на кадр (рывок), иногда ни одного (заминка). На паузе LVGL (экран
+  // выключен) таймер тоже стоит
+  this->timer_ = lv_timer_create(frame_timer_cb, 33, this);
 }
 
 void WeatherFx::add_exclude(int x1, int y1, int x2, int y2) {
@@ -1073,19 +1086,25 @@ static float fit(const float (*src)[2], const int *sz, int n, float ang, int *ox
   const float bw = std::max(x1 - x0, 1e-4f), bh = std::max(y1 - y0, 1e-4f);
   const float mx = (x0 + x1) / 2, my = (y0 + y1) / 2;
   float k = std::min(BOX_W / bw, BOX_H / bh);
-  for (int it = 0; it < 40; it++) {
-    bool ok = true;
-    for (int i = 0; i < n; i++) {
-      const float x = BOX_CX + (pts[i][0] - mx) * k, y = BOX_CY - (pts[i][1] - my) * k;
-      ox[i] = (int) lroundf(x);
-      oy[i] = (int) lroundf(y);
-      const float dx = x - 233.0f, dy = y - 233.0f;
-      if (sqrtf(dx * dx + dy * dy) + sz[i] / 2 + 3 > 224.0f)
-        ok = false;
-    }
-    if (ok)
-      break;
-    k *= 0.94f;
+  // Край круга: звезда со смещением d от середины фигуры встаёт в точку
+  // c + k·d (c — центр прямоугольника относительно центра экрана) и должна
+  // остаться ближе R к центру. Наибольшее k — положительный корень
+  // |d|²k² + 2(c·d)k + |c|² − R² = 0. Считается сразу, без подбора
+  const float cx = BOX_CX - 233.0f, cy = BOX_CY - 233.0f;
+  for (int i = 0; i < n; i++) {
+    const float dx = pts[i][0] - mx, dy = -(pts[i][1] - my);
+    const float dd = dx * dx + dy * dy;
+    if (dd < 1e-12f)
+      continue;
+    const float r = 224.0f - sz[i] / 2 - 3;
+    const float cd = cx * dx + cy * dy, cc = cx * cx + cy * cy - r * r;
+    const float disc = cd * cd - dd * cc;
+    if (disc > 0)
+      k = std::min(k, (-cd + sqrtf(disc)) / dd);
+  }
+  for (int i = 0; i < n; i++) {
+    ox[i] = (int) lroundf(BOX_CX + (pts[i][0] - mx) * k);
+    oy[i] = (int) lroundf(BOX_CY - (pts[i][1] - my) * k);
   }
   return std::max(bw, bh) * k;
 }

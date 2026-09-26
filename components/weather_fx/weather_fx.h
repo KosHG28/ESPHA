@@ -55,7 +55,13 @@ class WeatherFx : public Component {
   void bind(lv_obj_t *root, lv_obj_t *clouds, lv_obj_t *bolt, lv_obj_t *glow, const lv_font_t *flake_s,
             const lv_font_t *flake_l, const lv_font_t *caption);
 
-  /// Один кадр анимации. Вызывается раз в weather_fx_interval.
+  /// Что показывать — packages/weather.yaml обновляет это раз в
+  /// weather_fx_interval. Сам кадр считается в таймере LVGL (см. bind) —
+  /// ровно один шаг на каждую перерисовку экрана
+  void set_params(const Params &p) { this->params_ = p; }
+  const Params &params_for_timer() const { return this->params_; }
+
+  /// Один кадр анимации
   void frame(const Params &p);
 
   /// Прямоугольник (экранные координаты), где капли и снежинки не рисуются:
@@ -126,6 +132,8 @@ class WeatherFx : public Component {
   static void show_(lv_obj_t *o, bool v);
 
   bool bound_{false};
+  Params params_{};
+  lv_timer_t *timer_{nullptr};
   lv_obj_t *root_{nullptr}, *paint_{nullptr}, *back_{nullptr}, *clouds_box_{nullptr}, *bolt_{nullptr},
       *glow_{nullptr};
   const lv_font_t *font_s_{nullptr}, *font_l_{nullptr}, *font_cap_{nullptr};

@@ -2,7 +2,7 @@
 """Рисует пиксельные спрайты «гостей» экрана (кот, птица, улитка, снеговик,
 сова, бабочка, ёжик, тыква,
 праздничный колпак, зонтик, снежинка) и записывает их в components/critters/sprites.h как
-изображения LVGL (ARGB8888). Запуск: python3 tools/make_sprites.py [папка_для_png]
+изображения LVGL (RGB565A8). Запуск: python3 tools/make_sprites.py [папка_для_png]
 
 Колпак — отдельная картинка: в праздники она едет поверх кота. Для каждого
 кадра кота записывается точка на макушке между ушами (HAT_ANCHORS), куда
@@ -377,19 +377,26 @@ def sprites():
 
 
 def c_array(name, im):
-    # LVGL ARGB8888: в памяти байты B, G, R, A
-    data = bytearray()
-    px = im.get_flattened_data() if hasattr(im, "get_flattened_data") else im.getdata()
+    # LVGL RGB565A8: сначала цвета — RGB565, младший байт первым, — потом
+    # отдельной плоскостью прозрачность, по байту на пиксель. На 25 % меньше
+    # ARGB8888, и LVGL смешивает такую картинку с экраном RGB565 напрямую,
+    # без перевода цвета каждого пикселя из 32 бит
+    px = list(im.get_flattened_data() if hasattr(im, "get_flattened_data") else im.getdata())
+    color = bytearray()
+    alpha = bytearray()
     for r, g, b, a in px:
-        data += bytes((b, g, r, a))
+        v = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3)
+        color += bytes((v & 0xFF, v >> 8))
+        alpha.append(a)
+    data = color + alpha
     rows = []
     for i in range(0, len(data), 24):
         rows.append("  " + ", ".join(f"0x{v:02x}" for v in data[i:i + 24]) + ",")
     return (
         f"static const uint8_t {name}_px[] = {{\n" + "\n".join(rows) + "\n};\n"
         f"static const lv_image_dsc_t {name} = {{\n"
-        f"    .header = {{.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_ARGB8888, .flags = 0,\n"
-        f"               .w = {im.width}, .h = {im.height}, .stride = {im.width * 4}, .reserved_2 = 0}},\n"
+        f"    .header = {{.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_RGB565A8, .flags = 0,\n"
+        f"               .w = {im.width}, .h = {im.height}, .stride = {im.width * 2}, .reserved_2 = 0}},\n"
         f"    .data_size = sizeof({name}_px),\n"
         f"    .data = {name}_px,\n"
         f"    .reserved = nullptr,\n"

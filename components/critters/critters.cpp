@@ -31,6 +31,8 @@ static const uint32_t SIT_MS[4] = {3000, 4200, 4300, 6000};
 
 int Critters::rnd_(int lo, int hi) { return lo + (int) (random_uint32() % (uint32_t) (hi - lo)); }
 
+static void tick_cb(lv_timer_t *t) { static_cast<Critters *>(lv_timer_get_user_data(t))->tick(); }
+
 void Critters::bind(lv_obj_t *img, lv_obj_t *zzz, lv_obj_t *hat, lv_obj_t *item) {
   this->img_ = img;
   this->zzz_ = zzz;
@@ -40,6 +42,9 @@ void Critters::bind(lv_obj_t *img, lv_obj_t *zzz, lv_obj_t *hat, lv_obj_t *item)
     lv_image_set_src(item, &spr_flake);
   // Первый гость — через 20–60 минут после запуска
   this->next_ = millis() + rnd_(20, 60) * 60000u;
+  // Кадр — в таймере LVGL, в одном проходе с перерисовкой экрана (как у
+  // погодного фона): движение ровное, без лишних и пропущенных шагов
+  lv_timer_create(tick_cb, 33, this);
 }
 
 void Critters::set_festive(bool festive) {
