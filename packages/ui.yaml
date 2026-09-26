@@ -108,7 +108,7 @@ font:
 
   # Снежинки погодного фона: три формы из Noto Sans Symbols 2 и две из
   # Material Design Icons, в двух размерах — дальние и ближние. Там же два
-  # листа для осеннего листопада
+  # листа для осеннего листопада и два сердечка для 14 февраля
   - file:
       type: gfonts
       family: Noto Sans Symbols 2
@@ -127,6 +127,8 @@ font:
           - "\U000F0F2A"   # mdi-snowflake-variant
           - "\U000F032A"   # mdi-leaf — листопад
           - "\U000F0C93"   # mdi-leaf-maple
+          - "\U000F02D1"   # mdi-heart — 14 февраля
+          - "\U000F08D0"   # mdi-cards-heart
 
   - file:
       type: gfonts
@@ -146,6 +148,8 @@ font:
           - "\U000F0F2A"   # mdi-snowflake-variant
           - "\U000F032A"   # mdi-leaf — листопад
           - "\U000F0C93"   # mdi-leaf-maple
+          - "\U000F02D1"   # mdi-heart — 14 февраля
+          - "\U000F08D0"   # mdi-cards-heart
 
   # Иконка погоды рядом с уличной температурой
   - file:

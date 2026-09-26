@@ -21,9 +21,27 @@ enum Show : uint8_t {
 
 class Critters : public Component {
  public:
-  /// Картинка гостя, надпись «z z z» и колпак на верхнем слое LVGL
+  /// Картинка гостя, надпись над ним («z z z», «мяу!»), вещь на голове
+  /// (колпак или зонтик) и вещь в воздухе (снежинка) — на верхнем слое LVGL
   /// (packages/critters.yaml)
-  void bind(lv_obj_t *img, lv_obj_t *zzz, lv_obj_t *hat);
+  void bind(lv_obj_t *img, lv_obj_t *zzz, lv_obj_t *hat, lv_obj_t *item);
+
+  /// Погода для кота: wx 0 — сухо, 1 — дождь (кот под зонтиком), 2 — снег
+  /// (ловит снежинку); stars — ясная ночь (провожает метеор взглядом)
+  void set_weather(int wx, bool stars) {
+    this->weather_ = wx;
+    this->stars_ = stars;
+  }
+
+  /// Печать закончилась: кот прибегает и заинтересованно смотрит
+  void start_printer_visit();
+
+  /// Кот хочет, чтобы пролетел метеор (он смотрит в небо). Флаг сбрасывается
+  bool take_meteor() {
+    bool r = this->meteor_req_;
+    this->meteor_req_ = false;
+    return r;
+  }
 
   /// Праздник (Новый год, день рождения): кот приходит чаще и в колпаке
   void set_festive(bool festive);
@@ -45,12 +63,21 @@ class Critters : public Component {
   float get_setup_priority() const override { return setup_priority::LATE; }
 
  protected:
+  /// Что кот делает, когда сидит посередине
+  enum Variant : uint8_t { VAR_PLAIN, VAR_CATCH, VAR_STARS, VAR_PRINTER };
+
   void stop_();
   void place_(const lv_image_dsc_t *img, int x, int y);
+  void say_(const char *text);
+  void sit_(uint32_t st);
   static int rnd_(int lo, int hi);
 
-  lv_obj_t *img_{nullptr}, *zzz_{nullptr}, *hat_{nullptr};
-  bool festive_{false};
+  lv_obj_t *img_{nullptr}, *zzz_{nullptr}, *hat_{nullptr}, *item_{nullptr};
+  const lv_image_dsc_t *head_src_{nullptr};
+  const char *said_{nullptr};
+  bool festive_{false}, stars_{false}, meteor_req_{false}, meteor_sent_{false};
+  int weather_{0};
+  Variant variant_{VAR_PLAIN};
   const lv_image_dsc_t *shown_img_{nullptr};
   Show show_{SHOW_NONE};
   bool winter_{false};

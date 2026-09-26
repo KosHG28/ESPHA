@@ -30,7 +30,16 @@ static const uint32_t LEAF_CP[2] = {0xF032A, 0xF0C93};
 static const uint32_t LEAF_COLORS[4] = {0xE67E22, 0xD35400, 0xC0392B, 0xF1C40F};
 static const uint32_t LEAF_COLORS_DIM[4] = {0xFFA24D, 0xFF7A26, 0xFF5A4A, 0xFFE04D};
 
-static uint32_t glyph_cp(int set, int i) { return set ? LEAF_CP[(i / 2) % 2] : FLAKE_CP[i % 5]; }
+// Сердечки 14 февраля: обычное и «карточное», розовые и красные
+static const uint32_t HEART_CP[2] = {0xF02D1, 0xF08D0};
+static const uint32_t HEART_COLORS[4] = {0xFF4081, 0xE91E63, 0xFF1744, 0xF06292};
+static const uint32_t HEART_COLORS_DIM[4] = {0xFF80AB, 0xFF4F8B, 0xFF5C7A, 0xFF9CC0};
+// Салют: цвета вспышек
+static const uint32_t FW_COLORS[6] = {0xFF5252, 0xFFD740, 0x69F0AE, 0x40C4FF, 0xE040FB, 0xFFFFFF};
+
+static uint32_t glyph_cp(int set, int i) {
+  return set == 2 ? HEART_CP[(i / 2) % 2] : (set == 1 ? LEAF_CP[(i / 2) % 2] : FLAKE_CP[i % 5]);
+}
 // Солнце — справа в «шапке» круга, мимо значка двери посередине
 static const int SUN_X = 300, SUN_Y = 74, SUN_R = 40;
 // Созвездие вписывается в «шапку» над строкой погоды: центр и размеры
@@ -109,7 +118,7 @@ void WeatherFx::bind(lv_obj_t *root, lv_obj_t *clouds, lv_obj_t *bolt, lv_obj_t 
   // серединой знака по горизонтали и линией основания по вертикали, так что
   // знак лежит выше и левее точки. Участок к перерисовке должен закрывать его
   // целиком — иначе при сдвиге края знака не стираются и тянутся шлейфом
-  for (int set = 0; set < 2; set++) {
+  for (int set = 0; set < 3; set++) {
     for (int i = 0; i < NF; i++) {
       const lv_font_t *f = (i % 2) ? flake_l : flake_s;
       lv_font_glyph_dsc_t g;
@@ -381,13 +390,15 @@ void WeatherFx::paint_front(lv_layer_t *layer) {
   lv_draw_letter_dsc_t let;
   lv_draw_letter_dsc_init(&let);
   let.opa = LV_OPA_COVER;
-  const int set = this->leaves_ ? 1 : 0;
+  const int set = this->fset_;
   for (int i = 0; i < NF; i++) {
     if (!place(this->fs_[i]))
       continue;
     const bool big = i % 2;
     let.font = big ? this->font_l_ : this->font_s_;
-    if (set)
+    if (set == 2)
+      let.color = big ? this->c_heart_[(i / 2) % 4] : this->c_heart_s_[(i / 2) % 4];
+    else if (set == 1)
       let.color = big ? this->c_leaf_[(i / 2) % 4] : this->c_leaf_s_[(i / 2) % 4];
     else
       let.color = big ? this->c_flake_l_ : this->c_flake_s_;
@@ -395,6 +406,69 @@ void WeatherFx::paint_front(lv_layer_t *layer) {
     // Обратно из прямоугольника знака к точке рисования
     lv_point_t pt = {abs.x1 - this->fox_[set][i], abs.y1 - this->foy_[set][i]};
     lv_draw_letter(layer, &let, &pt);
+  }
+
+  // Салют: искры цветом вспышки, гаснут со временем
+  fill.radius = LV_RADIUS_CIRCLE;
+  for (int j = 0; j < NB; j++) {
+    const Burst &b = this->bursts_[j];
+    if (!b.on)
+      continue;
+    fill.color = b.c;
+    fill.opa = this->burst_opa_[j];
+    for (int k = 0; k < NP; k++)
+      if (place(b.sp[k]))
+        lv_draw_fill(layer, &fill, &abs);
+  }
+  fill.opa = LV_OPA_COVER;
+
+  // Воздушный змей: ромб из четырёх цветных треугольников, крестовина и
+  // хвост с бантиками
+  if (place(this->kite_spot_)) {
+    const float kx = this->kite_x_ + oc.x1, ky = this->kite_y_ + oc.y1;
+    const lv_point_precise_t top = {(lv_value_precise_t) kx, (lv_value_precise_t) (ky - 18)};
+    const lv_point_precise_t bot = {(lv_value_precise_t) kx, (lv_value_precise_t) (ky + 24)};
+    const lv_point_precise_t lft = {(lv_value_precise_t) (kx - 14), (lv_value_precise_t) ky};
+    const lv_point_precise_t rgt = {(lv_value_precise_t) (kx + 14), (lv_value_precise_t) ky};
+    const lv_point_precise_t mid = {(lv_value_precise_t) kx, (lv_value_precise_t) ky};
+    lv_draw_triangle_dsc_t tr;
+    lv_draw_triangle_dsc_init(&tr);
+    tr.opa = LV_OPA_COVER;
+    const lv_point_precise_t quads[4][3] = {{top, lft, mid}, {top, rgt, mid}, {bot, lft, mid}, {bot, rgt, mid}};
+    static const uint32_t KITE_C[4] = {0xFF5252, 0xFFD740, 0x40C4FF, 0x69F0AE};
+    for (int q = 0; q < 4; q++) {
+      tr.p[0] = quads[q][0];
+      tr.p[1] = quads[q][1];
+      tr.p[2] = quads[q][2];
+      tr.color = lv_color_hex(KITE_C[q]);
+      lv_draw_triangle(layer, &tr);
+    }
+    lv_draw_line_dsc_t ln;
+    lv_draw_line_dsc_init(&ln);
+    ln.opa = LV_OPA_COVER;
+    ln.width = 1;
+    ln.color = lv_color_hex(0x5D4037);
+    ln.p1 = top;
+    ln.p2 = bot;
+    lv_draw_line(layer, &ln);
+    ln.p1 = lft;
+    ln.p2 = rgt;
+    lv_draw_line(layer, &ln);
+    ln.color = lv_color_hex(0xCFD8DC);
+    ln.p1 = bot;
+    for (int j = 0; j < NTAIL; j++) {
+      ln.p2 = {this->kite_tail_[j].x + oc.x1, this->kite_tail_[j].y + oc.y1};
+      if (j)
+        lv_draw_line(layer, &ln);
+      ln.p1 = ln.p2;
+      if (j == 3 || j == 6 || j == NTAIL - 1) {
+        // Бантик на хвосте
+        lv_area_t bow = {(int32_t) ln.p2.x - 3, (int32_t) ln.p2.y - 2, (int32_t) ln.p2.x + 3, (int32_t) ln.p2.y + 2};
+        fill.radius = 1;
+        fill.color = lv_color_hex(j == 6 ? 0xFFD740 : 0xFF5252);
+        lv_draw_fill(layer, &fill, &bow);
+      }
+    }
   }
 
   // Гирлянда: тёмно-зелёный провод по краю и перемигивающиеся лампочки
@@ -456,8 +530,10 @@ void WeatherFx::apply_(const Params &p, bool relayout) {
   // Град всегда падает
   this->glass_on_ = !this->hail_ && p.rain_style == 0;
   this->nd_ = (p.mode == 1 || p.mode == 4) ? cnt : (p.mode == 3 ? cnt / 2 : 0);
-  this->nf_ = std::min(p.mode == 2 || p.mode == 5 ? cnt : (p.mode == 3 ? cnt / 2 : 0), NF);
-  this->leaves_ = p.mode == 5;
+  this->nf_ = std::min(p.mode == 2 || p.mode == 5 || p.mode == 6 ? cnt : (p.mode == 3 ? cnt / 2 : 0), NF);
+  this->fset_ = p.mode == 6 ? 2 : (p.mode == 5 ? 1 : 0);
+  this->fw_on_ = p.fireworks;
+  this->kite_mode_ = p.kite;
   this->ncl_ = std::min(std::max(p.clouds, 0), NC);
   this->storm_ = p.storm;
   if (p.stars && !this->stars_on_)
@@ -471,8 +547,19 @@ void WeatherFx::apply_(const Params &p, bool relayout) {
   this->gar_on_ = p.garland;
   if (!this->storm_)
     this->end_strike_();
-  show_(this->root_,
-        this->nd_ || this->nf_ || this->ncl_ || this->storm_ || this->stars_on_ || this->sun_on_ || this->gar_on_);
+  show_(this->root_, this->nd_ || this->nf_ || this->ncl_ || this->storm_ || this->stars_on_ || this->sun_on_ ||
+                         this->gar_on_ || this->fw_on_ || this->kite_mode_);
+  // Салют кончился или змей больше не летает — убрать с экрана
+  if (!this->fw_on_)
+    for (auto &b : this->bursts_) {
+      for (auto &sp : b.sp)
+        this->mark_(sp, false, 0, 0, 1, 1);
+      b.on = false;
+    }
+  if (!this->kite_mode_ && this->kite_on_) {
+    this->mark_(this->kite_spot_, false, 0, 0, 1, 1);
+    this->kite_on_ = false;
+  }
 
   // В приглушённом режиме палитра ярче: при низкой яркости панели тёмные
   // частицы сливаются с чёрным
@@ -492,6 +579,8 @@ void WeatherFx::apply_(const Params &p, bool relayout) {
   for (int k = 0; k < 4; k++) {
     this->c_leaf_[k] = lv_color_hex(dim ? LEAF_COLORS_DIM[k] : LEAF_COLORS[k]);
     this->c_leaf_s_[k] = lv_color_mix(this->c_leaf_[k], lv_color_black(), dim ? 190 : 140);
+    this->c_heart_[k] = lv_color_hex(dim ? HEART_COLORS_DIM[k] : HEART_COLORS[k]);
+    this->c_heart_s_[k] = lv_color_mix(this->c_heart_[k], lv_color_black(), dim ? 190 : 140);
   }
 
   if (relayout) {
@@ -727,7 +816,16 @@ void WeatherFx::flakes_(float wind, float ks) {
     const float k = big ? this->k_ : ks;
     if (k <= 0)
       continue;
-    if (this->leaves_) {
+    if (this->fset_ == 2) {
+      // Сердечки медленно всплывают снизу вверх, покачиваясь
+      this->fy_[i] -= k * (big ? 0.9f + (i % 3) * 0.15f : 0.55f + (i % 3) * 0.1f);
+      this->fph_[i] += k * ((big ? 0.06f : 0.05f) + i * 0.003f);
+      this->fx_[i] = wrap_x(this->fx_[i] + k * (cosf(this->fph_[i]) * (big ? 0.9f : 0.6f) + wind * 0.5f));
+      if (this->fy_[i] < -30) {
+        this->fy_[i] = 490 + rnd_(0, 40);
+        this->fx_[i] = rnd_(30, 430);
+      }
+    } else if (this->fset_ == 1) {
       // Листья падают медленнее, раскачиваются шире и сильнее летят по ветру
       this->fy_[i] += k * (big ? 1.1f + (i % 3) * 0.2f : 0.6f + (i % 3) * 0.15f);
       this->fph_[i] += k * ((big ? 0.10f : 0.08f) + i * 0.004f);
@@ -743,7 +841,7 @@ void WeatherFx::flakes_(float wind, float ks) {
       this->fy_[i] = -30 - rnd_(0, 40);
       this->fx_[i] = rnd_(30, 430);
     }
-    const int set = this->leaves_ ? 1 : 0;
+    const int set = this->fset_;
     const int w = this->fw_[set][i], h = this->fh_[set][i];
     const int x = (int) this->fx_[i] + this->fox_[set][i], y = (int) this->fy_[i] + this->foy_[set][i];
     this->mark_(this->fs_[i], !this->excluded_(x, y, w, h), x, y, w, h);
@@ -1162,6 +1260,99 @@ void WeatherFx::garland_(uint32_t now) {
       this->invalidate_(g.a);
 }
 
+void WeatherFx::fireworks_(uint32_t now) {
+  if (!this->fw_on_)
+    return;
+  // Новая вспышка раз в 0,35–0,9 с, если есть свободное место
+  if ((int32_t) (now - this->next_burst_) >= 0) {
+    this->next_burst_ = now + rnd_(350, 900);
+    for (auto &b : this->bursts_) {
+      if (b.on)
+        continue;
+      b.on = true;
+      b.t0 = now;
+      b.x = rnd_(110, 357);
+      b.y = rnd_(60, 175);
+      b.c = lv_color_hex(FW_COLORS[rnd_(0, 6)]);
+      const float sp = rnd_(7, 12) / 100.0f;  // px/мс
+      const float a0 = rnd_(0, 628) / 100.0f;
+      for (int k = 0; k < NP; k++) {
+        const float a = a0 + k * (2.0f * PI_F / NP) + rnd_(-15, 16) / 100.0f;
+        const float v = sp * (0.8f + rnd_(0, 40) / 100.0f);
+        b.vx[k] = v * cosf(a);
+        b.vy[k] = v * sinf(a);
+      }
+      break;
+    }
+  }
+  // Искры разлетаются, падают под своим весом и гаснут за 1,3 с
+  for (int j = 0; j < NB; j++) {
+    Burst &b = this->bursts_[j];
+    if (!b.on)
+      continue;
+    const float t = now - b.t0;
+    if (t > 1300) {
+      for (auto &sp : b.sp)
+        this->mark_(sp, false, 0, 0, 1, 1);
+      b.on = false;
+      continue;
+    }
+    this->burst_opa_[j] = (lv_opa_t) (255 * (1.0f - t / 1300.0f));
+    for (int k = 0; k < NP; k++) {
+      const int x = (int) (b.x + b.vx[k] * t) - 2;
+      const int y = (int) (b.y + b.vy[k] * t + 0.00006f * t * t) - 2;
+      // Гаснет — перерисовать, даже если искра не сдвинулась
+      if (b.sp[k].on)
+        this->invalidate_(b.sp[k].a);
+      this->mark_(b.sp[k], !this->excluded_(x, y, 5, 5), x, y, 5, 5);
+    }
+  }
+}
+
+void WeatherFx::kite_(uint32_t now, float wind) {
+  if (!this->kite_mode_)
+    return;
+  if (!this->kite_on_) {
+    if (this->next_kite_ == 0)
+      this->next_kite_ = now + (this->kite_mode_ == 2 ? 1000 : rnd_(20000, 60000));
+    if ((int32_t) (now - this->next_kite_) < 0)
+      return;
+    // Летит по ветру, а без ветра — в случайную сторону
+    this->kite_dir_ = wind > 0.05f ? 1.0f : (wind < -0.05f ? -1.0f : (rnd_(0, 2) ? 1.0f : -1.0f));
+    this->kite_speed_ = (25.0f + std::fabs(wind) * 25.0f + rnd_(0, 10)) / 1000.0f;  // px/мс
+    this->kite_x_ = this->kite_dir_ > 0 ? -40.0f : 506.0f;
+    this->kite_t0_ = now;
+    this->kite_on_ = true;
+  }
+  const float t = now - this->kite_t0_;
+  this->kite_x_ = (this->kite_dir_ > 0 ? -40.0f : 506.0f) + this->kite_dir_ * this->kite_speed_ * t;
+  this->kite_y_ = 72.0f + 16.0f * sinf(t * 0.0013f);
+  if (this->kite_x_ < -60.0f || this->kite_x_ > 526.0f) {
+    this->mark_(this->kite_spot_, false, 0, 0, 1, 1);
+    this->kite_on_ = false;
+    this->next_kite_ = now + (this->kite_mode_ == 2 ? rnd_(4000, 8000) : rnd_(180000, 480000));
+    return;
+  }
+  // Хвост тянется назад и вниз и треплется на ветру
+  float x0 = 1e9f, x1 = -1e9f, y1 = -1e9f;
+  for (int j = 0; j < NTAIL; j++) {
+    const float tx = this->kite_x_ - this->kite_dir_ * j * 6.0f;
+    const float ty = this->kite_y_ + 24.0f + j * 4.5f + 5.0f * sinf(t * 0.009f + j * 0.9f);
+    this->kite_tail_[j].x = (lv_value_precise_t) tx;
+    this->kite_tail_[j].y = (lv_value_precise_t) ty;
+    x0 = std::min(x0, tx);
+    x1 = std::max(x1, tx);
+    y1 = std::max(y1, ty);
+  }
+  x0 = std::min(x0, this->kite_x_ - 15.0f);
+  x1 = std::max(x1, this->kite_x_ + 15.0f);
+  const int bx = (int) x0 - 8, by = (int) this->kite_y_ - 26;
+  // Хвост треплется и при той же рамке — перерисовать в любом случае
+  if (this->kite_spot_.on)
+    this->invalidate_(this->kite_spot_.a);
+  this->mark_(this->kite_spot_, true, bx, by, (int) (x1 - x0) + 17, (int) (y1 - by) + 10);
+}
+
 void WeatherFx::frame(const Params &p) {
   if (!this->bound_)
     return;
@@ -1169,18 +1360,19 @@ void WeatherFx::frame(const Params &p) {
   const int cnt = std::min(std::max(p.count, 0), ND);
   const int sig = p.mode | (cnt << 4) | (std::min(std::max(p.clouds, 0), NC) << 10) | ((p.storm ? 1 : 0) << 12) |
                   ((p.dim ? 1 : 0) << 13) | ((p.stars ? 1 : 0) << 14) | ((p.rain_style ? 1 : 0) << 15) |
-                  ((p.sun ? 1 : 0) << 16) | ((p.garland ? 1 : 0) << 17);
+                  ((p.sun ? 1 : 0) << 16) | ((p.garland ? 1 : 0) << 17) | ((p.fireworks ? 1 : 0) << 18) |
+                  ((std::min(std::max(p.kite, 0), 3)) << 19);
   if (sig != this->applied_) {
     // Если поменялись только яркость, солнце или гирлянда — перекрашиваем,
     // но осадки не перемешиваем
-    const int keep = ~((1 << 13) | (1 << 16) | (1 << 17));
+    const int keep = ~((1 << 13) | (1 << 16) | (1 << 17) | (1 << 18) | (3 << 19));
     const bool relayout = this->applied_ < 0 || (sig & keep) != (this->applied_ & keep);
     this->applied_ = sig;
     this->apply_(p, relayout);
   }
 
-  const bool any =
-      this->nd_ || this->nf_ || this->ncl_ || this->storm_ || this->stars_on_ || this->sun_on_ || this->gar_on_;
+  const bool any = this->nd_ || this->nf_ || this->ncl_ || this->storm_ || this->stars_on_ || this->sun_on_ ||
+                   this->gar_on_ || this->fw_on_ || this->kite_mode_;
   if (!any || !p.active) {
     this->end_strike_();
     this->last_ms_ = 0;
@@ -1207,6 +1399,8 @@ void WeatherFx::frame(const Params &p) {
   this->meteor_(now);
   this->sun_(now);
   this->garland_(now);
+  this->fireworks_(now);
+  this->kite_(now, wind);
   if (this->glass_on_) {
     if (ks > 0)
       this->glass_(ks, ks * 50.0f);

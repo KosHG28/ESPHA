@@ -10,8 +10,12 @@
 # можно указать имя: «15.01 Маша, 3.07 Костя, 21.11». В такой день:
 #   - вместо восхода и заката на часах — «С днём рождения, Маша!» золотым;
 #   - горит гирлянда (если «Гирлянда» не «Выкл»);
-#   - в 9 утра — поздравление карточкой, как сообщение из HA. Если в это время
-#     экран погашен (ночь или никого нет дома) — как только кто-то вернётся.
+#   - в 9 утра — поздравление карточкой, как сообщение из HA, и салют. Если в
+#     это время экран погашен (ночь или никого нет дома) — как только кто-то
+#     вернётся.
+#
+# Салют: ровно в полночь на Новый год — минуту, в день рождения — вместе с
+# поздравлением, и по кнопке «Салют» в Home Assistant — 20 секунд.
 # ---------------------------------------------------------------------------
 
 globals:
@@ -36,6 +40,16 @@ globals:
     type: int
     restore_value: true
     initial_value: '-1'
+
+button:
+  # Салют прямо сейчас — на 20 секунд
+  - platform: template
+    name: Салют 🎆
+    icon: mdi:firework
+    on_press:
+      - script.execute:
+          id: start_fireworks
+          seconds: 20
 
 select:
   - platform: template
@@ -65,6 +79,17 @@ text:
       - script.execute: holiday_check
 
 script:
+  # Салют на странице часов на seconds секунд; экран просыпается
+  - id: start_fireworks
+    parameters:
+      seconds: int
+    mode: restart
+    then:
+      - lambda: 'id(fireworks_until) = millis() + (uint32_t) seconds * 1000u;'
+      - script.execute: wake_screen
+      - lvgl.page.show:
+          id: page_clock
+
   # Раз в минуту (из refresh_clock) и при смене настроек: какой сегодня
   # праздник, гореть ли гирлянде, кого поздравить
   - id: holiday_check
@@ -121,4 +146,12 @@ script:
           if (bday && now.hour >= 9 && id(greeted_day) != now.day_of_year && !id(off_wanted)) {
             id(greeted_day) = now.day_of_year;
             id(show_message)->execute(line, ${message_seconds}, std::string("#FFC107"));
+            id(start_fireworks)->execute(${message_seconds});
+          }
+
+          // Новогодний салют — ровно в полночь, минуту
+          static int fired_year = -1;
+          if (now.month == 1 && now.day_of_month == 1 && now.hour == 0 && now.minute == 0 && fired_year != now.year) {
+            fired_year = now.year;
+            id(start_fireworks)->execute(60);
           }

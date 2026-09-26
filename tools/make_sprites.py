@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Рисует пиксельные спрайты «гостей» экрана (кот, птица, улитка, снеговик,
-праздничный колпак) и записывает их в components/critters/sprites.h как
+праздничный колпак, зонтик, снежинка) и записывает их в components/critters/sprites.h как
 изображения LVGL (ARGB8888). Запуск: python3 tools/make_sprites.py [папка_для_png]
 
 Колпак — отдельная картинка: в праздники она едет поверх кота. Для каждого
@@ -69,7 +69,8 @@ def cat_run(phase):
     return im
 
 
-def cat_sit(blink=False):
+def cat_sit(blink=False, look=False, paw=False):
+    """Кот сидит. look — смотрит вверх (глаза выше), paw — поднял лапу к морде."""
     im = canvas(26, 16)
     d = ImageDraw.Draw(im)
     # хвост обвивает лапы
@@ -84,17 +85,56 @@ def cat_sit(blink=False):
     d.ellipse([11, 1, 20, 8], fill=FUR)
     d.polygon([(11, 3), (12, 0), (14, 2)], fill=FUR)
     d.polygon([(17, 2), (19, 0), (20, 3)], fill=FUR)
+    ey = 3 if look else 4
     if blink:
-        d.line([13, 4, 14, 4], fill=EYE)
-        d.line([17, 4, 18, 4], fill=EYE)
+        d.line([13, ey, 14, ey], fill=EYE)
+        d.line([17, ey, 18, ey], fill=EYE)
     else:
-        d.point((14, 4), fill=EYE)
-        d.point((17, 4), fill=EYE)
+        d.point((14, ey), fill=EYE)
+        d.point((17, ey), fill=EYE)
     d.point((15, 6), fill=NOSE)
     d.point((16, 6), fill=NOSE)
-    # передние лапы
+    # передние лапы: одна поднята к морде — ловит снежинку
     d.line([13, 13, 13, 15], fill=FUR)
-    d.line([16, 13, 16, 15], fill=FUR)
+    if paw:
+        d.line([17, 12, 20, 8], fill=FUR)
+        d.line([18, 12, 21, 8], fill=FUR)
+        d.rectangle([20, 6, 22, 8], fill=FUR)
+        d.point((21, 6), fill=NOSE)
+    else:
+        d.line([16, 13, 16, 15], fill=FUR)
+    return im
+
+
+# Кончик поднятой лапы в спрайте cat_paw_r (клетки сетки): сюда садится снежинка
+PAW_TIP = (21.5, 6.5)
+
+
+def umbrella():
+    """Зонтик: голубой купол с тёмными спицами и ручка-крючок."""
+    im = canvas(18, 14)
+    d = ImageDraw.Draw(im)
+    d.pieslice([0, 1, 17, 13], 180, 360, fill=(66, 165, 245, 255))
+    rib = (25, 118, 210, 255)
+    d.line([9, 1, 4, 7], fill=rib)
+    d.line([9, 1, 13, 7], fill=rib)
+    d.line([0, 7, 17, 7], fill=rib)
+    d.point((9, 0), fill=(40, 40, 50, 255))
+    d.line([9, 8, 9, 12], fill=(90, 70, 60, 255))
+    d.point((8, 13), fill=(90, 70, 60, 255))
+    d.point((7, 12), fill=(90, 70, 60, 255))
+    return im
+
+
+def snowflake():
+    """Снежинка, которую ловит кот."""
+    im = canvas(7, 7)
+    d = ImageDraw.Draw(im)
+    c = (235, 245, 255, 255)
+    d.line([3, 0, 3, 6], fill=c)
+    d.line([0, 3, 6, 3], fill=c)
+    d.line([1, 1, 5, 5], fill=c)
+    d.line([1, 5, 5, 1], fill=c)
     return im
 
 
@@ -192,7 +232,7 @@ def hat_anchors():
         bob = [0, -1, 0, 1][p]
         a[f"cat_run_r{p}"] = (21.0, 3 + bob)
         a[f"cat_run_l{p}"] = (26 - 21.0, 3 + bob)
-    for name in ("cat_sit", "cat_blink"):
+    for name in ("cat_sit", "cat_blink", "cat_look", "cat_paw"):
         a[f"{name}_r"] = (16.0, 2)
         a[f"{name}_l"] = (26 - 16.0, 2)
     a["cat_sleep"] = (20.0, 6)
@@ -216,6 +256,10 @@ def sprites():
     out["cat_blink_r"] = cat_sit(True)
     out["cat_sit_l"] = mirrored(cat_sit())
     out["cat_blink_l"] = mirrored(cat_sit(True))
+    out["cat_look_r"] = cat_sit(look=True)
+    out["cat_look_l"] = mirrored(cat_sit(look=True))
+    out["cat_paw_r"] = cat_sit(paw=True)
+    out["cat_paw_l"] = mirrored(cat_sit(paw=True))
     out["cat_sleep"] = cat_sleep()
     for up in (0, 1):
         out[f"bird_r{up}"] = bird(up)
@@ -223,6 +267,8 @@ def sprites():
         out[f"snail_l{up}"] = mirrored(snail(up))
         out[f"snowman{up}"] = snowman(up)
     out["cat_hat"] = party_hat()
+    out["cat_umbrella"] = umbrella()
+    out["flake"] = snowflake()
     return {k: scaled(v, SCALE_CAT if k.startswith("cat") else SCALE_OTHER) for k, v in out.items()}
 
 
@@ -261,6 +307,9 @@ def main():
         "\n// Куда ставить колпак: середина его нижнего края, в пикселях спрайта\n"
         "struct HatAnchor {\n  const lv_image_dsc_t *img;\n  int16_t x, y;\n};\n"
         "static const HatAnchor HAT_ANCHORS[] = {\n" + "\n".join(rows) + "\n};\n"
+        "\n// Кончик поднятой лапы: [0] — кот смотрит вправо, [1] — влево\n"
+        f"static const int16_t PAW_TIP[2][2] = {{{{{round(PAW_TIP[0] * SCALE_CAT)}, {round(PAW_TIP[1] * SCALE_CAT)}}}, "
+        f"{{{round((26 - PAW_TIP[0]) * SCALE_CAT)}, {round(PAW_TIP[1] * SCALE_CAT)}}}}};\n"
     )
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(
