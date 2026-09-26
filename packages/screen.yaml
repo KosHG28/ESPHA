@@ -187,8 +187,12 @@ script:
                   lambda: 'return id(printer_pending);'
                 then:
                   - lambda: 'id(printer_pending) = false;'
-                  - lvgl.page.show:
-                      id: page_printer
+                  - if:
+                      condition:
+                        lambda: 'return !id(page_printer)->skip;'
+                      then:
+                        - lvgl.page.show:
+                            id: page_printer
       - lambda: |-
           id(screen_dimmed) = false;
           // Надписи на часах снова непрозрачные (в ожидании могли быть приглушены)
