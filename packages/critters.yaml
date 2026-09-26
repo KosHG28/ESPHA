@@ -9,6 +9,11 @@
 #   - ночью кот может прийти поспать — свернётся внизу, над ним «z z z».
 # В Новый год (15.12–14.01) и в дни рождения приходит только кот — чаще, раз в
 # 30–60 минут, и в праздничном колпаке.
+#
+# Кот и погода: в дождь пробегает под зонтиком; в снег садится посередине и
+# ловит лапой снежинку; ясной ночью иногда садится и смотрит в небо — и там
+# пролетает метеор. Когда печать закончилась, кот прибегает посмотреть на
+# принтер и мурчит.
 # Позвать кота: кнопка «Позвать кота» в Home Assistant или пять быстрых
 # касаний по странице часов.
 #
@@ -48,11 +53,14 @@ interval:
             lv_obj_set_style_text_color(zzz, lv_color_hex(0x8FB3CC), 0);
             lv_obj_add_flag(zzz, LV_OBJ_FLAG_HIDDEN);
             lv_obj_clear_flag(zzz, LV_OBJ_FLAG_CLICKABLE);
-            // Праздничный колпак — поверх кота
+            // Колпак или зонтик — поверх кота; снежинка, которую он ловит
             lv_obj_t *hat = lv_image_create(top);
             lv_obj_add_flag(hat, LV_OBJ_FLAG_HIDDEN);
             lv_obj_clear_flag(hat, LV_OBJ_FLAG_CLICKABLE);
-            id(crit)->bind(img, zzz, hat);
+            lv_obj_t *item = lv_image_create(top);
+            lv_obj_add_flag(item, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_clear_flag(item, LV_OBJ_FLAG_CLICKABLE);
+            id(crit)->bind(img, zzz, hat, item);
           }
           // Зима ли — достаточно проверять раз в минуту
           static bool winter = false;
@@ -63,6 +71,9 @@ interval:
             winter = now.is_valid() && (now.month == 12 || now.month <= 2);
           }
           id(crit)->set_festive(id(festive_day));
+          // Дождь, мокрый снег и град — кот под зонтиком; снег — ловит снежинку
+          const int m = id(weather_mode);
+          id(crit)->set_weather(m == 1 || m == 3 || m == 4 ? 1 : (m == 2 ? 2 : 0), id(weather_stars));
           id(crit)->frame(!id(screen_off), id(is_night), winter);
 
 button:

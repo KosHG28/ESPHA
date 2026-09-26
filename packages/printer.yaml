@@ -185,6 +185,16 @@ binary_sensor:
       - script.execute: update_printer_phase
 
 script:
+  # Печать закончилась: после вспышки «ГОТОВО» прибегает кот, садится и
+  # заинтересованно смотрит на принтер. Экран погашен — не приходит
+  - id: printer_cat
+    mode: single
+    then:
+      - delay: 6s
+      - lambda: |-
+          if (!id(screen_off))
+            id(crit)->start_printer_visit();
+
   - id: refresh_printer_layers
     mode: restart
     then:
@@ -453,6 +463,7 @@ script:
                 id: flash_screen
                 color: !lambda 'return 0x22DD44;'
                 text: !lambda 'return "ГОТОВО";'
+            - script.execute: printer_cat
       - if:
           condition:
             lambda: |-

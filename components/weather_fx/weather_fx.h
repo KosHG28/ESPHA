@@ -6,13 +6,14 @@
 #include <lvgl.h>
 
 #include "esphome/core/component.h"
+#include "esphome/core/hal.h"
 
 namespace esphome {
 namespace weather_fx {
 
 /// Что показывать в этом кадре. Заполняет packages/weather.yaml.
 struct Params {
-  int mode{0};        ///< осадки: 0 нет, 1 дождь, 2 снег, 3 мокрый снег, 4 град, 5 листопад
+  int mode{0};  ///< 0 нет, 1 дождь, 2 снег, 3 мокрый снег, 4 град, 5 листопад, 6 сердечки
   int count{0};       ///< сколько частиц: капель до 32, снежинок и листьев до 16
   int clouds{0};      ///< сколько облаков, до 3
   bool storm{false};  ///< гроза: молнии
@@ -25,6 +26,8 @@ struct Params {
   int rain_style{0};  ///< 0 — капли на стекле, 1 — падающий дождь
   bool sun{false};      ///< ясный день: солнце с лучами
   bool garland{false};  ///< праздник: гирлянда по краю экрана
+  bool fireworks{false};  ///< салют
+  int kite{0};            ///< воздушный змей: 0 нет, 1 изредка, 2 часто (проверка)
   // Для созвездия: где и когда смотрим на небо. utc 0 — время неизвестно
   float lat{NAN}, lon{NAN};  ///< градусы, восточная долгота — плюс
   uint32_t utc{0};           ///< секунды Unix
@@ -63,6 +66,12 @@ class WeatherFx : public Component {
   void paint_back(lv_layer_t *layer);
   void paint_front(lv_layer_t *layer);
 
+  /// Пустить метеор сейчас (кот смотрит в небо). Только ясной ночью
+  void launch_meteor() {
+    if (this->stars_on_ && !this->met_on_)
+      this->next_met_ = millis();
+  }
+
   /// Какое созвездие сейчас на экране (для отладки), пустая строка — никакое
   const char *constellation() const { return this->con_on_ ? this->con_name_ : ""; }
 
@@ -77,6 +86,9 @@ class WeatherFx : public Component {
   static const int NCS = 10;     // звёзд в созвездии, не больше
   static const int NDASH = 128;  // чёрточек пунктира
   static const int NG = 24;      // лампочек гирлянды
+  static const int NB = 3;       // вспышек салюта одновременно
+  static const int NP = 14;      // искр во вспышке
+  static const int NTAIL = 9;    // точек хвоста воздушного змея
 
   /// Что сейчас нарисовано для частицы: прямоугольник относительно холста
   struct Spot {
@@ -99,6 +111,8 @@ class WeatherFx : public Component {
   void meteor_(uint32_t now);
   void sun_(uint32_t now);
   void garland_(uint32_t now);
+  void fireworks_(uint32_t now);
+  void kite_(uint32_t now, float wind);
 
   /// Перенести частицу: отметить к перерисовке старое и новое место
   void mark_(Spot &s, bool on, int x, int y, int w, int h);
@@ -118,7 +132,8 @@ class WeatherFx : public Component {
   int applied_{-1};
   int nd_{0}, nf_{0}, ncl_{0};
   bool hail_{false}, storm_{false}, stars_on_{false}, dim_{false}, glass_on_{false};
-  bool sun_on_{false}, gar_on_{false};
+  bool sun_on_{false}, gar_on_{false}, fw_on_{false};
+  int kite_mode_{0};
 
   // Движение считается по реально прошедшему времени: k_ — во сколько раз
   // этот кадр длиннее опорных 50 мс
@@ -139,10 +154,30 @@ class WeatherFx : public Component {
   float fx_[NF]{}, fy_[NF]{}, fph_[NF]{};
   Spot fs_[NF]{};
   // Прямоугольник знака относительно точки рисования и его размер: [0] —
-  // снежинки, [1] — листья
-  int fox_[2][NF]{}, foy_[2][NF]{}, fw_[2][NF]{}, fh_[2][NF]{};
-  bool leaves_{false};  // вместо снежинок падают листья
-  lv_color_t c_leaf_[4]{}, c_leaf_s_[4]{};
+  // снежинки, [1] — листья, [2] — сердечки
+  int fox_[3][NF]{}, foy_[3][NF]{}, fw_[3][NF]{}, fh_[3][NF]{};
+  int fset_{0};  // что падает (или всплывает): 0 снежинки, 1 листья, 2 сердечки
+  lv_color_t c_leaf_[4]{}, c_leaf_s_[4]{}, c_heart_[4]{}, c_heart_s_[4]{};
+
+  // Салют: вспышки, у каждой — центр, начало, цвет и разлетающиеся искры
+  struct Burst {
+    bool on;
+    uint32_t t0;
+    float x, y;
+    lv_color_t c;
+    float vx[NP], vy[NP];
+    Spot sp[NP];
+  };
+  Burst bursts_[NB]{};
+  uint32_t next_burst_{0};
+  lv_opa_t burst_opa_[NB]{};
+
+  // Воздушный змей: летит ли, откуда, когда вылетел; точки хвоста
+  bool kite_on_{false};
+  uint32_t kite_t0_{0}, next_kite_{0};
+  float kite_x_{0}, kite_y_{0}, kite_dir_{1}, kite_speed_{0};
+  lv_point_precise_t kite_tail_[NTAIL]{};
+  Spot kite_spot_{};
   float sx_[NS]{}, sy_[NS]{}, svx_[NS]{}, svy_[NS]{};
   float slife_[NS]{};  // сколько ещё жить брызгам, мс
   Spot ss_[NS]{};

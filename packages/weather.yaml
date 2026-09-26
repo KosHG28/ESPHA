@@ -50,6 +50,16 @@ globals:
     type: bool
     restore_value: false
     initial_value: 'false'
+  # Воздушный змей: 0 нет, 1 изредка (ясный ветреный день), 2 часто (проверка)
+  - id: weather_kite
+    type: int
+    restore_value: false
+    initial_value: '0'
+  # Салют идёт, пока millis() не дошёл до этого момента
+  - id: fireworks_until
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
   # Солнце: ясный день
   - id: weather_sun
     type: bool
@@ -134,7 +144,7 @@ select:
     name: Фон погоды
     icon: mdi:weather-snowy-rainy
     entity_category: config
-    options: ["Авто", "Выкл", "Дождь", "Снег", "Гроза", "Облачно", "Ясная ночь", "Ясный день", "Листопад"]
+    options: ["Авто", "Выкл", "Дождь", "Снег", "Гроза", "Облачно", "Ясная ночь", "Ясный день", "Листопад", "Сердечки", "Воздушный змей"]
     initial_option: "Авто"
     optimistic: true
     restore_value: true
@@ -232,7 +242,7 @@ script:
       - lambda: |-
           // Номер пункта «Фона погоды»:
           // 0 Авто, 1 Выкл, 2 Дождь, 3 Снег, 4 Гроза, 5 Облачно, 6 Ясная ночь,
-          // 7 Ясный день, 8 Листопад
+          // 7 Ясный день, 8 Листопад, 9 Сердечки, 10 Воздушный змей
           size_t sel = id(weather_fx_select).active_index().value_or(0);
           std::string s;
           switch (sel) {
@@ -244,12 +254,14 @@ script:
             case 6: s = "clear"; break;
             case 7: s = "clear"; break;
             case 8: s = "cloudy"; break;
+            case 9: s = "clear"; break;
+            case 10: s = "clear"; break;
             default: s = ""; break;
           }
           // Звёзды — ясной или малооблачной ночью, солнце — таким же днём.
           // «Ясная ночь» и «Ясный день» показывают своё в любое время
           const bool fair = s == "clear" || s == "partly_cloudy";
-          const bool night = sel == 6 ? true : (sel == 7 ? false : id(is_night));
+          const bool night = sel == 6 ? true : (sel == 7 || sel == 10 ? false : id(is_night));
           id(weather_stars) = fair && night;
           id(weather_sun) = fair && !night;
           int mode = 0, cnt = 0, clouds = 0;
@@ -288,6 +300,14 @@ script:
             const bool strong = (!std::isnan(ws) && ws >= 9.0f) || (!std::isnan(wg) && wg >= 14.0f);
             cnt = sel == 8 || strong ? 14 : 10;
           }
+          // 14 февраля вместо пустого неба всплывают сердечки
+          const bool valentine = now.is_valid() && now.month == 2 && now.day_of_month == 14;
+          if (sel == 9 || (sel == 0 && mode == 0 && dry && valentine)) {
+            mode = 6;
+            cnt = 12;
+          }
+          // Воздушный змей — ясным ветреным днём, изредка
+          id(weather_kite) = sel == 10 ? 2 : (sel == 0 && id(weather_sun) && windy ? 1 : 0);
           id(weather_mode) = mode;
           id(weather_count) = cnt;
           id(weather_clouds) = clouds;
@@ -325,6 +345,8 @@ interval:
           p.stars = id(weather_stars);
           p.sun = id(weather_sun);
           p.garland = id(fx_garland);
+          p.fireworks = (int32_t) (id(fireworks_until) - millis()) > 0;
+          p.kite = id(weather_kite);
           p.dim = id(screen_dimmed);
           // Для созвездия: координаты дома и время
           p.lat = std::isnan(id(ha_home_lat).state) ? ${home_latitude} : id(ha_home_lat).state;
@@ -343,3 +365,6 @@ interval:
           // «Стиль дождя»: 0 — капли на стекле, 1 — падающий
           p.rain_style = (int) id(rain_style_select).active_index().value_or(0);
           id(wfx)->frame(p);
+          // Кот смотрит в небо — пусть пролетит метеор
+          if (id(crit)->take_meteor())
+            id(wfx)->launch_meteor();
