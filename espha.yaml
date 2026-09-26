@@ -85,6 +85,10 @@ substitutions:
   slot2_title: "В комнате"
   slot2_format: "%.1f°"
 
+  # Влажность в комнате — для страницы «Климат». Если сущности нет, блок
+  # влажности не показывается
+  room_humidity_entity: sensor.0xa4c138e62d2c9de0_humidity
+
 
   # ---- 3D-принтер Bambu Lab ----------------------------------------------
   # Сущности создаёт интеграция Bambu Lab (HACS, greghesp/ha-bambulab),
@@ -159,6 +163,8 @@ esphome:
     - priority: -100
       then:
         - script.execute: wake_screen
+        # Какие страницы показывать — по выключателям в HA
+        - script.execute: layout_dots
         - script.execute: refresh_clock
         - component.update: i2c_devices
         # Заставку прячет подключение к HA; без HA — через минуту, часы идут по RTC

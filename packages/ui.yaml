@@ -13,23 +13,27 @@
 # ---------------------------------------------------------------------------
 
 font:
+  # Шрифт интерфейса — Montserrat: геометричный, крупные цифры Medium,
+  # подписи Regular. Кириллица в нём есть.
+  #
   # Время: только цифры и прочерк. Минуты — font_time, часы на 5 пунктов
-  # крупнее — font_time_h
-  - file: "gfonts://Roboto@700"
+  # крупнее — font_time_h. Им же — крупная температура на странице «Климат»
+  # и процент печати, отсюда точка, градус и минус
+  - file: "gfonts://Montserrat@500"
     id: font_time
     size: 96
     bpp: 4
     glyphs: "0123456789-"
 
-  - file: "gfonts://Roboto@700"
+  - file: "gfonts://Montserrat@500"
     id: font_time_h
     size: 101
     bpp: 4
-    glyphs: "0123456789-"
+    glyphs: ["0123456789-.", "°"]
 
   # Строка восхода и заката на часах. Она же пишет «нет связи с HA»,
   # поэтому с кириллицей
-  - file: "gfonts://Roboto@400"
+  - file: "gfonts://Montserrat@400"
     id: font_sun
     size: 22
     bpp: 4
@@ -43,23 +47,14 @@ font:
           - "\U000F059C"   # weather-sunset-up
           - "\U000F059B"   # weather-sunset-down
 
-  # Крупный процент на странице принтера
-  - file: "gfonts://Roboto@700"
+  # Надпись вспышки во весь экран: «ГОТОВО», «ОШИБКА»
+  - file: "gfonts://Montserrat@600"
     id: font_pct
     size: 58
     bpp: 4
-    glyphs: "0123456789%-"
+    glyphs: ["0123456789%-", "ГОТВШИБКА"]
 
-  # Крупные значения на двух плитках страницы «Дом»
-  - file: "gfonts://Roboto@500"
-    id: font_tile
-    size: 60
-    bpp: 4
-    glyphsets: [GF_Latin_Kernel, GF_Cyrillic_Core]
-    glyphs: ["°"]
-    ignore_missing_glyphs: true
-
-  - file: "gfonts://Roboto@500"
+  - file: "gfonts://Montserrat@500"
     id: font_l
     size: 38
     bpp: 4
@@ -68,7 +63,7 @@ font:
     glyphs: ["°", "«", "»", "—", "…", "№"]
     ignore_missing_glyphs: true
 
-  - file: "gfonts://Roboto@400"
+  - file: "gfonts://Montserrat@400"
     id: font_m
     size: 26
     bpp: 4
@@ -77,7 +72,7 @@ font:
     glyphs: ["°", "«", "»", "—", "…", "№"]
     ignore_missing_glyphs: true
 
-  - file: "gfonts://Roboto@400"
+  - file: "gfonts://Montserrat@400"
     id: font_s
     size: 22
     bpp: 4
@@ -86,7 +81,7 @@ font:
     ignore_missing_glyphs: true
 
   # Текст вперемешку с иконками Material Design Icons
-  - file: "gfonts://Roboto@400"
+  - file: "gfonts://Montserrat@400"
     id: font_icon
     size: 26
     bpp: 4
@@ -190,14 +185,6 @@ lvgl:
       pad_all: 0
       radius: 0
 
-    - id: style_card
-      bg_color: 0x14181D
-      bg_opa: COVER
-      radius: 22
-      border_width: 0
-      pad_all: 6
-      text_color: 0xFFFFFF
-
     - id: style_caption
       text_font: font_s
       text_color: 0x8A9199
@@ -285,8 +272,8 @@ lvgl:
       border_width: 0
       pad_all: 0
 
-  # Индикатор страниц один на все страницы: раньше он был скопирован
-  # в каждую из них, и точки приходилось править в четырёх местах
+  # Индикатор страниц один на все страницы. Активная точка — цветом страницы:
+  # часы голубые, климат бирюзовый, принтер зелёный, устройство серое
   top_layer:
     widgets:
       # Заставка при запуске: видна, пока нет связи с Home Assistant (но не
@@ -381,19 +368,22 @@ lvgl:
       - obj:
           id: page_dots
           align: CENTER
-          y: 184
-          width: 76
-          height: 14
+          y: 180
+          width: 180
+          height: 30
           bg_opa: TRANSP
           border_width: 0
           pad_all: 0
           scrollable: false
           clickable: false
           widgets:
-            - obj: { id: dot_1, styles: style_dot, bg_color: 0x03A9F4, align: CENTER, x: -33 }
-            - obj: { id: dot_2, styles: style_dot, bg_color: 0x33383E, align: CENTER, x: -11 }
-            - obj: { id: dot_3, styles: style_dot, bg_color: 0x33383E, align: CENTER, x: 11 }
-            - obj: { id: dot_4, styles: style_dot, bg_color: 0x33383E, align: CENTER, x: 33 }
+            # Точки стоят по дуге вдоль нижнего края круга. Здесь — положение для
+            # четырёх страниц; если какие-то страницы выключены в HA, скрипт
+            # layout_dots расставляет оставшиеся заново
+            - obj: { id: dot_1, styles: style_dot, bg_color: 0x5AC8FA, align: CENTER, x: -58, y: -1 }
+            - obj: { id: dot_2, styles: style_dot, bg_color: 0x33383E, align: CENTER, x: -20, y: 7 }
+            - obj: { id: dot_3, styles: style_dot, bg_color: 0x33383E, align: CENTER, x: 20, y: 7 }
+            - obj: { id: dot_4, styles: style_dot, bg_color: 0x33383E, align: CENTER, x: 58, y: -1 }
 
   pages:
     # =====================================================================
@@ -597,7 +587,7 @@ lvgl:
               # Иконка погоды и уличная температура — в одну строку по центру
               - obj:
                   align: CENTER
-                  y: -98
+                  y: -100
                   width: SIZE_CONTENT
                   height: SIZE_CONTENT
                   bg_opa: TRANSP
@@ -625,18 +615,18 @@ lvgl:
                         text_color: 0xFFFFFF
 
               # Время без двоеточия: часы белые справа от центра зазора,
-              # минуты цветные слева от него. Цифры Roboto одинаковой
-              # ширины, поэтому время не прыгает. Часы на 5 пунктов крупнее
-              # и подняты на 2 px, чтобы низ цифр совпадал с минутами
+              # минуты цветные слева от него, с зазором 28 px. Часы на 5
+              # пунктов крупнее и подняты на 2 px, чтобы низ цифр совпадал
+              # с минутами
               - label:
                   id: lbl_time_h
                   text: "--"
                   text_font: font_time_h
                   text_color: 0xFFFFFF
                   text_align: RIGHT
-                  width: 136
+                  width: 160
                   align: CENTER
-                  x: -82
+                  x: -94
                   y: -10
               - label:
                   id: lbl_time_m
@@ -644,12 +634,21 @@ lvgl:
                   text_font: font_time
                   text_color: ${time_minutes_color}
                   text_align: LEFT
-                  width: 130
+                  width: 160
                   align: CENTER
-                  x: 79
+                  x: 94
                   y: -8
 
-              # Восход и закат. Без связи с Home Assistant здесь пишется
+              # Погода словом — «Облачно», «Дождь» — цветом иконки погоды
+              - label:
+                  id: lbl_wstatus
+                  text: ""
+                  text_font: font_m
+                  text_color: 0x90A4AE
+                  align: CENTER
+                  y: 58
+
+              # Восход или закат. Без связи с Home Assistant здесь пишется
               # «нет связи с HA»
               - label:
                   id: lbl_sun
@@ -657,7 +656,7 @@ lvgl:
                   text_font: font_sun
                   text_color: 0x8A9199
                   align: CENTER
-                  y: 62
+                  y: 94
 
               - label:
                   id: lbl_slot2
@@ -665,10 +664,11 @@ lvgl:
                   text_font: font_l
                   text_color: 0xFFFFFF
                   align: CENTER
-                  y: 124
+                  y: 140
 
     # =====================================================================
-    # Страница 2 — два значения из Home Assistant крупно
+    # Страница 2 — «Климат»: температура в комнате крупно, словом — как
+    # в ней, ниже — на улице и влажность. Цвет страницы — бирюзовый
     # =====================================================================
     - id: page_home
       styles: style_page
@@ -683,48 +683,84 @@ lvgl:
             styles: style_root
             scrollable: false
             widgets:
-              - obj:
-                  styles: style_card
-                  width: 196
-                  height: 200
-                  radius: 28
+              - label:
+                  text: "${slot2_title}"
+                  styles: style_caption
                   align: CENTER
-                  x: -103
-                  scrollable: false
+                  y: -150
+
+              # Крупно — температура в комнате. Цвет по значению задаёт
+              # color_temps: холодно — голубой, норма — белый, жарко — оранжевый
+              - label:
+                  id: lbl_slot2_card
+                  text: "--"
+                  text_font: font_time_h
+                  text_color: 0xFFFFFF
+                  align: CENTER
+                  y: -60
+
+              # «Прохладно» / «Комфортно» / «Жарко»
+              - label:
+                  id: lbl_comfort
+                  text: ""
+                  text_font: font_m
+                  text_color: 0x2DD4BF
+                  align: CENTER
+                  y: 24
+
+              # На улице. Пока нет влажности — по центру, с ней — слева
+              - obj:
+                  id: clim_out
+                  align: CENTER
+                  y: 100
+                  width: 170
+                  height: 80
+                  bg_opa: TRANSP
+                  border_width: 0
+                  pad_all: 0
                   clickable: false
+                  scrollable: false
                   widgets:
+                    - label:
+                        id: lbl_slot1_card
+                        text: "--"
+                        text_font: font_l
+                        text_color: 0xFFFFFF
+                        align: TOP_MID
+                        y: 0
                     - label:
                         text: "${slot1_title}"
                         styles: style_caption
                         align: TOP_MID
-                        y: 22
-                    - label:
-                        id: lbl_slot1_card
-                        text: "--"
-                        text_font: font_tile
-                        align: CENTER
-                        y: 14
+                        y: 46
+
+              # Влажность в комнате — появляется, когда есть данные
               - obj:
-                  styles: style_card
-                  width: 196
-                  height: 200
-                  radius: 28
+                  id: clim_hum
                   align: CENTER
-                  x: 103
-                  scrollable: false
+                  x: 85
+                  y: 100
+                  width: 170
+                  height: 80
+                  bg_opa: TRANSP
+                  border_width: 0
+                  pad_all: 0
                   clickable: false
+                  scrollable: false
+                  hidden: true
                   widgets:
                     - label:
-                        text: "${slot2_title}"
+                        id: lbl_hum
+                        text: "--"
+                        text_font: font_l
+                        text_color: 0x2DD4BF
+                        align: TOP_MID
+                        y: 0
+                    - label:
+                        text: "Влажность"
                         styles: style_caption
                         align: TOP_MID
-                        y: 22
-                    - label:
-                        id: lbl_slot2_card
-                        text: "--"
-                        text_font: font_tile
-                        align: CENTER
-                        y: 14
+                        y: 46
 
     # =====================================================================
     # Страница 3 — 3D-принтер Bambu Lab

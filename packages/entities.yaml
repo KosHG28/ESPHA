@@ -106,6 +106,11 @@ script:
                   shown2 = z2;
                   lv_obj_set_style_text_color(id(lbl_slot2), color(z2), 0);
                   lv_obj_set_style_text_color(id(lbl_slot2_card), color(z2), 0);
+                  // Словом на странице «Климат» — цветом зоны; норма — бирюзовая
+                  static const char *const WORD[3] = {"Прохладно", "Комфортно", "Жарко"};
+                  lv_obj_t *cf = id(lbl_comfort);
+                  lv_label_set_text(cf, std::isnan(id(ha_slot2).state) ? "" : WORD[z2]);
+                  lv_obj_set_style_text_color(cf, z2 == 1 ? lv_color_hex(0x2DD4BF) : color(z2), 0);
                 }
 
   # Ближайшее событие солнца: днём «закат 18:55», ночью «восход 6:42».
@@ -233,6 +238,28 @@ sensor:
       - script.execute:
           id: color_temps
           force: false
+
+  # Влажность в комнате — на странице «Климат». Если такой сущности нет,
+  # блок влажности просто не появляется
+  - platform: homeassistant
+    id: ha_room_humidity
+    entity_id: ${room_humidity_entity}
+    internal: true
+    filters:
+      - delta: 0.5
+    on_value:
+      - lambda: |-
+          bool ok = !std::isnan(x);
+          if (ok) {
+            char buf[12];
+            snprintf(buf, sizeof(buf), "%.0f%%", x);
+            lv_label_set_text(id(lbl_hum), buf);
+            lv_obj_clear_flag(id(clim_hum), LV_OBJ_FLAG_HIDDEN);
+          } else {
+            lv_obj_add_flag(id(clim_hum), LV_OBJ_FLAG_HIDDEN);
+          }
+          // С влажностью «на улице» уходит влево, без неё — по центру
+          lv_obj_align(id(clim_out), LV_ALIGN_CENTER, ok ? -85 : 0, 100);
 
   # ---- диагностика самого устройства ------------------------------------
   - platform: wifi_signal

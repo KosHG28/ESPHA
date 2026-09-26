@@ -126,8 +126,9 @@ script:
           id(weather_apply)->execute();
           id(weather_icon)->execute();
 
-  # Иконка погоды рядом с уличной температурой. Показывает настоящую погоду,
-  # а не пункт «Фона погоды». Ночью — луна вместо солнца
+  # Иконка погоды рядом с уличной температурой и погода словом под временем
+  # («Облачно», «Дождь») — её цветом. Показывают настоящую погоду, а не пункт
+  # «Фона погоды». Ночью — луна вместо солнца
   - id: weather_icon
     mode: restart
     then:
@@ -150,14 +151,40 @@ script:
 
           // Надпись меняем, только когда иконка правда сменилась: этот скрипт
           // вызывается каждую минуту, а лишняя установка текста — лишняя перерисовка
+          static const struct { const char *key, *word; } WORDS[] = {
+              {"clear", "Ясно"},
+              {"partly_cloudy", "Переменная облачность"},
+              {"cloudy", "Облачно"},
+              {"overcast", "Пасмурно"},
+              {"light_rain", "Небольшой дождь"},
+              {"rain", "Дождь"},
+              {"heavy_rain", "Ливень"},
+              {"showers", "Ливень"},
+              {"sleet", "Мокрый снег"},
+              {"light_snow", "Небольшой снег"},
+              {"snow", "Снег"},
+              {"snowfall", "Снегопад"},
+              {"hail", "Град"},
+              {"thunderstorm", "Гроза"},
+              {"thunderstorm_with_rain", "Гроза с дождём"},
+              {"thunderstorm_with_hail", "Гроза с градом"},
+          };
+          const char *word = "";
+          for (const auto &w : WORDS)
+            if (s == w.key) { word = w.word; break; }
+
           static std::string shown = "-";
-          lv_obj_t *lbl = id(lbl_weather_icon);
-          if (shown != icon) {
-            shown = icon;
+          std::string key = std::string(icon) + "|" + s;
+          if (shown != key) {
+            shown = key;
+            lv_obj_t *lbl = id(lbl_weather_icon);
             lv_label_set_text(lbl, icon);
             lv_obj_set_style_text_color(lbl, lv_color_hex(color), 0);
             if (*icon) lv_obj_clear_flag(lbl, LV_OBJ_FLAG_HIDDEN);
             else lv_obj_add_flag(lbl, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_t *st = id(lbl_wstatus);
+            lv_label_set_text(st, word);
+            lv_obj_set_style_text_color(st, lv_color_hex(color), 0);
           }
 
   # Выбрать осадки, облака, грозу и звёзды по погоде и настройке «Фон погоды»
@@ -221,8 +248,8 @@ interval:
             // кусок цифры 101 px ради пролетающей капли — самое дорогое.
             // Прямоугольники цифр часов и минут в экранных координатах (с
             // запасом на сдвиг против выгорания)
-            id(wfx)->add_exclude(98, 182, 224, 262);
-            id(wfx)->add_exclude(242, 186, 366, 262);
+            id(wfx)->add_exclude(64, 180, 222, 264);
+            id(wfx)->add_exclude(244, 184, 402, 264);
           }
           weather_fx::Params p;
           p.mode = id(weather_mode);

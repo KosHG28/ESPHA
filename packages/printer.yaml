@@ -234,6 +234,12 @@ script:
   - id: printer_focus
     mode: restart
     then:
+      # Страница принтера выключена в HA — не открывать её
+      - if:
+          condition:
+            lambda: 'return id(page_printer)->skip;'
+          then:
+            - script.stop: printer_focus
       # Экран выключен (ночь или никого нет) — не будить, а открыть страницу
       # принтера, когда экран включат
       - if:

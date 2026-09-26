@@ -25,31 +25,59 @@ script:
       idx: int
     mode: restart
     then:
-      - lambda: 'id(current_page) = idx;'
+      - lambda: |-
+          id(current_page) = idx;
+          // Активная точка — цветом страницы, остальные тёмные
+          static const uint32_t ACCENT[4] = {0x5AC8FA, 0x2DD4BF, 0x22DD44, 0x9AA4AE};
+          lv_obj_t *dots[4] = {id(dot_1), id(dot_2), id(dot_3), id(dot_4)};
+          for (int i = 0; i < 4; i++)
+            lv_obj_set_style_bg_color(dots[i], lv_color_hex(i == idx ? ACCENT[i] : 0x33383E), 0);
       - script.execute: dots_autohide
-      - lvgl.widget.update:
-          id: [dot_1, dot_2, dot_3, dot_4]
-          bg_color: 0x33383E
+
+  # Какие страницы показывать — выключатели «Страница …» в HA. Выключенная
+  # страница пропускается при листании, её точка прячется, а оставшиеся
+  # точки заново расставляются по дуге вдоль нижнего края круга
+  - id: layout_dots
+    mode: queued
+    max_runs: 3
+    then:
+      - lambda: |-
+          // Выключатели восстанавливают состояние при старте раньше, чем
+          // создаётся интерфейс; тогда просто ждём вызова из on_boot
+          if (id(dot_1) == nullptr)
+            return;
+          id(page_home)->skip = !id(sw_page_climate).state;
+          id(page_printer)->skip = !id(sw_page_printer).state;
+          id(page_system)->skip = !id(sw_page_system).state;
+          lv_obj_t *dots[4] = {id(dot_1), id(dot_2), id(dot_3), id(dot_4)};
+          bool on[4] = {true, id(sw_page_climate).state, id(sw_page_printer).state, id(sw_page_system).state};
+          int n = 0;
+          for (int i = 0; i < 4; i++)
+            if (on[i]) n++;
+          // Дуга радиусом 188 px от центра экрана, шаг 12°; контейнер точек
+          // стоит на 180 px ниже центра
+          int k = 0;
+          for (int i = 0; i < 4; i++) {
+            if (!on[i]) {
+              lv_obj_add_flag(dots[i], LV_OBJ_FLAG_HIDDEN);
+              continue;
+            }
+            float a = (k - (n - 1) / 2.0f) * 12.0f * 0.0174533f;
+            lv_obj_align(dots[i], LV_ALIGN_CENTER, (int) lroundf(188.0f * sinf(a)),
+                         (int) lroundf(188.0f * cosf(a) - 180.0f));
+            lv_obj_clear_flag(dots[i], LV_OBJ_FLAG_HIDDEN);
+            k++;
+          }
+      # Если выключили страницу, которая сейчас на экране, — на часы
       - if:
           condition:
-            lambda: 'return idx == 0;'
+            lambda: |-
+              int p = id(current_page);
+              return (p == 1 && id(page_home)->skip) || (p == 2 && id(page_printer)->skip) ||
+                     (p == 3 && id(page_system)->skip);
           then:
-            - lvgl.widget.update: { id: dot_1, bg_color: 0x03A9F4 }
-      - if:
-          condition:
-            lambda: 'return idx == 1;'
-          then:
-            - lvgl.widget.update: { id: dot_2, bg_color: 0x03A9F4 }
-      - if:
-          condition:
-            lambda: 'return idx == 2;'
-          then:
-            - lvgl.widget.update: { id: dot_3, bg_color: 0x03A9F4 }
-      - if:
-          condition:
-            lambda: 'return idx == 3;'
-          then:
-            - lvgl.widget.update: { id: dot_4, bg_color: 0x03A9F4 }
+            - lvgl.page.show:
+                id: page_clock
 
   # Точки страниц видны после касания или смены страницы и прячутся через
   # page_dots_timeout без касаний: чище вид и меньше выгорание AMOLED
@@ -99,6 +127,43 @@ script:
       - lvgl.widget.show: alert_overlay
       - delay: 3s
       - lvgl.widget.hide: alert_overlay
+
+switch:
+  - platform: template
+    id: sw_page_climate
+    name: Страница климата
+    icon: mdi:home-thermometer-outline
+    entity_category: config
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    on_turn_on:
+      - script.execute: layout_dots
+    on_turn_off:
+      - script.execute: layout_dots
+
+  - platform: template
+    id: sw_page_printer
+    name: Страница 3D-принтера
+    icon: mdi:printer-3d
+    entity_category: config
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    on_turn_on:
+      - script.execute: layout_dots
+    on_turn_off:
+      - script.execute: layout_dots
+
+  - platform: template
+    id: sw_page_system
+    name: Страница устройства
+    icon: mdi:chip
+    entity_category: config
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    on_turn_on:
+      - script.execute: layout_dots
+    on_turn_off:
+      - script.execute: layout_dots
 
 interval:
   # Защита AMOLED: содержимое каждые несколько минут сдвигается на два
