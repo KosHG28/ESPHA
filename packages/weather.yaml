@@ -217,6 +217,12 @@ interval:
             bound = true;
             id(wfx)->bind(id(fx_root), id(fx_drops), id(fx_flakes), id(fx_splash), id(fx_clouds), id(fx_stars),
                           id(fx_bolt)->obj, id(fx_bolt_glow)->obj);
+            // За крупными цифрами времени частицы не рисуются: перерисовывать
+            // кусок цифры 101 px ради пролетающей капли — самое дорогое.
+            // Прямоугольники цифр часов и минут в экранных координатах (с
+            // запасом на сдвиг против выгорания)
+            id(wfx)->add_exclude(98, 182, 224, 262);
+            id(wfx)->add_exclude(242, 186, 366, 262);
           }
           weather_fx::Params p;
           p.mode = id(weather_mode);

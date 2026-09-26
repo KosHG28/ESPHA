@@ -34,6 +34,12 @@ class WeatherFx : public Component {
   /// Один кадр анимации. Вызывается раз в weather_fx_interval.
   void frame(const Params &p);
 
+  /// Прямоугольник, внутри которого капли и снежинки не рисуются (экранные
+  /// координаты). Нужен для крупных цифр времени: перерисовывать кусок цифры
+  /// в 101 px каждый раз, когда за ней пролетает капля, — самое дорогое во
+  /// всём погодном фоне. До двух прямоугольников: часы и минуты.
+  void add_exclude(int x1, int y1, int x2, int y2);
+
   float get_setup_priority() const override { return setup_priority::LATE; }
 
  protected:
@@ -55,6 +61,9 @@ class WeatherFx : public Component {
   void stars_(uint32_t now);
   void lightning_(uint32_t now);
   void end_strike_();
+  /// Поставить частицу на место; внутри исключённых прямоугольников — спрятать
+  void place_(lv_obj_t *o, int x, int y, int w, int h, bool &visible);
+  bool excluded_(int x, int y, int w, int h) const;
 
   static int rnd_(int lo, int hi);
   static void show_(lv_obj_t *o, bool v);
@@ -79,6 +88,9 @@ class WeatherFx : public Component {
   float sx_[NS]{}, sy_[NS]{}, svx_[NS]{}, svy_[NS]{};
   float slife_[NS]{};  // сколько ещё жить брызгам, мс
   float cx_[NC]{};
+  bool dvis_[ND]{}, fvis_[NF]{};  // видна ли частица сейчас
+  int n_ex_{0};
+  int ex_[2][4]{};
   float stph_[NST]{};
 
   // Порыв ветра: когда начался и сколько длится (0 — порыва нет)
