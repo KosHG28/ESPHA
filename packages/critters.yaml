@@ -42,7 +42,7 @@ interval:
             lv_obj_add_flag(img, LV_OBJ_FLAG_HIDDEN);
             lv_obj_clear_flag(img, LV_OBJ_FLAG_CLICKABLE);
             lv_obj_t *zzz = lv_label_create(top);
-            lv_obj_set_style_text_font(zzz, id(font_m)->get_lv_font(), 0);
+            lv_obj_set_style_text_font(zzz, id(font_l)->get_lv_font(), 0);
             lv_obj_set_style_text_color(zzz, lv_color_hex(0x8FB3CC), 0);
             lv_obj_add_flag(zzz, LV_OBJ_FLAG_HIDDEN);
             lv_obj_clear_flag(zzz, LV_OBJ_FLAG_CLICKABLE);

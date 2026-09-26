@@ -11,7 +11,9 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
-SCALE = 2
+# Во сколько раз увеличивать: кот крупный, остальные гости поменьше
+SCALE_CAT = 4
+SCALE_OTHER = 3
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "components" / "critters" / "sprites.h"
 
@@ -167,8 +169,8 @@ def snowman(arms_up):
     return im
 
 
-def scaled(im):
-    return im.resize((im.width * SCALE, im.height * SCALE), Image.NEAREST)
+def scaled(im, k):
+    return im.resize((im.width * k, im.height * k), Image.NEAREST)
 
 
 def mirrored(im):
@@ -190,7 +192,7 @@ def sprites():
         out[f"bird_l{up}"] = mirrored(bird(up))
         out[f"snail_l{up}"] = mirrored(snail(up))
         out[f"snowman{up}"] = snowman(up)
-    return {k: scaled(v) for k, v in out.items()}
+    return {k: scaled(v, SCALE_CAT if k.startswith("cat") else SCALE_OTHER) for k, v in out.items()}
 
 
 def c_array(name, im):
