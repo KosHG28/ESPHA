@@ -48,8 +48,14 @@ interval:
             lv_obj_clear_flag(zzz, LV_OBJ_FLAG_CLICKABLE);
             id(crit)->bind(img, zzz);
           }
-          auto now = id(ha_time).now();
-          bool winter = now.is_valid() && (now.month == 12 || now.month <= 2);
+          // Зима ли — достаточно проверять раз в минуту
+          static bool winter = false;
+          static uint32_t checked = 0;
+          if (checked == 0 || millis() - checked > 60000) {
+            checked = millis();
+            auto now = id(ha_time).now();
+            winter = now.is_valid() && (now.month == 12 || now.month <= 2);
+          }
           id(crit)->frame(!id(screen_off), id(is_night), winter);
 
 button:
