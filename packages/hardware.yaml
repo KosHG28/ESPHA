@@ -105,6 +105,9 @@ touchscreen:
           id(touch_woke) = id(screen_off);
           id(touch_active) = true;
           id(touch_release_ms) = millis();
+          // Кот на экране замечает касание и мяукает
+          if (!id(touch_woke))
+            id(crit)->poke();
           // Пасхалка: пять быстрых касаний по часам (за 2,5 с) зовут кота
           if (id(current_page) == 0 && !id(touch_woke)) {
             uint32_t now = millis();

@@ -23,6 +23,11 @@ struct Params {
   float wind_bearing{NAN};  ///< градусы, откуда дует
   float wind_gust{NAN};     ///< м/с, порывы
   int rain_style{0};  ///< 0 — капли на стекле, 1 — падающий дождь
+  bool sun{false};      ///< ясный день: солнце с лучами
+  bool garland{false};  ///< праздник: гирлянда по краю экрана
+  // Для созвездия: где и когда смотрим на небо. utc 0 — время неизвестно
+  float lat{NAN}, lon{NAN};  ///< градусы, восточная долгота — плюс
+  uint32_t utc{0};           ///< секунды Unix
 };
 
 /// Погодный фон страницы часов.
@@ -32,14 +37,19 @@ struct Params {
 /// отрисовки, а изменившиеся участки отмечаются напрямую. Сдвиг обычного
 /// объекта LVGL меняет его стиль и заставляет пересчитать раскладку всего
 /// контейнера — на 50–60 частицах при 30 кадрах в секунду это заметная
-/// работа, которой здесь нет. Облака, молния и Большая Медведица — редкие и
-/// крупные, они остаются обычными объектами.
+/// работа, которой здесь нет. Облака и молния — редкие и крупные, они
+/// остаются обычными объектами.
+///
+/// Холстов два. Задний лежит под облаками — на нём небо: звёзды, созвездие,
+/// метеоры и солнце, так что облако их закрывает. Передний — над облаками:
+/// капли, брызги, снежинки и гирлянда.
 class WeatherFx : public Component {
  public:
   /// root — слой погоды на странице часов; clouds — контейнер с тремя
-  /// облаками; bolt и glow — линии молнии; шрифты — для снежинок
+  /// облаками; bolt и glow — линии молнии; шрифты — для снежинок и подписи
+  /// созвездия
   void bind(lv_obj_t *root, lv_obj_t *clouds, lv_obj_t *bolt, lv_obj_t *glow, const lv_font_t *flake_s,
-            const lv_font_t *flake_l);
+            const lv_font_t *flake_l, const lv_font_t *caption);
 
   /// Один кадр анимации. Вызывается раз в weather_fx_interval.
   void frame(const Params &p);
@@ -48,8 +58,13 @@ class WeatherFx : public Component {
   /// крупные цифры времени. До двух прямоугольников
   void add_exclude(int x1, int y1, int x2, int y2);
 
-  /// Нарисовать частицы, попадающие в перерисовываемый участок
-  void paint(lv_layer_t *layer);
+  /// Нарисовать то, что попадает в перерисовываемый участок: небо (задний
+  /// холст) или осадки и гирлянду (передний)
+  void paint_back(lv_layer_t *layer);
+  void paint_front(lv_layer_t *layer);
+
+  /// Какое созвездие сейчас на экране (для отладки), пустая строка — никакое
+  const char *constellation() const { return this->con_on_ ? this->con_name_ : ""; }
 
   float get_setup_priority() const override { return setup_priority::LATE; }
 
@@ -59,8 +74,9 @@ class WeatherFx : public Component {
   static const int NS = 8;    // брызги
   static const int NC = 3;    // облака
   static const int NST = 12;  // звёзды
-  static const int NDIP = 7;
-  static const int NDASH = 64;
+  static const int NCS = 10;     // звёзд в созвездии, не больше
+  static const int NDASH = 128;  // чёрточек пунктира
+  static const int NG = 24;      // лампочек гирлянды
 
   /// Что сейчас нарисовано для частицы: прямоугольник относительно холста
   struct Spot {
@@ -78,8 +94,11 @@ class WeatherFx : public Component {
   void stars_(uint32_t now);
   void lightning_(uint32_t now);
   void end_strike_();
-  void build_dipper_();
-  void show_dipper_(bool on, bool dim);
+  void sky_(const Params &p);
+  void layout_con_(int idx, const float (*pts)[2], int n);
+  void meteor_(uint32_t now);
+  void sun_(uint32_t now);
+  void garland_(uint32_t now);
 
   /// Перенести частицу: отметить к перерисовке старое и новое место
   void mark_(Spot &s, bool on, int x, int y, int w, int h);
@@ -91,13 +110,15 @@ class WeatherFx : public Component {
   static void show_(lv_obj_t *o, bool v);
 
   bool bound_{false};
-  lv_obj_t *root_{nullptr}, *paint_{nullptr}, *clouds_box_{nullptr}, *bolt_{nullptr}, *glow_{nullptr};
-  const lv_font_t *font_s_{nullptr}, *font_l_{nullptr};
+  lv_obj_t *root_{nullptr}, *paint_{nullptr}, *back_{nullptr}, *clouds_box_{nullptr}, *bolt_{nullptr},
+      *glow_{nullptr};
+  const lv_font_t *font_s_{nullptr}, *font_l_{nullptr}, *font_cap_{nullptr};
 
   // Текущая настройка
   int applied_{-1};
   int nd_{0}, nf_{0}, ncl_{0};
   bool hail_{false}, storm_{false}, stars_on_{false}, dim_{false}, glass_on_{false};
+  bool sun_on_{false}, gar_on_{false};
 
   // Движение считается по реально прошедшему времени: k_ — во сколько раз
   // этот кадр длиннее опорных 50 мс
@@ -144,12 +165,38 @@ class WeatherFx : public Component {
   uint32_t next_strike_{0}, strike_t0_{0};
   bool striking_{false}, bolt_on_{false};
 
-  // Большая Медведица
-  lv_obj_t *dip_box_{nullptr};
-  lv_obj_t *dip_star_[NDIP]{};
-  lv_obj_t *dash_[NDASH]{};
-  lv_point_precise_t dash_pts_[NDASH][2]{};
+  // Созвездие: какое, где звёзды (экранные координаты центра) и их размер,
+  // чёрточки пунктира, общий прямоугольник вместе с подписью
+  bool con_on_{false}, con_force_{true};
+  int con_idx_{-1};
+  int64_t con_min_{-1000};  // минута последнего расчёта
+  int64_t con_slot_{-1};    // десятиминутка, в которую выбрано созвездие
+  const char *con_name_{""};
+  int cn_{0};
+  int csx_[NCS]{}, csy_[NCS]{}, csz_[NCS]{};
   int ndash_{0};
+  lv_point_precise_t dash_[NDASH][2]{};
+  lv_area_t con_area_{};
+  lv_area_t cap_area_{};
+
+  // Метеор: откуда и куда летит, когда начался; что нарисовано сейчас
+  bool met_on_{false};
+  uint32_t met_t0_{0}, met_len_{0}, next_met_{0};
+  float met_x0_{0}, met_y0_{0}, met_vx_{0}, met_vy_{0};
+  float met_hx_{0}, met_hy_{0}, met_tx_{0}, met_ty_{0};
+  lv_opa_t met_opa_{0};
+  Spot met_spot_{};
+
+  // Солнце: угол поворота лучей
+  float sun_ang_{0};
+  uint32_t sun_ms_{0};
+  Spot sun_spot_{};
+
+  // Гирлянда: шаг перемигивания
+  int gar_step_{0};
+  uint32_t gar_ms_{0};
+  int gx_[NG]{}, gy_[NG]{};
+  Spot gs_[NG]{};
 };
 
 }  // namespace weather_fx

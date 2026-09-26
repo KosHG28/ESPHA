@@ -189,6 +189,7 @@ api:
     - lvgl.label.update:
         id: lbl_sun
         text: "нет связи с Home Assistant"
+        text_color: 0x8A9199
     # Без связи неизвестно, есть ли кто дома, — вернуть обычный режим
     - script.execute: power_eval
   on_client_connected:

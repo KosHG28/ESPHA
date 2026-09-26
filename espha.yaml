@@ -127,6 +127,10 @@ substitutions:
   weather_wind_bearing_entity: sensor.yandex_pogoda_wind_bearing
   # Порывы ветра, м/с. Время от времени снос на пару секунд усиливается до них
   weather_wind_gust_entity: sensor.yandex_pogoda_wind_gust
+  # Координаты дома для созвездий на ночном небе — пока Home Assistant не
+  # прислал свои (из зоны «Дом»). Градусы, восточная долгота — плюс
+  home_latitude: "55.75"
+  home_longitude: "37.62"
 
   # Период кадра погодного фона — в такт с обновлением экрана
   # (lvgl_refresh_interval), иначе движение неровное. 33ms — 30 кадров в
@@ -203,6 +207,7 @@ packages:
   critters: !include packages/critters.yaml
   ui: !include packages/ui.yaml
   imu: !include packages/imu.yaml
+  holidays: !include packages/holidays.yaml
   behaviour: !include packages/behaviour.yaml
 
 logger:

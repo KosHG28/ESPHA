@@ -1,0 +1,116 @@
+# ---------------------------------------------------------------------------
+# Праздники.
+#
+# Новогодняя гирлянда: с 15 декабря по 14 января (до Старого Нового года) по
+# краю страницы часов горит гирлянда — тёмно-зелёный провод и разноцветные
+# лампочки, которые перемигиваются. Выбор «Гирлянда» в Home Assistant:
+# «Авто» — по датам, «Всегда» — зажечь сейчас, «Выкл» — не зажигать.
+#
+# Дни рождения: в текстовом поле «Дни рождения» — даты через запятую, у каждой
+# можно указать имя: «15.01 Маша, 3.07 Костя, 21.11». В такой день:
+#   - вместо восхода и заката на часах — «С днём рождения, Маша!» золотым;
+#   - горит гирлянда (если «Гирлянда» не «Выкл»);
+#   - в 9 утра — поздравление карточкой, как сообщение из HA. Если в это время
+#     экран погашен (ночь или никого нет дома) — как только кто-то вернётся.
+# ---------------------------------------------------------------------------
+
+globals:
+  # Гирлянда сейчас горит
+  - id: fx_garland
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  # Кого поздравляем сегодня: «Маша и Костя»; пусто — никого. Отдельно — есть
+  # ли вообще день рождения (дата может быть без имени)
+  - id: birthday_line
+    type: std::string
+    restore_value: false
+    initial_value: '""'
+  # День года, когда уже поздравили карточкой
+  - id: greeted_day
+    type: int
+    restore_value: true
+    initial_value: '-1'
+
+select:
+  - platform: template
+    id: garland_select
+    name: Гирлянда
+    icon: mdi:string-lights
+    entity_category: config
+    options: ["Авто", "Всегда", "Выкл"]
+    initial_option: "Авто"
+    optimistic: true
+    restore_value: true
+    on_value:
+      - script.execute: holiday_check
+
+text:
+  - platform: template
+    id: birthdays_text
+    name: Дни рождения
+    icon: mdi:cake-variant
+    entity_category: config
+    mode: text
+    max_length: 200
+    optimistic: true
+    restore_value: true
+    initial_value: ""
+    on_value:
+      - script.execute: holiday_check
+
+script:
+  # Раз в минуту (из refresh_clock) и при смене настроек: какой сегодня
+  # праздник, гореть ли гирлянде, кого поздравить
+  - id: holiday_check
+    mode: queued
+    max_runs: 2
+    then:
+      - lambda: |-
+          auto now = id(ha_time).now();
+          if (!now.is_valid())
+            return;
+
+          // Дни рождения: «ДД.ММ Имя» через запятую или точку с запятой
+          std::string names;
+          bool bday = false;
+          const std::string &all = id(birthdays_text).state;
+          size_t pos = 0;
+          while (pos < all.size()) {
+            size_t end = all.find_first_of(",;", pos);
+            if (end == std::string::npos)
+              end = all.size();
+            std::string item = all.substr(pos, end - pos);
+            pos = end + 1;
+            int d = 0, m = 0, used = 0;
+            if (sscanf(item.c_str(), " %d.%d%n", &d, &m, &used) < 2)
+              continue;
+            if (d != now.day_of_month || m != now.month)
+              continue;
+            bday = true;
+            // Имя — всё после даты, без пробелов по краям
+            std::string name = item.substr(used);
+            size_t a = name.find_first_not_of(" \t"), b = name.find_last_not_of(" \t");
+            name = a == std::string::npos ? "" : name.substr(a, b - a + 1);
+            if (!name.empty())
+              names += (names.empty() ? "" : " и ") + name;
+          }
+          std::string line;
+          if (bday)
+            line = names.empty() ? std::string("С днём рождения!") : "С днём рождения, " + names + "!";
+          if (line != id(birthday_line)) {
+            id(birthday_line) = line;
+            id(refresh_sun)->execute();
+          }
+
+          // Гирлянда: «Авто» — в новогодние праздники и в дни рождения
+          const size_t sel = id(garland_select).active_index().value_or(0);
+          const bool new_year = (now.month == 12 && now.day_of_month >= 15) || (now.month == 1 && now.day_of_month <= 14);
+          id(fx_garland) = sel == 1 || (sel == 0 && (new_year || bday));
+
+          // Поздравление карточкой — один раз в день, с 9 утра, когда экран
+          // не погашен по ночному расписанию и кто-то дома
+          if (bday && now.hour >= 9 && id(greeted_day) != now.day_of_year && !id(off_wanted)) {
+            id(greeted_day) = now.day_of_year;
+            id(show_message)->execute(line, ${message_seconds}, std::string("#FFC107"));
+          }
