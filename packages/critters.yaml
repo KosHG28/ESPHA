@@ -1,0 +1,61 @@
+# ---------------------------------------------------------------------------
+# Пасхалки: изредка, раз в 1–3 часа, на экран выходит гость — на любой
+# странице, в том числе в приглушённом режиме (но не когда экран погашен
+# совсем):
+#   - кот пробегает внизу; иногда добегает до середины, садится, моргает и
+#     убегает обратно;
+#   - птица пролетает по верху;
+#   - улитка медленно ползёт по низу, а зимой вместо неё проходит снеговик;
+#   - ночью кот может прийти поспать — свернётся внизу, над ним «z z z».
+# Позвать кота: кнопка «Позвать кота» в Home Assistant или пять быстрых
+# касаний по странице часов.
+#
+# Анимацию ведёт компонент components/critters (C++), спрайты рисует
+# tools/make_sprites.py. Гость — одна маленькая картинка, так что за кадр
+# перерисовывается только участок вокруг неё.
+# ---------------------------------------------------------------------------
+
+critters:
+  id: crit
+
+globals:
+  # Секретный вызов: сколько касаний подряд и когда было первое
+  - id: tap_count
+    type: int
+    restore_value: false
+    initial_value: '0'
+  - id: tap_first_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+
+interval:
+  - interval: 33ms
+    then:
+      - lambda: |-
+          static bool bound = false;
+          if (!bound) {
+            bound = true;
+            // Картинка гостя и «z z z» — на верхнем слое, поверх любой страницы
+            lv_obj_t *top = lv_display_get_layer_top(lv_display_get_default());
+            lv_obj_t *img = lv_image_create(top);
+            lv_obj_add_flag(img, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_clear_flag(img, LV_OBJ_FLAG_CLICKABLE);
+            lv_obj_t *zzz = lv_label_create(top);
+            lv_obj_set_style_text_font(zzz, id(font_m)->get_lv_font(), 0);
+            lv_obj_set_style_text_color(zzz, lv_color_hex(0x8FB3CC), 0);
+            lv_obj_add_flag(zzz, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_clear_flag(zzz, LV_OBJ_FLAG_CLICKABLE);
+            id(crit)->bind(img, zzz);
+          }
+          auto now = id(ha_time).now();
+          bool winter = now.is_valid() && (now.month == 12 || now.month <= 2);
+          id(crit)->frame(!id(screen_off), id(is_night), winter);
+
+button:
+  - platform: template
+    name: Позвать кота 🐈
+    icon: mdi:cat
+    on_press:
+      - script.execute: wake_screen
+      - lambda: 'id(crit)->start_cat();'

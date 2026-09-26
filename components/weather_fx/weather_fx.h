@@ -22,6 +22,7 @@ struct Params {
   float wind_speed{NAN};    ///< м/с
   float wind_bearing{NAN};  ///< градусы, откуда дует
   float wind_gust{NAN};     ///< м/с, порывы
+  int rain_style{0};  ///< 0 — капли на стекле, 1 — падающий дождь
 };
 
 class WeatherFx : public Component {
@@ -59,6 +60,12 @@ class WeatherFx : public Component {
   void flakes_(float wind);
   void clouds_();
   void stars_(uint32_t now);
+  /// Дождь «капли на стекле»: капли появляются, держатся и иногда медленно
+  /// сползают вниз. Почти ничего не движется быстро — нет мерцания и нагрузки
+  void glass_();
+  /// Большая Медведица среди звёзд: 7 звёзд и пунктир между ними
+  void build_dipper_();
+  void show_dipper_(bool on, bool dim);
   void lightning_(uint32_t now);
   void end_strike_();
   /// Поставить частицу на место; внутри исключённых прямоугольников — спрятать
@@ -89,6 +96,19 @@ class WeatherFx : public Component {
   float slife_[NS]{};  // сколько ещё жить брызгам, мс
   float cx_[NC]{};
   bool dvis_[ND]{}, fvis_[NF]{};  // видна ли частица сейчас
+  // Капли на стекле: состояние (0 ждёт, 1 на стекле), сколько прожила и
+  // сколько проживёт, мс; когда начнёт сползать (0 — не сползёт)
+  uint8_t gst_[ND]{};
+  float gt_[ND]{}, glife_[ND]{}, gslide_[ND]{};
+  bool glass_on_{false};
+  // Большая Медведица
+  static const int NDIP = 7;
+  static const int NDASH = 64;
+  lv_obj_t *dip_box_{nullptr};
+  lv_obj_t *dip_star_[NDIP]{};
+  lv_obj_t *dash_[NDASH]{};
+  lv_point_precise_t dash_pts_[NDASH][2]{};
+  int ndash_{0};
   int n_ex_{0};
   int ex_[2][4]{};
   float stph_[NST]{};

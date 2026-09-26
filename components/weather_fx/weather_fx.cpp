@@ -98,6 +98,9 @@ void WeatherFx::apply_(const Params &p, bool relayout) {
   const int cnt = std::min(std::max(p.count, 0), ND);
   this->dim_ = dim;
   this->hail_ = p.mode == 4;
+  // Дождь (и дождь в мокром снеге) — каплями на стекле, если так выбрано.
+  // Град всегда падает
+  this->glass_on_ = !this->hail_ && p.rain_style == 0;
   this->nd_ = (p.mode == 1 || p.mode == 4) ? cnt : (p.mode == 3 ? cnt / 2 : 0);
   this->nf_ = std::min(p.mode == 2 ? cnt : (p.mode == 3 ? cnt / 2 : 0), NF);
   this->ncl_ = std::min(std::max(p.clouds, 0), NC);
@@ -119,12 +122,15 @@ void WeatherFx::apply_(const Params &p, bool relayout) {
       do {
         x = rnd_(50, 416);
         y = rnd_(30, 220);
-      } while ((x - 233) * (x - 233) + (y - 233) * (y - 233) > 215 * 215);
+      } while ((x - 233) * (x - 233) + (y - 233) * (y - 233) > 215 * 215 ||
+               (x > 118 && x < 342 && y > 8 && y < 92));  // место Большой Медведицы
       lv_obj_set_pos(s, x, y);
       this->stph_[i] = rnd_(0, 628) / 100.0f;
     }
     show_(s, true);
   }
+
+  this->show_dipper_(this->stars_on_, dim);
 
   // В приглушённом режиме палитра ярче: при низкой яркости панели тёмные
   // частицы сливаются с чёрным
@@ -135,6 +141,30 @@ void WeatherFx::apply_(const Params &p, bool relayout) {
       show_(d, false);
       continue;
     }
+    if (this->glass_on_) {
+      // Капля на стекле: кружок 4–8 px со светлым ободком
+      const int sz = 4 + 2 * (i % 3);
+      lv_obj_set_size(d, sz, sz);
+      lv_obj_set_style_radius(d, LV_RADIUS_CIRCLE, 0);
+      lv_obj_set_style_bg_grad_dir(d, LV_GRAD_DIR_NONE, 0);
+      lv_obj_set_style_bg_color(d, lv_color_hex(dim ? 0x3F8FC4 : 0x1D4F72), 0);
+      lv_obj_set_style_border_width(d, 1, 0);
+      lv_obj_set_style_border_color(d, lv_color_hex(dim ? 0xBFE8FF : 0x5FA8D8), 0);
+      if (relayout) {
+        // Все капли сначала ждут, появляются вразнобой
+        this->gst_[i] = 0;
+        this->glife_[i] = rnd_(0, 3000);
+      }
+      if (this->gst_[i] == 0) {
+        show_(d, false);
+        this->dvis_[i] = false;
+      } else {
+        show_(d, true);
+        this->dvis_[i] = true;
+      }
+      continue;
+    }
+    lv_obj_set_style_border_width(d, 0, 0);
     if (this->hail_) {
       lv_obj_set_size(d, HAIL_SIZE, HAIL_SIZE);
       lv_obj_set_style_radius(d, 3, 0);
@@ -411,13 +441,137 @@ void WeatherFx::lightning_(uint32_t now) {
   }
 }
 
+void WeatherFx::glass_() {
+  const float k = this->k_;
+  for (int i = 0; i < this->nd_; i++) {
+    lv_obj_t *d = lv_obj_get_child(this->drops_box_, i);
+    const int sz = 4 + 2 * (i % 3);
+    if (this->gst_[i] == 0) {
+      // Ждёт своей очереди
+      this->glife_[i] -= this->dt_ms_;
+      if (this->glife_[i] > 0)
+        continue;
+      int x, y, tries = 0;
+      do {
+        x = rnd_(40, 420);
+        y = rnd_(30, 400);
+      } while (++tries < 20 && ((x - 233) * (x - 233) + (y - 233) * (y - 233) > 205 * 205 ||
+                                this->excluded_(x, y, sz, sz)));
+      this->dx_[i] = x;
+      this->dy_[i] = y;
+      this->gt_[i] = 0;
+      this->glife_[i] = rnd_(2500, 7000);
+      // Примерно каждая третья капля через секунду-две начинает сползать
+      this->gslide_[i] = rnd_(0, 100) < 35 ? rnd_(600, 1800) : 0;
+      this->gst_[i] = 1;
+      lv_obj_set_pos(d, x, y);
+      show_(d, true);
+      this->dvis_[i] = true;
+      continue;
+    }
+    this->gt_[i] += this->dt_ms_;
+    bool gone = this->gt_[i] > this->glife_[i];
+    if (!gone && this->gslide_[i] > 0 && this->gt_[i] > this->gslide_[i]) {
+      // Сползает ~25 px/с — медленно, без мерцания
+      this->dy_[i] += k * 1.25f;
+      const float dxc = this->dx_[i] - 233.0f;
+      const float bottom = 233.0f + sqrtf(std::max(0.0f, 215.0f * 215.0f - dxc * dxc));
+      gone = this->dy_[i] + sz > bottom;
+      if (!gone)
+        this->place_(d, (int) this->dx_[i], (int) this->dy_[i], sz, sz, this->dvis_[i]);
+    }
+    if (gone) {
+      show_(d, false);
+      this->dvis_[i] = false;
+      this->gst_[i] = 0;
+      this->glife_[i] = rnd_(300, 2000);
+    }
+  }
+}
+
+// Большая Медведица: ковш и ручка, экранные координаты над погодой
+static const int DIPPER[7][2] = {
+    {133, 70},  // Бенетнаш (конец ручки)
+    {182, 52},  // Мицар
+    {221, 63},  // Алиот
+    {263, 68},  // Мегрец
+    {268, 19},  // Дубхе
+    {328, 29},  // Мерак
+    {323, 76},  // Фекда
+};
+static const int DIPPER_LINKS[7][2] = {{0, 1}, {1, 2}, {2, 3}, {3, 6}, {6, 5}, {5, 4}, {4, 3}};
+
+void WeatherFx::build_dipper_() {
+  // Все объекты — внутри своего прозрачного слоя, который прячется целиком
+  lv_obj_t *box = lv_obj_create(this->root_);
+  lv_obj_remove_style_all(box);
+  lv_obj_set_size(box, 466, 466);
+  lv_obj_set_pos(box, 0, 0);
+  lv_obj_clear_flag(box, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_clear_flag(box, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_add_flag(box, LV_OBJ_FLAG_HIDDEN);
+  // Под звёздами, но над облаками и каплями не важно — это ясная ночь
+  lv_obj_move_to_index(box, 0);
+  this->dip_box_ = box;
+
+  // Пунктир: чёрточки по 4 px через 4 px, с отступом от звёзд
+  this->ndash_ = 0;
+  for (const auto &l : DIPPER_LINKS) {
+    const float x0 = DIPPER[l[0]][0], y0 = DIPPER[l[0]][1];
+    const float x1 = DIPPER[l[1]][0], y1 = DIPPER[l[1]][1];
+    const float len = sqrtf((x1 - x0) * (x1 - x0) + (y1 - y0) * (y1 - y0));
+    const float ux = (x1 - x0) / len, uy = (y1 - y0) / len;
+    for (float s = 6.0f; s + 4.0f < len - 6.0f && this->ndash_ < NDASH; s += 8.0f) {
+      lv_point_precise_t *pt = this->dash_pts_[this->ndash_];
+      pt[0].x = (lv_value_precise_t) (x0 + ux * s);
+      pt[0].y = (lv_value_precise_t) (y0 + uy * s);
+      pt[1].x = (lv_value_precise_t) (x0 + ux * (s + 4.0f));
+      pt[1].y = (lv_value_precise_t) (y0 + uy * (s + 4.0f));
+      lv_obj_t *ln = lv_line_create(box);
+      lv_obj_remove_style_all(ln);
+      lv_line_set_points(ln, pt, 2);
+      lv_obj_set_style_line_width(ln, 1, 0);
+      lv_obj_set_style_line_rounded(ln, false, 0);
+      lv_obj_clear_flag(ln, LV_OBJ_FLAG_CLICKABLE);
+      this->dash_[this->ndash_++] = ln;
+    }
+  }
+  // Звёзды ковша — крупнее и ярче случайных
+  for (int i = 0; i < NDIP; i++) {
+    lv_obj_t *st = lv_obj_create(box);
+    lv_obj_remove_style_all(st);
+    const int sz = (i == 1 || i == 2 || i == 4) ? 5 : 4;  // Мицар, Алиот, Дубхе — ярче
+    lv_obj_set_size(st, sz, sz);
+    lv_obj_set_pos(st, DIPPER[i][0] - sz / 2, DIPPER[i][1] - sz / 2);
+    lv_obj_set_style_radius(st, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_opa(st, LV_OPA_COVER, 0);
+    lv_obj_clear_flag(st, LV_OBJ_FLAG_CLICKABLE);
+    this->dip_star_[i] = st;
+  }
+}
+
+void WeatherFx::show_dipper_(bool on, bool dim) {
+  if (!this->dip_box_) {
+    if (!on)
+      return;
+    this->build_dipper_();
+  }
+  if (on) {
+    for (int i = 0; i < NDIP; i++)
+      lv_obj_set_style_bg_color(this->dip_star_[i], lv_color_hex(dim ? 0xFFF6DC : 0xD8D0B8), 0);
+    for (int i = 0; i < this->ndash_; i++)
+      lv_obj_set_style_line_color(this->dash_[i], lv_color_hex(dim ? 0x6A7FA8 : 0x34435E), 0);
+  }
+  show_(this->dip_box_, on);
+}
+
 void WeatherFx::frame(const Params &p) {
   if (!this->bound_)
     return;
 
   const int cnt = std::min(std::max(p.count, 0), ND);
   const int sig = p.mode | (cnt << 4) | (std::min(std::max(p.clouds, 0), NC) << 10) | ((p.storm ? 1 : 0) << 12) |
-                  ((p.dim ? 1 : 0) << 13) | ((p.stars ? 1 : 0) << 14);
+                  ((p.dim ? 1 : 0) << 13) | ((p.stars ? 1 : 0) << 14) | ((p.rain_style ? 1 : 0) << 15);
   if (sig != this->applied_) {
     // Если поменялась только яркость — перекрашиваем, но не перемешиваем
     const int no_dim = ~(1 << 13);
@@ -443,8 +597,12 @@ void WeatherFx::frame(const Params &p) {
   this->k_ = dt / 50.0f;
   const float wind = this->wind_(p, now);
   this->stars_(now);
-  this->drops_(wind);
-  this->splashes_();
+  if (this->glass_on_) {
+    this->glass_();
+  } else {
+    this->drops_(wind);
+    this->splashes_();
+  }
   this->flakes_(wind);
   this->clouds_();
   this->lightning_(now);
