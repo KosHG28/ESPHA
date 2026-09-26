@@ -25,11 +25,24 @@ static const uint32_t MEOW_MS = 1600;  // сколько кот сидит и м
 
 int Critters::rnd_(int lo, int hi) { return lo + (int) (random_uint32() % (uint32_t) (hi - lo)); }
 
-void Critters::bind(lv_obj_t *img, lv_obj_t *zzz) {
+void Critters::bind(lv_obj_t *img, lv_obj_t *zzz, lv_obj_t *hat) {
   this->img_ = img;
   this->zzz_ = zzz;
+  this->hat_ = hat;
+  if (hat)
+    lv_image_set_src(hat, &spr_cat_hat);
   // Первый гость — через 20–60 минут после запуска
   this->next_ = millis() + rnd_(20, 60) * 60000u;
+}
+
+void Critters::set_festive(bool festive) {
+  if (festive && !this->festive_ && this->show_ == SHOW_NONE) {
+    // Праздник начался — кот придёт поздравить в ближайшие минуты
+    const uint32_t soon = millis() + rnd_(2, 10) * 60000u;
+    if ((int32_t) (this->next_ - soon) > 0)
+      this->next_ = soon;
+  }
+  this->festive_ = festive;
 }
 
 void Critters::place_(const lv_image_dsc_t *img, int x, int y) {
@@ -40,6 +53,20 @@ void Critters::place_(const lv_image_dsc_t *img, int x, int y) {
     this->shown_img_ = img;
   }
   lv_obj_set_pos(this->img_, x, y);
+  if (!this->hat_)
+    return;
+  // В праздник на коте колпак — на макушке в каждом кадре
+  const HatAnchor *a = nullptr;
+  if (this->festive_)
+    for (const auto &h : HAT_ANCHORS)
+      if (h.img == img)
+        a = &h;
+  if (a) {
+    lv_obj_set_pos(this->hat_, x + a->x - (int) spr_cat_hat.header.w / 2, y + a->y - (int) spr_cat_hat.header.h);
+    lv_obj_clear_flag(this->hat_, LV_OBJ_FLAG_HIDDEN);
+  } else {
+    lv_obj_add_flag(this->hat_, LV_OBJ_FLAG_HIDDEN);
+  }
 }
 
 void Critters::stop_() {
@@ -48,9 +75,11 @@ void Critters::stop_() {
     lv_obj_add_flag(this->img_, LV_OBJ_FLAG_HIDDEN);
   if (this->zzz_)
     lv_obj_add_flag(this->zzz_, LV_OBJ_FLAG_HIDDEN);
+  if (this->hat_)
+    lv_obj_add_flag(this->hat_, LV_OBJ_FLAG_HIDDEN);
   this->shown_img_ = nullptr;
-  // Следующий — через 1–3 часа
-  this->next_ = millis() + rnd_(60, 180) * 60000u;
+  // Следующий — через 1–3 часа, в праздник кот заходит чаще: раз в 30–60 минут
+  this->next_ = millis() + (this->festive_ ? rnd_(30, 60) : rnd_(60, 180)) * 60000u;
 }
 
 void Critters::start_cat() { this->start(rnd_(0, 2) ? SHOW_CAT_RUN : SHOW_CAT_VISIT); }
@@ -124,6 +153,8 @@ void Critters::frame(bool can_show, bool night, bool winter) {
     }
     Show s;
     int r = rnd_(0, 100);
+    if (this->festive_)
+      r = rnd_(0, 70);  // в праздник приходит только кот
     if (night && r < 50)
       s = SHOW_CAT_SLEEP;
     else if (r < 70)

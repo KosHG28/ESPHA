@@ -107,7 +107,8 @@ font:
     glyphs: [" АБВКЛМОПТЦабвгдезийлмнопрсфцчшыья"]
 
   # Снежинки погодного фона: три формы из Noto Sans Symbols 2 и две из
-  # Material Design Icons, в двух размерах — дальние и ближние
+  # Material Design Icons, в двух размерах — дальние и ближние. Там же два
+  # листа для осеннего листопада
   - file:
       type: gfonts
       family: Noto Sans Symbols 2
@@ -124,6 +125,8 @@ font:
         glyphs:
           - "\U000F0717"   # mdi-snowflake
           - "\U000F0F2A"   # mdi-snowflake-variant
+          - "\U000F032A"   # mdi-leaf — листопад
+          - "\U000F0C93"   # mdi-leaf-maple
 
   - file:
       type: gfonts
@@ -141,6 +144,8 @@ font:
         glyphs:
           - "\U000F0717"   # mdi-snowflake
           - "\U000F0F2A"   # mdi-snowflake-variant
+          - "\U000F032A"   # mdi-leaf — листопад
+          - "\U000F0C93"   # mdi-leaf-maple
 
   # Иконка погоды рядом с уличной температурой
   - file:

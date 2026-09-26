@@ -17,7 +17,7 @@
 # сама молния, яркость экрана она не трогает.
 #
 # Вид осадков (глобальная weather_mode):
-#   0 нет  1 дождь  2 снег  3 мокрый снег (дождь + снег)  4 град
+#   0 нет  1 дождь  2 снег  3 мокрый снег (дождь + снег)  4 град  5 листопад
 # ---------------------------------------------------------------------------
 
 globals:
@@ -83,6 +83,9 @@ sensor:
     id: ha_wind_speed
     entity_id: ${weather_wind_speed_entity}
     internal: true
+    # Ветер решает, будет ли осенью листопад
+    on_value:
+      - script.execute: weather_apply
   - platform: homeassistant
     id: ha_wind_bearing
     entity_id: ${weather_wind_bearing_entity}
@@ -92,6 +95,8 @@ sensor:
     id: ha_wind_gust
     entity_id: ${weather_wind_gust_entity}
     internal: true
+    on_value:
+      - script.execute: weather_apply
 
   # Где дом — из зоны «Дом» Home Assistant. По ним и по времени считается,
   # какие созвездия сейчас над горизонтом. Пока HA не ответил — координаты
@@ -129,7 +134,7 @@ select:
     name: Фон погоды
     icon: mdi:weather-snowy-rainy
     entity_category: config
-    options: ["Авто", "Выкл", "Дождь", "Снег", "Гроза", "Облачно", "Ясная ночь", "Ясный день"]
+    options: ["Авто", "Выкл", "Дождь", "Снег", "Гроза", "Облачно", "Ясная ночь", "Ясный день", "Листопад"]
     initial_option: "Авто"
     optimistic: true
     restore_value: true
@@ -227,7 +232,7 @@ script:
       - lambda: |-
           // Номер пункта «Фона погоды»:
           // 0 Авто, 1 Выкл, 2 Дождь, 3 Снег, 4 Гроза, 5 Облачно, 6 Ясная ночь,
-          // 7 Ясный день
+          // 7 Ясный день, 8 Листопад
           size_t sel = id(weather_fx_select).active_index().value_or(0);
           std::string s;
           switch (sel) {
@@ -238,6 +243,7 @@ script:
             case 5: s = "cloudy"; break;
             case 6: s = "clear"; break;
             case 7: s = "clear"; break;
+            case 8: s = "cloudy"; break;
             default: s = ""; break;
           }
           // Звёзды — ясной или малооблачной ночью, солнце — таким же днём.
@@ -264,6 +270,24 @@ script:
           else if (s == "thunderstorm") { storm = true; clouds = 3; }
           else if (s == "thunderstorm_with_rain") { mode = 1; cnt = 18; clouds = 3; storm = true; }
           else if (s == "thunderstorm_with_hail") { mode = 4; cnt = 12; clouds = 3; storm = true; }
+          // Листопад: в сентябре и октябре, в ветреный день без осадков —
+          // ветер от 5 м/с или порывы от 8. Перестаёт, когда ветер стих
+          // ниже 4 и 7 м/с, чтобы не мигать на границе
+          static bool windy = false;
+          const float ws = id(ha_wind_speed).state, wg = id(ha_wind_gust).state;
+          const bool calm = (std::isnan(ws) || ws < 4.0f) && (std::isnan(wg) || wg < 7.0f);
+          if ((!std::isnan(ws) && ws >= 5.0f) || (!std::isnan(wg) && wg >= 8.0f))
+            windy = true;
+          else if (calm)
+            windy = false;
+          auto now = id(ha_time).now();
+          const bool autumn = now.is_valid() && (now.month == 9 || now.month == 10);
+          const bool dry = mode == 0 && !storm && !s.empty();
+          if (sel == 8 || (sel == 0 && dry && autumn && windy)) {
+            mode = 5;
+            const bool strong = (!std::isnan(ws) && ws >= 9.0f) || (!std::isnan(wg) && wg >= 14.0f);
+            cnt = sel == 8 || strong ? 14 : 10;
+          }
           id(weather_mode) = mode;
           id(weather_count) = cnt;
           id(weather_clouds) = clouds;

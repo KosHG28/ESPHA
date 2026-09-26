@@ -26,6 +26,11 @@ globals:
     type: std::string
     restore_value: false
     initial_value: '""'
+  # Сегодня праздник: Новый год или чей-то день рождения. Кот — в колпаке
+  - id: festive_day
+    type: bool
+    restore_value: false
+    initial_value: 'false'
   # День года, когда уже поздравили карточкой
   - id: greeted_day
     type: int
@@ -107,6 +112,9 @@ script:
           const size_t sel = id(garland_select).active_index().value_or(0);
           const bool new_year = (now.month == 12 && now.day_of_month >= 15) || (now.month == 1 && now.day_of_month <= 14);
           id(fx_garland) = sel == 1 || (sel == 0 && (new_year || bday));
+          // «Гирлянда: Всегда» заодно надевает на кота колпак — чтобы увидеть
+          // праздник, не дожидаясь даты
+          id(festive_day) = new_year || bday || sel == 1;
 
           // Поздравление карточкой — один раз в день, с 9 утра, когда экран
           // не погашен по ночному расписанию и кто-то дома
