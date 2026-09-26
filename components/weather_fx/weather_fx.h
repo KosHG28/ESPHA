@@ -27,6 +27,7 @@ struct Params {
   bool sun{false};      ///< ясный день: солнце с лучами
   bool garland{false};  ///< праздник: гирлянда по краю экрана
   bool fireworks{false};  ///< салют
+  bool rainbow{false};    ///< радуга: днём после дождя прояснилось
   int kite{0};            ///< воздушный змей: 0 нет, 1 изредка, 2 часто (проверка)
   // Для созвездия: где и когда смотрим на небо. utc 0 — время неизвестно
   float lat{NAN}, lon{NAN};  ///< градусы, восточная долгота — плюс
@@ -113,6 +114,7 @@ class WeatherFx : public Component {
   void garland_(uint32_t now);
   void fireworks_(uint32_t now);
   void kite_(uint32_t now, float wind);
+  void moon_(uint32_t utc);
 
   /// Перенести частицу: отметить к перерисовке старое и новое место
   void mark_(Spot &s, bool on, int x, int y, int w, int h);
@@ -132,7 +134,10 @@ class WeatherFx : public Component {
   int applied_{-1};
   int nd_{0}, nf_{0}, ncl_{0};
   bool hail_{false}, storm_{false}, stars_on_{false}, dim_{false}, glass_on_{false};
-  bool sun_on_{false}, gar_on_{false}, fw_on_{false};
+  bool sun_on_{false}, gar_on_{false}, fw_on_{false}, rainbow_on_{false};
+  // Луна: фаза 0..1 (0 — новолуние, 0,5 — полнолуние), нарисована ли
+  float moon_phase_{-1};
+  Spot moon_spot_{};
   int kite_mode_{0};
 
   // Движение считается по реально прошедшему времени: k_ — во сколько раз

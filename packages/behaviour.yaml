@@ -194,12 +194,10 @@ api:
     - script.execute: power_eval
   on_client_connected:
     - lvgl.widget.update:
-        id: [lbl_slot1, lbl_slot1_card, lbl_slot2, lbl_slot2_card,
-             lbl_time_h, lbl_print_pct]
+        id: [lbl_slot1, lbl_slot1_card, lbl_slot2, lbl_slot2_card, lbl_print_pct]
         text_color: 0xFFFFFF
-    - lvgl.widget.update:
-        id: lbl_time_m
-        text_color: ${time_minutes_color}
+    # Цифры времени — обычные или тёплые ночные
+    - script.execute: clock_colors
     - script.execute: refresh_clock
     - script.execute: printer_arm
     - script.execute: refresh_sun

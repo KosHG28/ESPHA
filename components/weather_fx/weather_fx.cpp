@@ -50,6 +50,11 @@ static const int CAP_Y = 24, CAP_W = 220;
 static const float CON_MIN_ALT = 0.4226f;  // sin 25°
 // Сменять созвездие раз в 10 минут, пересчитывать поворот раз в 5
 static const int CON_SLOT_S = 600, CON_RECALC_MIN = 5;
+// Луна — слева от строки погоды, в стороне от созвездия и цифр
+static const int MOON_X = 84, MOON_Y = 150, MOON_R = 15;
+// Радуга — дугой по верху круга, над строкой погоды
+static const int RB_X = 233, RB_Y = 190, RB_R = 120, RB_W = 4;
+static const uint32_t RB_COLORS[7] = {0xFF3B30, 0xFF9500, 0xFFCC00, 0x34C759, 0x32ADE6, 0x3F51B5, 0x9C27B0};
 // Гирлянда: радиус, цвета лампочек
 static const int GAR_R = 221;
 static const uint32_t GAR_PAL[4] = {0xFF3B30, 0xFFD60A, 0x30D158, 0x0A84FF};
@@ -254,6 +259,50 @@ void WeatherFx::paint_back(lv_layer_t *layer) {
     fill.opa = LV_OPA_COVER;
     ln.round_start = 0;
     ln.round_end = 0;
+  }
+
+  // Радуга: семь дуг от красной снаружи до фиолетовой внутри
+  if (this->rainbow_on_) {
+    lv_area_t rb = {RB_X - RB_R - 2 + oc.x1, RB_Y - RB_R - 2 + oc.y1, RB_X + RB_R + 2 + oc.x1, RB_Y + oc.y1};
+    if (hit(rb, clip)) {
+      lv_draw_arc_dsc_t arc;
+      lv_draw_arc_dsc_init(&arc);
+      arc.center = {RB_X + oc.x1, RB_Y + oc.y1};
+      arc.width = RB_W;
+      arc.start_angle = 198;
+      arc.end_angle = 342;
+      arc.opa = dim ? 170 : 120;
+      for (int k = 0; k < 7; k++) {
+        arc.radius = RB_R - k * RB_W;
+        arc.color = lv_color_hex(RB_COLORS[k]);
+        lv_draw_arc(layer, &arc);
+      }
+    }
+  }
+
+  // Луна: светлый диск, на который наползает чёрная тень — от фазы. Растущая
+  // светится справа, убывающая — слева. Поверх — слабый ореол: тёмная часть
+  // диска от него чуть видна, как пепельный свет
+  if (place(this->moon_spot_) && this->moon_phase_ >= 0) {
+    const int cx = MOON_X + oc.x1, cy = MOON_Y + oc.y1, r = MOON_R;
+    fill.radius = LV_RADIUS_CIRCLE;
+    fill.opa = LV_OPA_COVER;
+    fill.color = lv_color_hex(dim ? 0xFFF8E1 : 0xE8E0C4);
+    lv_area_t disc = {cx - r, cy - r, cx + r, cy + r};
+    lv_draw_fill(layer, &fill, &disc);
+    const float ph = this->moon_phase_;
+    const float k = ph < 0.5f ? ph / 0.5f : (1.0f - ph) / 0.5f;  // 0 новолуние … 1 полнолуние
+    const int dx = (int) (k * (2 * r + 2)) * (ph < 0.5f ? -1 : 1);
+    if (std::abs(dx) <= 2 * r) {
+      fill.color = lv_color_black();
+      lv_area_t sh = {cx - r + dx, cy - r - 1, cx + r + dx, cy + r + 1};
+      lv_draw_fill(layer, &fill, &sh);
+    }
+    fill.color = lv_color_hex(0xFFF3C4);
+    fill.opa = dim ? 34 : 24;
+    lv_area_t halo = {cx - r - 7, cy - r - 7, cx + r + 7, cy + r + 7};
+    lv_draw_fill(layer, &fill, &halo);
+    fill.opa = LV_OPA_COVER;
   }
 
   // Мерцающие звёзды
@@ -524,6 +573,12 @@ void WeatherFx::end_strike_() {
 void WeatherFx::apply_(const Params &p, bool relayout) {
   const bool dim = p.dim;
   const int cnt = std::min(std::max(p.count, 0), ND);
+  // Сменилась палитра — перерисовать всё: луна, солнце и созвездие
+  // неподвижны и сами не обновятся
+  if (dim != this->dim_ && this->back_) {
+    lv_obj_invalidate(this->back_);
+    lv_obj_invalidate(this->paint_);
+  }
   this->dim_ = dim;
   this->hail_ = p.mode == 4;
   // Дождь (и дождь в мокром снеге) — каплями на стекле, если так выбрано.
@@ -533,6 +588,11 @@ void WeatherFx::apply_(const Params &p, bool relayout) {
   this->nf_ = std::min(p.mode == 2 || p.mode == 5 || p.mode == 6 ? cnt : (p.mode == 3 ? cnt / 2 : 0), NF);
   this->fset_ = p.mode == 6 ? 2 : (p.mode == 5 ? 1 : 0);
   this->fw_on_ = p.fireworks;
+  if (p.rainbow != this->rainbow_on_) {
+    lv_area_t rb = {RB_X - RB_R - 2, RB_Y - RB_R - 2, RB_X + RB_R + 2, RB_Y};
+    this->invalidate_(rb);
+  }
+  this->rainbow_on_ = p.rainbow;
   this->kite_mode_ = p.kite;
   this->ncl_ = std::min(std::max(p.clouds, 0), NC);
   this->storm_ = p.storm;
@@ -548,7 +608,12 @@ void WeatherFx::apply_(const Params &p, bool relayout) {
   if (!this->storm_)
     this->end_strike_();
   show_(this->root_, this->nd_ || this->nf_ || this->ncl_ || this->storm_ || this->stars_on_ || this->sun_on_ ||
-                         this->gar_on_ || this->fw_on_ || this->kite_mode_);
+                         this->gar_on_ || this->fw_on_ || this->kite_mode_ || this->rainbow_on_);
+  // Луна — вместе со звёздами; фазу задаёт moon_()
+  if (!this->stars_on_) {
+    this->mark_(this->moon_spot_, false, 0, 0, 1, 1);
+    this->moon_phase_ = -1;
+  }
   // Салют кончился или змей больше не летает — убрать с экрана
   if (!this->fw_on_)
     for (auto &b : this->bursts_) {
@@ -605,7 +670,8 @@ void WeatherFx::apply_(const Params &p, bool relayout) {
         x = rnd_(50, 416);
         y = rnd_(30, 220);
       } while ((x - 233) * (x - 233) + (y - 233) * (y - 233) > 215 * 215 ||
-               (x > 82 && x < 372 && y > 22 && y < 122));
+               (x > 82 && x < 372 && y > 22 && y < 122) ||
+               (std::abs(x - MOON_X) < MOON_R + 12 && std::abs(y - MOON_Y) < MOON_R + 12));
       this->stx_[i] = x;
       this->sty_[i] = y;
       this->stph_[i] = rnd_(0, 628) / 100.0f;
@@ -1260,6 +1326,25 @@ void WeatherFx::garland_(uint32_t now) {
       this->invalidate_(g.a);
 }
 
+void WeatherFx::moon_(uint32_t utc) {
+  if (!this->stars_on_ || utc < 1600000000u)
+    return;
+  // Фаза по среднему синодическому месяцу от новолуния 6 января 2000 года.
+  // Точность — несколько часов, на рисунке 30 px это не видно
+  const double days = (utc - 947182440.0) / 86400.0;
+  double ph = fmod(days / 29.530588853, 1.0);
+  if (ph < 0)
+    ph += 1.0;
+  // Перерисовывать, только когда фаза заметно сменилась (раз в пару часов)
+  if (this->moon_spot_.on && std::fabs(ph - this->moon_phase_) < 0.003)
+    return;
+  this->moon_phase_ = (float) ph;
+  const int r = MOON_R + 8;
+  if (this->moon_spot_.on)
+    this->invalidate_(this->moon_spot_.a);
+  this->mark_(this->moon_spot_, true, MOON_X - r, MOON_Y - r, 2 * r + 1, 2 * r + 1);
+}
+
 void WeatherFx::fireworks_(uint32_t now) {
   if (!this->fw_on_)
     return;
@@ -1361,18 +1446,18 @@ void WeatherFx::frame(const Params &p) {
   const int sig = p.mode | (cnt << 4) | (std::min(std::max(p.clouds, 0), NC) << 10) | ((p.storm ? 1 : 0) << 12) |
                   ((p.dim ? 1 : 0) << 13) | ((p.stars ? 1 : 0) << 14) | ((p.rain_style ? 1 : 0) << 15) |
                   ((p.sun ? 1 : 0) << 16) | ((p.garland ? 1 : 0) << 17) | ((p.fireworks ? 1 : 0) << 18) |
-                  ((std::min(std::max(p.kite, 0), 3)) << 19);
+                  ((std::min(std::max(p.kite, 0), 3)) << 19) | ((p.rainbow ? 1 : 0) << 21);
   if (sig != this->applied_) {
     // Если поменялись только яркость, солнце или гирлянда — перекрашиваем,
     // но осадки не перемешиваем
-    const int keep = ~((1 << 13) | (1 << 16) | (1 << 17) | (1 << 18) | (3 << 19));
+    const int keep = ~((1 << 13) | (1 << 16) | (1 << 17) | (1 << 18) | (3 << 19) | (1 << 21));
     const bool relayout = this->applied_ < 0 || (sig & keep) != (this->applied_ & keep);
     this->applied_ = sig;
     this->apply_(p, relayout);
   }
 
   const bool any = this->nd_ || this->nf_ || this->ncl_ || this->storm_ || this->stars_on_ || this->sun_on_ ||
-                   this->gar_on_ || this->fw_on_ || this->kite_mode_;
+                   this->gar_on_ || this->fw_on_ || this->kite_mode_ || this->rainbow_on_;
   if (!any || !p.active) {
     this->end_strike_();
     this->last_ms_ = 0;
@@ -1395,6 +1480,7 @@ void WeatherFx::frame(const Params &p) {
   }
   const float wind = this->wind_(p, now);
   this->sky_(p);
+  this->moon_(p.utc);
   this->stars_(now);
   this->meteor_(now);
   this->sun_(now);

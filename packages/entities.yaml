@@ -296,6 +296,17 @@ sensor:
             snprintf(buf, sizeof(buf), "%.0f%%", x);
             lv_label_set_text(id(lbl_hum), buf);
             lv_obj_clear_flag(id(clim_hum), LV_OBJ_FLAG_HIDDEN);
+            // Подсказка: ниже 30 % — сухо, выше 60 % — пора проветрить.
+            // Обратно — только отойдя от порога на 2 %, чтобы не мигало
+            static int zone = 1;
+            if (x < 30.0f) zone = 0;
+            else if (x > 60.0f) zone = 2;
+            else if (x >= 32.0f && x <= 58.0f) zone = 1;
+            static const char *const CAP[3] = {"Сухой воздух", "Влажность", "Проветрите"};
+            static const uint32_t COL[3] = {0xFFB74D, 0x2DD4BF, 0x4FC3F7};
+            lv_label_set_text(id(lbl_hum_cap), CAP[zone]);
+            lv_obj_set_style_text_color(id(lbl_hum), lv_color_hex(COL[zone]), 0);
+            lv_obj_set_style_text_color(id(lbl_hum_cap), lv_color_hex(zone == 1 ? 0x8A9199 : COL[zone]), 0);
           } else {
             lv_obj_add_flag(id(clim_hum), LV_OBJ_FLAG_HIDDEN);
           }

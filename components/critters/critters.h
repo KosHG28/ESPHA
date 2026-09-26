@@ -17,6 +17,11 @@ enum Show : uint8_t {
   SHOW_BIRD,       ///< птица пролетает по верху
   SHOW_SNAIL,      ///< улитка медленно ползёт по низу (зимой — снеговик)
   SHOW_CAT_SLEEP,  ///< ночью: кот спит внизу, над ним «z z z»
+  SHOW_SNOWMAN,    ///< снеговик проходит по низу (зимой вместо улитки)
+  SHOW_OWL,        ///< ночью: сова сидит на ветке у левого края, моргает, «угу»
+  SHOW_BUTTERFLY,  ///< летом днём: бабочка порхает по экрану
+  SHOW_HEDGEHOG,   ///< осенью: ёжик с листом на спине идёт по низу
+  SHOW_PUMPKIN,    ///< 31 октября: тыква внизу, глаза мерцают
 };
 
 class Critters : public Component {
@@ -35,6 +40,12 @@ class Critters : public Component {
 
   /// Печать закончилась: кот прибегает и заинтересованно смотрит
   void start_printer_visit();
+
+  /// Какой сегодня день — для сезонных гостей
+  void set_date(int month, int day) {
+    this->month_ = month;
+    this->day_ = day;
+  }
 
   /// Кот хочет, чтобы пролетел метеор (он смотрит в небо). Флаг сбрасывается
   bool take_meteor() {
@@ -77,6 +88,7 @@ class Critters : public Component {
   const char *said_{nullptr};
   bool festive_{false}, stars_{false}, meteor_req_{false}, meteor_sent_{false};
   int weather_{0};
+  int month_{0}, day_{0};
   Variant variant_{VAR_PLAIN};
   const lv_image_dsc_t *shown_img_{nullptr};
   Show show_{SHOW_NONE};
