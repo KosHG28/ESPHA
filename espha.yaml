@@ -187,7 +187,7 @@ esphome:
 # репозитория в Home Assistant он искал бы /config/esphome/components.
 external_components:
   - source: github://koshg28/ESPHA@main
-    components: [ft3168, weather_fx]
+    components: [ft3168, weather_fx, critters]
 
 packages:
   hardware: !include packages/hardware.yaml
@@ -197,6 +197,7 @@ packages:
   weather: !include packages/weather.yaml
   message: !include packages/message.yaml
   diagnostics: !include packages/diagnostics.yaml
+  critters: !include packages/critters.yaml
   ui: !include packages/ui.yaml
   imu: !include packages/imu.yaml
   behaviour: !include packages/behaviour.yaml
