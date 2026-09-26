@@ -71,9 +71,9 @@ class WeatherFx : public Component {
   void apply_(const Params &p, bool relayout);
   float wind_(const Params &p, uint32_t now);
   void drops_(float wind);
-  void glass_();
+  void glass_(float k, float dt);
   void splashes_();
-  void flakes_(float wind);
+  void flakes_(float wind, float ks);
   void clouds_();
   void stars_(uint32_t now);
   void lightning_(uint32_t now);
@@ -104,6 +104,9 @@ class WeatherFx : public Component {
   uint32_t last_ms_{0};
   float k_{1.0f};
   float dt_ms_{50.0f};
+  // Медленные частицы (капли на стекле, мелкие снежинки) двигаются раз в
+  // ~66 мс: шаг всё равно меньше пары пикселей, а отправок в экран вдвое меньше
+  float slow_ms_{0.0f};
   uint32_t star_ms_{0};
 
   // Цвета (зависят от погоды и приглушения)
@@ -114,7 +117,8 @@ class WeatherFx : public Component {
   Spot ds_[ND]{};
   float fx_[NF]{}, fy_[NF]{}, fph_[NF]{};
   Spot fs_[NF]{};
-  int fw_[NF]{}, fh_[NF]{};
+  // Прямоугольник знака снежинки относительно точки рисования и его размер
+  int fox_[NF]{}, foy_[NF]{}, fw_[NF]{}, fh_[NF]{};
   float sx_[NS]{}, sy_[NS]{}, svx_[NS]{}, svy_[NS]{};
   float slife_[NS]{};  // сколько ещё жить брызгам, мс
   Spot ss_[NS]{};
