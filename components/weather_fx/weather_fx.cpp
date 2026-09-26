@@ -46,6 +46,43 @@ void WeatherFx::bind(lv_obj_t *root, lv_obj_t *drops, lv_obj_t *flakes, lv_obj_t
   this->applied_ = -1;
 }
 
+void WeatherFx::add_exclude(int x1, int y1, int x2, int y2) {
+  if (this->n_ex_ >= 2)
+    return;
+  int *e = this->ex_[this->n_ex_++];
+  e[0] = x1;
+  e[1] = y1;
+  e[2] = x2;
+  e[3] = y2;
+}
+
+bool WeatherFx::excluded_(int x, int y, int w, int h) const {
+  for (int i = 0; i < this->n_ex_; i++) {
+    const int *e = this->ex_[i];
+    if (x + w > e[0] && x < e[2] && y + h > e[1] && y < e[3])
+      return true;
+  }
+  return false;
+}
+
+void WeatherFx::place_(lv_obj_t *o, int x, int y, int w, int h, bool &visible) {
+  // Прячем до сдвига, показываем после: сдвиг скрытого объекта ничего не
+  // перерисовывает, так что за цифрами частица не стоит ни одного кадра
+  if (this->excluded_(x, y, w, h)) {
+    if (visible) {
+      show_(o, false);
+      visible = false;
+    }
+    lv_obj_set_pos(o, x, y);
+  } else {
+    lv_obj_set_pos(o, x, y);
+    if (!visible) {
+      show_(o, true);
+      visible = true;
+    }
+  }
+}
+
 void WeatherFx::end_strike_() {
   if (!this->striking_)
     return;
@@ -118,6 +155,7 @@ void WeatherFx::apply_(const Params &p, bool relayout) {
     }
     lv_obj_set_pos(d, (int) this->dx_[i], (int) this->dy_[i]);
     show_(d, true);
+    this->dvis_[i] = true;
   }
 
   // Нечётные снежинки крупные и яркие — «близко», чётные мелкие и тусклые — «далеко»
@@ -137,6 +175,7 @@ void WeatherFx::apply_(const Params &p, bool relayout) {
     }
     lv_obj_set_pos(f, (int) this->fx_[i], (int) this->fy_[i]);
     show_(f, true);
+    this->fvis_[i] = true;
   }
 
   for (int i = 0; i < NS; i++) {
@@ -247,7 +286,9 @@ void WeatherFx::drops_(float wind) {
       this->dx_[i] = wrap_x(rnd_(40, 426) - wind * 60.0f);
       this->dy_[i] = -DROP_LEN - 2 - rnd_(0, 120);
     }
-    lv_obj_set_pos(lv_obj_get_child(this->drops_box_, i), (int) this->dx_[i], (int) this->dy_[i]);
+    const int s = this->hail_ ? HAIL_SIZE : DROP_LEN;
+    this->place_(lv_obj_get_child(this->drops_box_, i), (int) this->dx_[i], (int) this->dy_[i],
+                 this->hail_ ? HAIL_SIZE : 2, s, this->dvis_[i]);
   }
 }
 
@@ -284,7 +325,10 @@ void WeatherFx::flakes_(float wind) {
       this->fy_[i] = -30 - rnd_(0, 40);
       this->fx_[i] = rnd_(30, 430);
     }
-    lv_obj_set_pos(lv_obj_get_child(this->flakes_box_, i), (int) this->fx_[i], (int) this->fy_[i]);
+    // Размер знака снежинки: мелкие 14 px, крупные 26 px
+    const int s = big ? 26 : 14;
+    this->place_(lv_obj_get_child(this->flakes_box_, i), (int) this->fx_[i], (int) this->fy_[i], s, s,
+                 this->fvis_[i]);
   }
 }
 

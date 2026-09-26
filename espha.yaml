@@ -32,9 +32,11 @@ substitutions:
   # Скорость шины дисплея. 40MHz — если на 80MHz появятся артефакты
   display_data_rate: 80MHz
 
-  # Буфер отрисовки LVGL в процентах экрана. Если после перехода на 25%
-  # интерфейс стал медленнее — верните 100%
-  lvgl_buffer_size: 25%
+  # Буфер отрисовки LVGL в процентах экрана. 12.5% (~54 КБ) — минимум, который
+  # допускает ESPHome, и шанс, что буфер поместится в быструю внутреннюю
+  # память, а не во внешнюю PSRAM: рисовать и отправлять в экран из неё
+  # быстрее. Если «Время цикла» в HA стало хуже, чем при 25%, — верните 25%
+  lvgl_buffer_size: 12.5%
 
   # Цвет минут на часах. Часы белые, минуты — этим цветом: без двоеточия
   # так легче читать время
@@ -188,12 +190,15 @@ packages:
   printer: !include packages/printer.yaml
   weather: !include packages/weather.yaml
   message: !include packages/message.yaml
+  diagnostics: !include packages/diagnostics.yaml
   ui: !include packages/ui.yaml
   imu: !include packages/imu.yaml
   behaviour: !include packages/behaviour.yaml
 
 logger:
-  level: INFO
+  # Только предупреждения и ошибки: на каждое обновление из Home Assistant
+  # плата больше не пишет строку в консоль. Для отладки верните INFO или DEBUG
+  level: WARN
   # У платы нет USB-UART моста: консоль идёт через встроенный USB-Serial/JTAG
   hardware_uart: USB_SERIAL_JTAG
 
