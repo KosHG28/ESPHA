@@ -107,6 +107,46 @@ def cat_sit(blink=False, look=False, paw=False):
     return im
 
 
+def cat_drink(lap):
+    """Кот пригнулся и лакает из миски справа. lap — язык высунут."""
+    im = canvas(26, 16)
+    d = ImageDraw.Draw(im)
+    # хвост лежит сзади
+    d.line([0, 13, 4, 11], fill=FUR_D)
+    # туловище пригнуто
+    d.ellipse([3, 7, 18, 14], fill=FUR)
+    d.line([7, 8, 7, 10], fill=FUR_D)
+    d.line([11, 8, 11, 10], fill=FUR_D)
+    d.line([7, 13, 15, 13], fill=BELLY)
+    # голова опущена к миске
+    hy = 1 if lap else 0
+    d.ellipse([16, 7 + hy, 23, 13 + hy], fill=FUR)
+    d.polygon([(16, 8 + hy), (17, 5 + hy), (19, 8 + hy)], fill=FUR)
+    d.polygon([(20, 8 + hy), (22, 5 + hy), (23, 9 + hy)], fill=FUR)
+    d.line([20, 10 + hy, 21, 10 + hy], fill=EYE)  # глаза прикрыты
+    d.point((23, 11 + hy), fill=NOSE)
+    if lap:
+        d.point((24, 13), fill=(255, 120, 150, 255))  # язык
+    # лапы
+    d.line([6, 13, 6, 15], fill=FUR_D)
+    d.line([15, 13, 15, 15], fill=FUR)
+    return im
+
+
+def bowl():
+    """Миска с водой."""
+    im = canvas(9, 5)
+    d = ImageDraw.Draw(im)
+    d.polygon([(0, 1), (8, 1), (7, 4), (1, 4)], fill=(66, 165, 245, 255))
+    d.line([1, 1, 7, 1], fill=(179, 229, 252, 255))
+    d.line([2, 4, 6, 4], fill=(25, 118, 210, 255))
+    return im
+
+
+# Миска стоит у морды пьющего кота: середина её низа, в клетках сетки кота
+BOWL_AT = (25.0, 16.0)
+
+
 # Кончик поднятой лапы в спрайте cat_paw_r (клетки сетки): сюда садится снежинка
 PAW_TIP = (21.5, 6.5)
 
@@ -360,6 +400,9 @@ def sprites():
     out["cat_paw_r"] = cat_sit(paw=True)
     out["cat_paw_l"] = mirrored(cat_sit(paw=True))
     out["cat_sleep"] = cat_sleep()
+    for f in (0, 1):
+        out[f"cat_drink_r{f}"] = cat_drink(f == 1)
+        out[f"cat_drink_l{f}"] = mirrored(cat_drink(f == 1))
     for up in (0, 1):
         out[f"bird_r{up}"] = bird(up)
         out[f"bird_l{up}"] = mirrored(bird(up))
@@ -373,6 +416,7 @@ def sprites():
     out["cat_hat"] = party_hat()
     out["cat_umbrella"] = umbrella()
     out["flake"] = snowflake()
+    out["cat_bowl"] = bowl()
     return {k: scaled(v, SCALE_CAT if k.startswith("cat") else SCALE_OTHER) for k, v in out.items()}
 
 
@@ -421,6 +465,9 @@ def main():
         "\n// Кончик поднятой лапы: [0] — кот смотрит вправо, [1] — влево\n"
         f"static const int16_t PAW_TIP[2][2] = {{{{{round(PAW_TIP[0] * SCALE_CAT)}, {round(PAW_TIP[1] * SCALE_CAT)}}}, "
         f"{{{round((26 - PAW_TIP[0]) * SCALE_CAT)}, {round(PAW_TIP[1] * SCALE_CAT)}}}}};\n"
+        "\n// Где стоит миска пьющего кота: середина её низа; [0] — вправо, [1] — влево\n"
+        f"static const int16_t BOWL_AT[2][2] = {{{{{round(BOWL_AT[0] * SCALE_CAT)}, {round(BOWL_AT[1] * SCALE_CAT)}}}, "
+        f"{{{round((26 - BOWL_AT[0]) * SCALE_CAT)}, {round(BOWL_AT[1] * SCALE_CAT)}}}}};\n"
     )
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(

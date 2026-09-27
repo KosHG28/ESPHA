@@ -1,0 +1,70 @@
+# ---------------------------------------------------------------------------
+# Экран во время обновления прошивки: чёрный круг, по краю кольцо прогресса,
+# в середине процент, над ним «Обновление прошивки», ниже «не выключайте
+# питание». В конце — «Готово», плата перезагружается. Ошибка — карточка
+# пропадает, на её месте сообщение.
+#
+# Пока идёт загрузка, основной цикл ESPHome занят ею и LVGL сам экран не
+# обновляет, поэтому после каждого изменения экран перерисовывается сразу
+# (lv_refr_now). Проценты меняются раз в процент — это до ста перерисовок.
+# ---------------------------------------------------------------------------
+
+script:
+  - id: ota_screen_begin
+    mode: queued
+    then:
+      - lambda: |-
+          // Экран выключен — включить: обновление должно быть видно
+          if (id(screen_off)) {
+            id(screen_off) = false;
+            id(lvgl_main)->set_paused(false, false);
+          }
+          id(nightlight_on) = false;
+          lv_obj_add_flag(id(nightlight_card), LV_OBJ_FLAG_HIDDEN);
+          id(amoled)->set_brightness((uint8_t) (std::max(40.0f, id(screen_brightness).state) * 2.55f));
+          lv_obj_t *c = id(ota_card);
+          lv_obj_move_foreground(c);
+          lv_obj_clear_flag(c, LV_OBJ_FLAG_HIDDEN);
+          lv_arc_set_value(id(ota_arc), 0);
+          lv_label_set_text(id(ota_pct), "0%");
+          lv_label_set_text(id(ota_title), "Обновление прошивки");
+          lv_refr_now(nullptr);
+
+  - id: ota_screen_progress
+    parameters:
+      pct: int
+    mode: queued
+    max_runs: 3
+    then:
+      - lambda: |-
+          static int last = -1;
+          const int p = std::max<int>(0, std::min<int>(100, pct));
+          if (p == last)
+            return;
+          last = p;
+          lv_arc_set_value(id(ota_arc), p);
+          char buf[8];
+          snprintf(buf, sizeof(buf), "%d%%", p);
+          lv_label_set_text(id(ota_pct), buf);
+          lv_refr_now(nullptr);
+
+  - id: ota_screen_end
+    mode: queued
+    then:
+      - lambda: |-
+          lv_arc_set_value(id(ota_arc), 100);
+          lv_label_set_text(id(ota_pct), "100%");
+          lv_label_set_text(id(ota_title), "Готово, перезагрузка");
+          lv_refr_now(nullptr);
+
+  - id: ota_screen_error
+    mode: queued
+    then:
+      - lambda: |-
+          lv_obj_add_flag(id(ota_card), LV_OBJ_FLAG_HIDDEN);
+          lv_refr_now(nullptr);
+      - script.execute:
+          id: show_message
+          text: "Не удалось обновить прошивку"
+          seconds: 15
+          color: "red"

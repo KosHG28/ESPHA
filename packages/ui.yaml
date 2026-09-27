@@ -333,6 +333,79 @@ lvgl:
                 width: 330
                 long_mode: WRAP
 
+      # Ночник: весь экран мягким тёплым светом (gestures.yaml). Касание гасит
+      - obj:
+          id: nightlight_card
+          width: 466
+          height: 466
+          align: CENTER
+          radius: 233
+          bg_color: 0xFFD49A
+          bg_opa: COVER
+          border_width: 0
+          pad_all: 0
+          hidden: true
+          clickable: false
+          scrollable: false
+
+      # Обновление прошивки: кольцо прогресса и процент (ota_screen.yaml)
+      - obj:
+          id: ota_card
+          width: 466
+          height: 466
+          align: CENTER
+          radius: 233
+          bg_color: 0x000000
+          bg_opa: COVER
+          border_width: 0
+          pad_all: 0
+          hidden: true
+          clickable: false
+          scrollable: false
+          widgets:
+            - arc:
+                id: ota_arc
+                width: 430
+                height: 430
+                align: CENTER
+                min_value: 0
+                max_value: 100
+                value: 0
+                rotation: 270
+                start_angle: 0
+                end_angle: 360
+                adjustable: false
+                clickable: false
+                arc_width: 10
+                arc_color: 0x1B1F24
+                arc_rounded: true
+                indicator:
+                  arc_width: 10
+                  arc_color: 0x03A9F4
+                  arc_rounded: true
+                knob:
+                  bg_opa: TRANSP
+            - label:
+                id: ota_title
+                text: "Обновление прошивки"
+                text_font: font_m
+                text_color: 0xFFFFFF
+                align: CENTER
+                y: -64
+            - label:
+                id: ota_pct
+                text: "0%"
+                text_font: font_pct
+                text_color: 0x03A9F4
+                align: CENTER
+                y: 4
+            - label:
+                text: "не выключайте питание"
+                styles: style_caption
+                text_font: font_sun
+                align: CENTER
+                y: 70
+
       # Нет воды в поилке кота — поверх всего, пока не нальют (pets.yaml).
       # Касание прячет на 30 минут
       - obj:
