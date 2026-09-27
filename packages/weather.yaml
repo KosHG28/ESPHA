@@ -160,7 +160,7 @@ select:
     name: Фон погоды
     icon: mdi:weather-snowy-rainy
     entity_category: config
-    options: ["Авто", "Выкл", "Дождь", "Снег", "Гроза", "Облачно", "Ясная ночь", "Ясный день", "Листопад", "Сердечки", "Воздушный змей", "Радуга"]
+    options: ["Авто", "Выкл", "Дождь", "Снег", "Гроза", "Облачно", "Ясная ночь", "Ясный день", "Листопад", "Сердечки", "Воздушный змей", "Радуга", "Иней"]
     initial_option: "Авто"
     optimistic: true
     restore_value: true
@@ -259,7 +259,8 @@ script:
       - lambda: |-
           // Номер пункта «Фона погоды»:
           // 0 Авто, 1 Выкл, 2 Дождь, 3 Снег, 4 Гроза, 5 Облачно, 6 Ясная ночь,
-          // 7 Ясный день, 8 Листопад, 9 Сердечки, 10 Воздушный змей, 11 Радуга
+          // 7 Ясный день, 8 Листопад, 9 Сердечки, 10 Воздушный змей, 11 Радуга,
+          // 12 Иней
           size_t sel = id(weather_fx_select).active_index().value_or(0);
           std::string s;
           switch (sel) {
@@ -274,6 +275,7 @@ script:
             case 9: s = "clear"; break;
             case 10: s = "clear"; break;
             case 11: s = "partly_cloudy"; break;
+            case 12: s = "clear"; break;
             default: s = ""; break;
           }
           // Звёзды — ясной или малооблачной ночью, солнце — таким же днём.
@@ -366,6 +368,16 @@ interval:
           const size_t fx_sel = id(weather_fx_select).active_index().value_or(0);
           p.rainbow = fx_sel == 11 || (fx_sel == 0 && (int32_t) (id(rainbow_until) - millis()) > 0 && !id(is_night));
           p.sun = id(weather_sun) && !p.rainbow;
+          // Иней по краю экрана — в мороз от −15° (сходит выше −14°)
+          static bool frost = false;
+          const float t_out = id(ha_slot1).state;
+          if (!std::isnan(t_out)) {
+            if (t_out <= -15.0f)
+              frost = true;
+            else if (t_out > -14.0f)
+              frost = false;
+          }
+          p.frost = frost || fx_sel == 12;
           p.garland = id(fx_garland);
           p.fireworks = (int32_t) (id(fireworks_until) - millis()) > 0;
           p.kite = id(weather_kite);

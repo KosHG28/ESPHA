@@ -28,6 +28,7 @@ struct Params {
   bool garland{false};  ///< праздник: гирлянда по краю экрана
   bool fireworks{false};  ///< салют
   bool rainbow{false};    ///< радуга: днём после дождя прояснилось
+  bool frost{false};      ///< мороз ниже −15°: иней по краю экрана
   int kite{0};            ///< воздушный змей: 0 нет, 1 изредка, 2 часто (проверка)
   // Для созвездия: где и когда смотрим на небо. utc 0 — время неизвестно
   float lat{NAN}, lon{NAN};  ///< градусы, восточная долгота — плюс
@@ -121,6 +122,8 @@ class WeatherFx : public Component {
   void fireworks_(uint32_t now);
   void kite_(uint32_t now, float wind);
   void moon_(uint32_t utc);
+  void planets_(double jd, float lst, float sphi, float cphi);
+  void build_frost_();
 
   /// Перенести частицу: отметить к перерисовке старое и новое место
   void mark_(Spot &s, bool on, int x, int y, int w, int h);
@@ -143,6 +146,17 @@ class WeatherFx : public Component {
   int nd_{0}, nf_{0}, ncl_{0};
   bool hail_{false}, storm_{false}, stars_on_{false}, dim_{false}, glass_on_{false};
   bool sun_on_{false}, gar_on_{false}, fw_on_{false}, rainbow_on_{false};
+  // Планеты над горизонтом: сколько, какие (номер в таблице), нарисованы ли
+  int npl_{0};
+  int pl_idx_[4]{};
+  Spot pl_spot_{};
+  // Иней: отрезки веточек по краю круга
+  static const int NFROST = 220;
+  bool frost_on_{false};
+  int nfr_{0};
+  int16_t fr_[NFROST][4]{};
+  uint8_t fr_opa_[NFROST]{};
+  int shake_{0};
   // Луна: фаза 0..1 (0 — новолуние, 0,5 — полнолуние), нарисована ли
   float moon_phase_{-1};
   Spot moon_spot_{};

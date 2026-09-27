@@ -133,6 +133,24 @@ def cat_drink(lap):
     return im
 
 
+def mouse(step):
+    """Серая мышка бежит вправо: хвост, ушко, глаз, лапки."""
+    im = canvas(14, 7)
+    d = ImageDraw.Draw(im)
+    grey = (170, 170, 180, 255)
+    dark = (120, 120, 130, 255)
+    d.line([0, 3, 3, 4], fill=(230, 160, 170, 255))  # хвост
+    d.ellipse([3, 2, 11, 6], fill=grey)
+    d.polygon([(10, 3), (13, 4), (10, 5)], fill=grey)  # мордочка
+    d.ellipse([8, 1, 10, 3], fill=(240, 170, 180, 255))  # ушко
+    d.point((11, 3), fill=EYE)
+    d.point((13, 4), fill=(240, 150, 160, 255))
+    feet = [(5, 6), (9, 6)] if step else [(4, 6), (10, 6)]
+    for x, y in feet:
+        d.point((x, y), fill=dark)
+    return im
+
+
 def bowl():
     """Миска с водой."""
     im = canvas(9, 5)
@@ -417,6 +435,9 @@ def sprites():
     out["cat_umbrella"] = umbrella()
     out["flake"] = snowflake()
     out["cat_bowl"] = bowl()
+    for f in (0, 1):
+        out[f"mouse_r{f}"] = mouse(f)
+        out[f"mouse_l{f}"] = mirrored(mouse(f))
     return {k: scaled(v, SCALE_CAT if k.startswith("cat") else SCALE_OTHER) for k, v in out.items()}
 
 
