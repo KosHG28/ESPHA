@@ -50,9 +50,10 @@ static const int CAP_Y = 24, CAP_W = 220;
 static const float CON_MIN_ALT = 0.4226f;  // sin 25°
 // Сменять созвездие раз в 10 минут, пересчитывать поворот раз в 5
 static const int CON_SLOT_S = 600, CON_RECALC_MIN = 5;
-// Планеты — столбиком справа от строки погоды: точка и название
-static const int PL_X = 336, PL_Y0 = 124, PL_DY = 18;
-static const lv_area_t PL_AREA = {PL_X - 8, PL_Y0 - 11, 432, PL_Y0 + 3 * PL_DY + 11};
+// Планеты — строкой внизу, под комнатной температурой: точка и название,
+// по центру. Ширина строки в этом месте круга — около 300 px
+static const int PL_Y = 408, PL_W = 74;
+static const lv_area_t PL_AREA = {233 - 2 * PL_W - 4, PL_Y - 16, 233 + 2 * PL_W + 4, PL_Y + 16};
 struct PlanetEl {
   const char *name;
   uint32_t color;
@@ -398,15 +399,17 @@ void WeatherFx::paint_back(lv_layer_t *layer) {
       lb.font = this->font_cap_;
       lb.color = lv_color_hex(dim ? 0x8898B8 : 0x4C5A74);
       lb.opa = LV_OPA_COVER;
+      lb.flag = LV_TEXT_FLAG_EXPAND;  // одной строкой, без переноса
       fill.radius = LV_RADIUS_CIRCLE;
       fill.opa = LV_OPA_COVER;
+      const int x0 = 233 - this->npl_ * PL_W / 2;
       for (int i = 0; i < this->npl_; i++) {
         const PlanetEl &pl = PLANETS[this->pl_idx_[i]];
-        const int cx = PL_X + oc.x1, cy = PL_Y0 + i * PL_DY + oc.y1, r = pl.size / 2;
+        const int cx = x0 + i * PL_W + 6 + oc.x1, cy = PL_Y + oc.y1, r = pl.size / 2;
         lv_area_t dot = {cx - r, cy - r, cx - r + pl.size - 1, cy - r + pl.size - 1};
         fill.color = lv_color_hex(pl.color);
         lv_draw_fill(layer, &fill, &dot);
-        lv_area_t ta = {cx + 10, cy - 9, cx + 95, cy + 10};
+        lv_area_t ta = {cx + 9, cy - 10, cx + PL_W - 8, cy + 12};
         lb.text = pl.name;
         lv_draw_label(layer, &lb, &ta);
       }
@@ -756,8 +759,7 @@ void WeatherFx::apply_(const Params &p, bool relayout) {
         y = rnd_(30, 220);
       } while ((x - 233) * (x - 233) + (y - 233) * (y - 233) > 215 * 215 ||
                (x > 82 && x < 372 && y > 22 && y < 122) ||
-               (std::abs(x - MOON_X) < MOON_R + 12 && std::abs(y - MOON_Y) < MOON_R + 12) ||
-               (x > PL_X - 12 && y > PL_Y0 - 12 && y < PL_Y0 + 4 * PL_DY));
+               (std::abs(x - MOON_X) < MOON_R + 12 && std::abs(y - MOON_Y) < MOON_R + 12));
       this->stx_[i] = x;
       this->sty_[i] = y;
       this->stph_[i] = rnd_(0, 628) / 100.0f;
