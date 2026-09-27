@@ -174,9 +174,11 @@ esphome:
       - -DLV_DRAW_SW_SUPPORT_RGB565A8=1
       # Самые частые функции отрисовки LVGL (смешивание цветов, заливка,
       # копирование) — во внутреннюю память процессора (IRAM), а не во флеш:
-      # без промахов кэша флеша они работают быстрее. esp_attr.h с IRAM_ATTR
-      # LVGL на ESP подключает сам
-      - -DLV_ATTRIBUTE_FAST_MEM=IRAM_ATTR
+      # без промахов кэша флеша они работают быстрее. Раздел .iram1.* линкер
+      # ESP-IDF кладёт в IRAM. Имя раздела собирается макросом-«строкой»,
+      # чтобы в флаге не было кавычек
+      - -DLV_STR_(x)=#x
+      - -DLV_ATTRIBUTE_FAST_MEM=__attribute__((section(LV_STR_(.iram1.lvgl))))
   on_boot:
     - priority: -100
       then:
