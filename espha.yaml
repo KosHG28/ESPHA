@@ -164,6 +164,10 @@ esphome:
       # Виджет картинки LVGL: ESPHome включает только виджеты, которые есть в
       # YAML, а спрайты гостей (components/critters) создаются из C++
       - -DLV_USE_IMAGE=1
+      # Спрайты гостей — RGB565A8. ESPHome включает в LVGL только форматы
+      # картинок, объявленных в YAML (RGB565 и ARGB8888), остальные выключает.
+      # Без поворота и масштаба RGB565A8 рисуется и так, но явно — надёжнее
+      - -DLV_DRAW_SW_SUPPORT_RGB565A8=1
   on_boot:
     - priority: -100
       then:
