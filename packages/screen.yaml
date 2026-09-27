@@ -51,6 +51,23 @@ number:
     on_value:
       - script.execute: wake_screen
 
+  # «Яркость по солнцу»: сколько процентов от «Яркости экрана» остаётся ночью
+  # (солнце ниже −6°). В сумерках яркость плавно переходит от 100 % к этому
+  - platform: template
+    id: sun_night_pct
+    name: "Яркость по солнцу: ночью, % от обычной"
+    icon: mdi:weather-night
+    entity_category: config
+    unit_of_measurement: "%"
+    min_value: 20
+    max_value: 100
+    step: 5
+    initial_value: 70
+    optimistic: true
+    restore_value: true
+    on_value:
+      - script.execute: sun_brightness
+
   # Ночное выключение: с какого и до какого часа экран гаснет полностью
   - platform: template
     id: night_from
@@ -411,8 +428,9 @@ script:
       - lambda: |-
           float f = 1.0f;
           const float e = id(ha_sun_elev).state;
+          const float lo = std::min(1.0f, std::max(0.2f, id(sun_night_pct).state / 100.0f));
           if (id(sw_sun_bri).state && !std::isnan(e))
-            f = e >= 8.0f ? 1.0f : (e <= -6.0f ? 0.45f : 0.45f + 0.55f * (e + 6.0f) / 14.0f);
+            f = e >= 8.0f ? 1.0f : (e <= -6.0f ? lo : lo + (1.0f - lo) * (e + 6.0f) / 14.0f);
           if (std::fabs(f - id(bri_factor)) < 0.01f)
             return;
           id(bri_factor) = f;
