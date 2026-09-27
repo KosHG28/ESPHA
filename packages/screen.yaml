@@ -179,6 +179,8 @@ sensor:
             - script.stop: away_timer
             - lambda: 'id(nobody_home) = false;'
             - script.execute: power_eval
+      # Кто-то пришёл или ушёл — показать или спрятать значок поилки
+      - script.execute: pet_alert_eval
 
 globals:
   # Экран приглушён по таймауту. По нему погодный фон берёт яркую палитру

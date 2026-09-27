@@ -127,6 +127,9 @@ substitutions:
   weather_wind_bearing_entity: sensor.yandex_pogoda_wind_bearing
   # Порывы ветра, м/с. Время от времени снос на пару секунд усиливается до них
   weather_wind_gust_entity: sensor.yandex_pogoda_wind_gust
+  # Поилка кота: «off» — воды нет. Тогда поверх экрана горит значок
+  pet_water_entity: binary_sensor.mmgg_s1_346f0_que_shui_1_you_shui
+
   # Координаты дома для созвездий на ночном небе — пока Home Assistant не
   # прислал свои (из зоны «Дом»). Градусы, восточная долгота — плюс
   home_latitude: "55.75"
@@ -210,6 +213,7 @@ packages:
   ui: !include packages/ui.yaml
   imu: !include packages/imu.yaml
   holidays: !include packages/holidays.yaml
+  pets: !include packages/pets.yaml
   behaviour: !include packages/behaviour.yaml
 
 logger:

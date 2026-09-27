@@ -151,6 +151,17 @@ font:
           - "\U000F02D1"   # mdi-heart — 14 февраля
           - "\U000F08D0"   # mdi-cards-heart
 
+  # Значок «нет воды в поилке» — крупная перечёркнутая капля
+  - file:
+      url: "https://raw.githubusercontent.com/Templarian/MaterialDesign-Webfont/master/fonts/materialdesignicons-webfont.ttf"
+      type: web
+    id: font_pet
+    size: 120
+    bpp: 4
+    glyphsets: []
+    glyphs:
+      - "\U000F058D"   # water-off
+
   # Иконка погоды рядом с уличной температурой
   - file:
       url: "https://raw.githubusercontent.com/Templarian/MaterialDesign-Webfont/master/fonts/materialdesignicons-webfont.ttf"
@@ -321,6 +332,46 @@ lvgl:
                 align: CENTER
                 width: 330
                 long_mode: WRAP
+
+      # Нет воды в поилке кота — поверх всего, пока не нальют (pets.yaml).
+      # Касание прячет на 30 минут
+      - obj:
+          id: pet_alert
+          align: CENTER
+          width: 300
+          height: 300
+          radius: 150
+          bg_color: 0x2A0F16
+          bg_opa: 92%
+          border_width: 3
+          border_color: 0xFF5C8A
+          pad_all: 0
+          hidden: true
+          scrollable: false
+          on_click:
+            - lambda: |-
+                id(pet_snooze_until) = millis() + 30u * 60u * 1000u;
+            - script.execute: pet_alert_eval
+          widgets:
+            - label:
+                id: pet_icon
+                text: "\U000F058D"
+                text_font: font_pet
+                text_color: 0xFF6B8B
+                align: CENTER
+                y: -34
+            - label:
+                text: "Нет воды у кота"
+                text_font: font_m
+                text_color: 0xFFFFFF
+                align: CENTER
+                y: 62
+            - label:
+                text: "коснитесь — напомнить через 30 мин"
+                styles: style_caption
+                text_font: font_sun
+                align: CENTER
+                y: 98
 
       # Полноэкранная вспышка о событии. Обычно скрыта; показывается скриптом
       # flash_screen. Не кликабельна, чтобы не перехватывать касания.
