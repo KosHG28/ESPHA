@@ -5,7 +5,70 @@
 # долгий проход основного цикла прошивки за последние 10 секунд. Чем больше,
 # тем дольше плата не успевает ответить на касание. Сравнивайте его при
 # включённом и выключенном «Фоне погоды», до и после правок.
+#
+# Отрисовка экрана — три датчика, считаются по самим перерисовкам LVGL за
+# последние 5 секунд:
+#   «FPS экрана» — сколько раз экран правда перерисовывался. Если на
+#     экране ничего не движется, кадров мало — это нормально; смотреть их
+#     стоит во время анимации (дождь, листание, салют). Потолок — 30;
+#   «Время кадра (ms)» — сколько в среднем занимает одна перерисовка (рисование +
+#     отправка в экран), мс. Меньше 33 мс — плата успевает 30 кадров;
+#   «Время кадра, максимум (ms)» — самый долгий кадр за эти 5 секунд, мс.
 # ---------------------------------------------------------------------------
+
+globals:
+  - id: fr_count
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+  - id: fr_sum_us
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+  - id: fr_max_us
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+  - id: fr_start_us
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+  - id: fr_window_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+
+interval:
+  - interval: 5s
+    then:
+      - lambda: |-
+          // Один раз — подписаться на начало и конец каждой перерисовки
+          static bool hooked = false;
+          if (!hooked) {
+            hooked = true;
+            lv_display_t *d = lv_display_get_default();
+            lv_display_add_event_cb(d, [](lv_event_t *e) { id(fr_start_us) = micros(); }, LV_EVENT_REFR_START,
+                                    nullptr);
+            lv_display_add_event_cb(d, [](lv_event_t *e) {
+              const uint32_t dt = micros() - id(fr_start_us);
+              id(fr_count) += 1;
+              id(fr_sum_us) += dt;
+              if (dt > id(fr_max_us))
+                id(fr_max_us) = dt;
+            }, LV_EVENT_REFR_READY, nullptr);
+            id(fr_window_ms) = millis();
+            return;
+          }
+          const uint32_t now = millis();
+          const float secs = (now - id(fr_window_ms)) / 1000.0f;
+          id(fr_window_ms) = now;
+          const uint32_t n = id(fr_count);
+          id(fps_sensor).publish_state(secs > 0 ? n / secs : NAN);
+          id(frame_ms_sensor).publish_state(n ? id(fr_sum_us) / 1000.0f / n : NAN);
+          id(frame_max_sensor).publish_state(n ? id(fr_max_us) / 1000.0f : NAN);
+          id(fr_count) = 0;
+          id(fr_sum_us) = 0;
+          id(fr_max_us) = 0;
 
 debug:
   update_interval: 10s
@@ -26,6 +89,34 @@ sensor:
     psram:
       name: Свободно PSRAM
       entity_category: diagnostic
+
+  - platform: template
+    id: fps_sensor
+    name: FPS экрана
+    icon: mdi:speedometer
+    entity_category: diagnostic
+    unit_of_measurement: "к/с"
+    accuracy_decimals: 1
+    state_class: measurement
+    update_interval: never
+  - platform: template
+    id: frame_ms_sensor
+    name: Время кадра (ms)
+    icon: mdi:timer-outline
+    entity_category: diagnostic
+    unit_of_measurement: ms
+    accuracy_decimals: 1
+    state_class: measurement
+    update_interval: never
+  - platform: template
+    id: frame_max_sensor
+    name: Время кадра, максимум (ms)
+    icon: mdi:timer-alert-outline
+    entity_category: diagnostic
+    unit_of_measurement: ms
+    accuracy_decimals: 1
+    state_class: measurement
+    update_interval: never
 
 text_sensor:
   # Если плата перезагрузилась сама — здесь будет видно почему
