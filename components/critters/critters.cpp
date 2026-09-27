@@ -27,7 +27,7 @@ static const int OFF_L = -110, OFF_R = 480;  // за краем экрана
 static const int CENTER_X = 233 - CAT_W / 2;
 static const uint32_t MEOW_MS = 1600;  // сколько кот сидит и мяукает после касания
 // Сколько кот сидит посередине: просто так, ловя снежинку, глядя в небо, у принтера
-static const uint32_t SIT_MS[4] = {3000, 4200, 4300, 6000};
+static const uint32_t SIT_MS[5] = {3000, 4200, 4300, 6000, 5200};
 
 int Critters::rnd_(int lo, int hi) { return lo + (int) (random_uint32() % (uint32_t) (hi - lo)); }
 
@@ -38,8 +38,7 @@ void Critters::bind(lv_obj_t *img, lv_obj_t *zzz, lv_obj_t *hat, lv_obj_t *item)
   this->zzz_ = zzz;
   this->hat_ = hat;
   this->item_ = item;
-  if (item)
-    lv_image_set_src(item, &spr_flake);
+
   // Первый гость — через 20–60 минут после запуска
   this->next_ = millis() + rnd_(20, 60) * 60000u;
   // Кадр — в таймере LVGL, в одном проходе с перерисовкой экрана (как у
@@ -98,6 +97,11 @@ void Critters::say_(const char *text) {
   lv_label_set_text(this->zzz_, text);
   lv_obj_set_pos(this->zzz_, (int) this->x_ + CAT_W / 2 - 40, (int) this->y_ - 48);
   lv_obj_clear_flag(this->zzz_, LV_OBJ_FLAG_HIDDEN);
+}
+
+void Critters::start_drink() {
+  this->start(SHOW_CAT_VISIT);
+  this->variant_ = VAR_DRINK;
 }
 
 void Critters::start_printer_visit() {
@@ -219,9 +223,34 @@ void Critters::sit_(uint32_t st) {
   const lv_image_dsc_t *look = pick(spr_cat_look_r, spr_cat_look_l), *paw = pick(spr_cat_paw_r, spr_cat_paw_l);
   const lv_image_dsc_t *img = sit;
   switch (this->variant_) {
+    case VAR_DRINK: {
+      // Налили воды: у морды миска, кот пригнулся и лакает, потом садится
+      // и мурчит
+      if (this->item_) {
+        if (this->item_src_ != &spr_cat_bowl) {
+          lv_image_set_src(this->item_, &spr_cat_bowl);
+          this->item_src_ = &spr_cat_bowl;
+        }
+        const int bx = (int) this->x_ + BOWL_AT[r ? 0 : 1][0], by = (int) this->y_ + BOWL_AT[r ? 0 : 1][1];
+        lv_obj_set_pos(this->item_, bx - (int) spr_cat_bowl.header.w / 2, by - (int) spr_cat_bowl.header.h);
+        lv_obj_clear_flag(this->item_, LV_OBJ_FLAG_HIDDEN);
+      }
+      if (st > 200 && st < 4000) {
+        const bool lap = (st / 330) % 2;
+        img = r ? (lap ? &spr_cat_drink_r1 : &spr_cat_drink_r0) : (lap ? &spr_cat_drink_l1 : &spr_cat_drink_l0);
+      } else if (st > 4600 && st < 4750) {
+        img = blink;
+      }
+      this->say_(st > 4100 ? "мур" : nullptr);
+      break;
+    }
     case VAR_CATCH: {
       // Снежинка падает, покачиваясь, прямо на лапу; кот следит за ней,
       // поднимает лапу — поймал! — и мяукает
+      if (this->item_ && this->item_src_ != &spr_flake) {
+        lv_image_set_src(this->item_, &spr_flake);
+        this->item_src_ = &spr_flake;
+      }
       const int tx = (int) this->x_ + PAW_TIP[r ? 0 : 1][0], ty = (int) this->y_ + PAW_TIP[r ? 0 : 1][1];
       const int fw = spr_flake.header.w, fh = spr_flake.header.h;
       if (st > 200 && st < 1750 && this->item_) {

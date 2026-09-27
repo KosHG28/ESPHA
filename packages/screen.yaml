@@ -231,6 +231,12 @@ script:
   - id: wake_screen
     mode: restart
     then:
+      # Горит ночник — он сам решает, когда вернуть обычный экран
+      - if:
+          condition:
+            lambda: 'return id(nightlight_on);'
+          then:
+            - script.stop: wake_screen
       # Разбудили посреди плавного гашения — не доводить его до конца
       - script.stop: screen_sleep
       # Из полной темноты экран разгорается дольше — вместе с раскрытием
@@ -520,8 +526,7 @@ script:
           then:
             - if:
                 condition:
-                  not:
-                    script.is_running: wake_screen
+                  lambda: 'return !id(wake_screen)->is_running() && !id(nightlight_on);'
                 then:
                   - script.execute: screen_sleep
       # Ночь кончилась или кто-то пришёл — включить

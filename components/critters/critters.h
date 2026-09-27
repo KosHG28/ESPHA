@@ -41,6 +41,9 @@ class Critters : public Component {
   /// Печать закончилась: кот прибегает и заинтересованно смотрит
   void start_printer_visit();
 
+  /// В поилку налили воды: кот прибегает попить из миски
+  void start_drink();
+
   /// Какой сегодня день — для сезонных гостей
   void set_date(int month, int day) {
     this->month_ = month;
@@ -84,7 +87,7 @@ class Critters : public Component {
 
  protected:
   /// Что кот делает, когда сидит посередине
-  enum Variant : uint8_t { VAR_PLAIN, VAR_CATCH, VAR_STARS, VAR_PRINTER };
+  enum Variant : uint8_t { VAR_PLAIN, VAR_CATCH, VAR_STARS, VAR_PRINTER, VAR_DRINK };
 
   void stop_();
   void place_(const lv_image_dsc_t *img, int x, int y);
@@ -93,7 +96,7 @@ class Critters : public Component {
   static int rnd_(int lo, int hi);
 
   lv_obj_t *img_{nullptr}, *zzz_{nullptr}, *hat_{nullptr}, *item_{nullptr};
-  const lv_image_dsc_t *head_src_{nullptr};
+  const lv_image_dsc_t *head_src_{nullptr}, *item_src_{nullptr};
   const char *said_{nullptr};
   bool festive_{false}, stars_{false}, meteor_req_{false}, meteor_sent_{false};
   int weather_{0};

@@ -35,6 +35,9 @@ sensor:
     motion_id: imu
     id: imu_az
     internal: true
+    # Каждый новый замер — проверить, не постучали ли (gestures.yaml)
+    on_value:
+      - script.execute: knock_check
 
 globals:
   - id: imu_prev_x
@@ -93,7 +96,9 @@ number:
     disabled_by_default: true
 
 interval:
-  - interval: ${imu_poll_interval}
+  # Акселерометр опрашивается часто (ради стука), а движение для пробуждения
+  # сравнивается, как и раньше, с замером четверть секунды назад
+  - interval: 250ms
     then:
       - lambda: |-
           float ax = id(imu_ax).state, ay = id(imu_ay).state, az = id(imu_az).state;

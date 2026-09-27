@@ -105,6 +105,12 @@ touchscreen:
           id(touch_woke) = id(screen_off);
           id(touch_active) = true;
           id(touch_release_ms) = millis();
+          id(touch_start_ms) = millis();
+          // Горит ночник — касание его гасит и больше ничего не делает
+          if (id(nightlight_on)) {
+            id(touch_woke) = true;
+            id(nightlight_off)->execute();
+          }
           // Кот на экране замечает касание и мяукает
           if (!id(touch_woke))
             id(crit)->poke();

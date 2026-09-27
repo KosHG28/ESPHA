@@ -21,8 +21,9 @@ substitutions:
   # Как часто содержимое сдвигается на пару пикселей против выгорания AMOLED
   pixel_shift_interval: 3min
 
-  # Как часто опрашивается акселерометр и проверяется движение
-  imu_poll_interval: 250ms
+  # Как часто опрашивается акселерометр. 20 мс — чтобы ловить стук по корпусу;
+  # движение для пробуждения сравнивается по-прежнему раз в ~250 мс
+  imu_poll_interval: 20ms
 
   # Насколько должен сдвинуться вектор ускорения (в g), чтобы экран проснулся.
   # Значение по умолчанию; на месте подбирается сущностью
@@ -214,6 +215,8 @@ packages:
   imu: !include packages/imu.yaml
   holidays: !include packages/holidays.yaml
   pets: !include packages/pets.yaml
+  gestures: !include packages/gestures.yaml
+  ota_screen: !include packages/ota_screen.yaml
   behaviour: !include packages/behaviour.yaml
 
 logger:
@@ -225,10 +228,31 @@ logger:
 
 api:
 
+# Во время обновления на экране — кольцо с процентом (packages/ota_screen.yaml)
 ota:
   - platform: esphome
+    on_begin:
+      - script.execute: ota_screen_begin
+    on_progress:
+      - script.execute:
+          id: ota_screen_progress
+          pct: !lambda 'return (int) x;'
+    on_end:
+      - script.execute: ota_screen_end
+    on_error:
+      - script.execute: ota_screen_error
   # Обновление по воздуху с GitHub Pages — через сущность «Прошивка» ниже
   - platform: http_request
+    on_begin:
+      - script.execute: ota_screen_begin
+    on_progress:
+      - script.execute:
+          id: ota_screen_progress
+          pct: !lambda 'return (int) x;'
+    on_end:
+      - script.execute: ota_screen_end
+    on_error:
+      - script.execute: ota_screen_error
 
 # Для загрузки манифеста и прошивки с GitHub Pages
 http_request:

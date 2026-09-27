@@ -1,0 +1,138 @@
+# ---------------------------------------------------------------------------
+# Ночник и стук по корпусу.
+#
+# Ночник: долгое касание (1 секунда, не сдвигая палец) зажигает весь экран
+# мягким тёплым светом на 5 минут. Касание гасит его раньше. Ночник держится,
+# даже если ночью экран должен быть выключен.
+#
+# Стук: два лёгких стука по корпусу или по столу рядом (с паузой 0,12–0,7 с)
+# будят экран, не касаясь стекла. Акселерометр для этого опрашивается часто
+# (${imu_poll_interval}), а короткий всплеск ускорения между соседними
+# замерами и есть стук. Сила стука — «Чувствительность к стуку» в HA.
+# ---------------------------------------------------------------------------
+
+globals:
+  - id: nightlight_on
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  # Когда началось текущее касание — для долгого нажатия
+  - id: touch_start_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+
+number:
+  - platform: template
+    id: knock_threshold
+    name: Чувствительность к стуку
+    icon: mdi:gesture-double-tap
+    entity_category: config
+    unit_of_measurement: g
+    min_value: 0.1
+    max_value: 2.0
+    step: 0.05
+    initial_value: 0.35
+    optimistic: true
+    restore_value: true
+
+switch:
+  - platform: template
+    id: sw_knock
+    name: Пробуждение двойным стуком по корпусу
+    icon: mdi:gesture-double-tap
+    entity_category: config
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+
+script:
+  # Зажечь ночник на 5 минут
+  - id: nightlight
+    mode: restart
+    then:
+      # Обычный таймер гашения не должен приглушить ночник
+      - script.stop: wake_screen
+      - lambda: |-
+          id(nightlight_on) = true;
+          lv_obj_t *nl = id(nightlight_card);
+          lv_obj_move_foreground(nl);
+          lv_obj_clear_flag(nl, LV_OBJ_FLAG_HIDDEN);
+          // Свет плавно разгорается за полсекунды
+          lv_anim_delete(nl, nullptr);
+          lv_anim_t a;
+          lv_anim_init(&a);
+          lv_anim_set_var(&a, nl);
+          lv_anim_set_values(&a, 0, 255);
+          lv_anim_set_duration(&a, 500);
+          lv_anim_set_early_apply(&a, true);
+          lv_anim_set_exec_cb(&a, [](void *o, int32_t v) {
+            lv_obj_set_style_opa((lv_obj_t *) o, (lv_opa_t) v, 0);
+          });
+          lv_anim_start(&a);
+          id(fade_screen)->execute(115, 255, 500);
+      - delay: 5min
+      - script.execute: nightlight_off
+
+  # Погасить ночник и вернуться к обычному экрану
+  - id: nightlight_off
+    mode: single
+    then:
+      - script.stop: nightlight
+      - lambda: |-
+          id(nightlight_on) = false;
+          lv_anim_delete(id(nightlight_card), nullptr);
+          lv_obj_add_flag(id(nightlight_card), LV_OBJ_FLAG_HIDDEN);
+      - script.execute: wake_screen
+
+  # Стук: всплеск ускорения между соседними замерами после затишья.
+  # Вызывается на каждый новый замер акселерометра (imu.yaml)
+  - id: knock_check
+    mode: queued
+    max_runs: 3
+    then:
+      - lambda: |-
+          if (!id(sw_knock).state)
+            return;
+          const float ax = id(imu_ax).state, ay = id(imu_ay).state, az = id(imu_az).state;
+          if (std::isnan(ax) || std::isnan(ay) || std::isnan(az))
+            return;
+          static float lx = NAN, ly = NAN, lz = NAN;
+          static int quiet = 0;
+          static uint32_t first = 0;
+          if (std::isnan(lx)) {
+            lx = ax; ly = ay; lz = az;
+            return;
+          }
+          const float dx = ax - lx, dy = ay - ly, dz = az - lz;
+          const float d = sqrtf(dx * dx + dy * dy + dz * dz);
+          lx = ax; ly = ay; lz = az;
+          const uint32_t now = millis();
+          // Стук — резкий всплеск после хотя бы 60 мс покоя (иначе это
+          // плату несут или трясут)
+          if (d > id(knock_threshold).state && quiet >= 3) {
+            if (first && now - first >= 120 && now - first <= 700) {
+              first = 0;
+              if (id(screen_off) || id(screen_dimmed))
+                id(wake_screen)->execute();
+            } else {
+              first = now;
+            }
+          }
+          if (first && now - first > 700)
+            first = 0;
+          quiet = d < 0.06f ? quiet + 1 : 0;
+
+interval:
+  # Долгое касание: палец лежит секунду почти на месте — ночник
+  - interval: 100ms
+    then:
+      - lambda: |-
+          if (!id(touch_active) || id(touch_woke) || id(nightlight_on))
+            return;
+          if (millis() - id(touch_start_ms) < 1000)
+            return;
+          if (abs(id(swipe_dx)) > 25 || abs(id(swipe_dy)) > 25)
+            return;
+          // Отпускание не должно листать страницу
+          id(touch_woke) = true;
+          id(nightlight)->execute();
