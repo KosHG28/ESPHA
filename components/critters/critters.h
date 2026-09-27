@@ -22,6 +22,7 @@ enum Show : uint8_t {
   SHOW_BUTTERFLY,  ///< летом днём: бабочка порхает по экрану
   SHOW_HEDGEHOG,   ///< осенью: ёжик с листом на спине идёт по низу
   SHOW_PUMPKIN,    ///< 31 октября: тыква внизу, глаза мерцают
+  SHOW_MOUSE,      ///< мышка пробегает по низу, кот гонится за ней
 };
 
 class Critters : public Component {

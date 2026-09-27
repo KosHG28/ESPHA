@@ -23,6 +23,8 @@ static const uint32_t OWL_MS = 20000;     // сова сидит 20 секунд
 static const uint32_t PUMPKIN_MS = 120000;  // тыква стоит 2 минуты
 static const float BUTTERFLY_SPEED = 0.06f;
 static const float HEDGEHOG_SPEED = 0.03f;
+static const float MOUSE_SPEED = 0.30f;  // мышь чуть быстрее кота
+static const int MOUSE_LEAD = 150;       // на сколько кот отстаёт от мыши на старте
 static const int OFF_L = -110, OFF_R = 480;  // за краем экрана
 static const int CENTER_X = 233 - CAT_W / 2;
 static const uint32_t MEOW_MS = 1600;  // сколько кот сидит и мяукает после касания
@@ -203,6 +205,10 @@ void Critters::start(Show show) {
       this->x_ = 233 - 24;
       this->y_ = GROUND - 42;
       break;
+    case SHOW_MOUSE:
+      // x_ — кот, мышь — впереди на MOUSE_LEAD
+      this->y_ = GROUND - CAT_H;
+      break;
     case SHOW_CAT_SLEEP:
       this->x_ = CENTER_X;
       this->y_ = GROUND - CAT_H;
@@ -329,9 +335,9 @@ void Critters::frame(bool can_show, bool night, bool winter) {
       const bool summer = this->month_ >= 6 && this->month_ <= 8;
       s = night ? SHOW_OWL : (summer && rnd_(0, 2) ? SHOW_BUTTERFLY : SHOW_BIRD);
     } else {
-      // Осенью вместо улитки — ёжик, зимой — снеговик
+      // Иногда вместо улитки — погоня за мышью; осенью — ёжик, зимой — снеговик
       const bool autumn = this->month_ >= 9 && this->month_ <= 11;
-      s = autumn ? SHOW_HEDGEHOG : SHOW_SNAIL;
+      s = rnd_(0, 3) == 0 ? SHOW_MOUSE : (autumn ? SHOW_HEDGEHOG : SHOW_SNAIL);
     }
     // На Хэллоуин чаще всего выходит тыква
     if (this->month_ == 10 && this->day_ == 31 && !this->festive_ && rnd_(0, 10) < 6)
@@ -463,6 +469,29 @@ void Critters::frame(bool can_show, bool night, bool winter) {
       this->x_ -= HEDGEHOG_SPEED * dt;
       this->place_((t / 260) % 2 ? &spr_hedgehog1 : &spr_hedgehog0, (int) this->x_, (int) this->y_);
       if (this->x_ < OFF_L)
+        this->stop_();
+      break;
+    }
+    case SHOW_MOUSE: {
+      // Мышка удирает, кот несётся следом и чуть отстаёт
+      const float mx = this->x_ + dir * (MOUSE_LEAD + (MOUSE_SPEED - CAT_SPEED) * t);
+      this->x_ += dir * CAT_SPEED * dt;
+      if (this->item_) {
+        const lv_image_dsc_t *m = this->right_ ? ((t / 70) % 2 ? &spr_mouse_r1 : &spr_mouse_r0)
+                                               : ((t / 70) % 2 ? &spr_mouse_l1 : &spr_mouse_l0);
+        if (m != this->item_src_) {
+          lv_image_set_src(this->item_, m);
+          this->item_src_ = m;
+        }
+        lv_obj_set_pos(this->item_, (int) mx + (this->right_ ? CAT_W - 20 : 20 - (int) m->header.w),
+                       GROUND - (int) m->header.h);
+        lv_obj_clear_flag(this->item_, LV_OBJ_FLAG_HIDDEN);
+      }
+      static const lv_image_dsc_t *R[4] = {&spr_cat_run_r0, &spr_cat_run_r1, &spr_cat_run_r2, &spr_cat_run_r3};
+      static const lv_image_dsc_t *L[4] = {&spr_cat_run_l0, &spr_cat_run_l1, &spr_cat_run_l2, &spr_cat_run_l3};
+      const int f = (t / 70) % 4;
+      this->place_(this->right_ ? R[f] : L[f], (int) this->x_, (int) this->y_);
+      if (off_screen())
         this->stop_();
       break;
     }

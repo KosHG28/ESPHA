@@ -90,7 +90,7 @@ select:
     id: guest_select
     name: Позвать гостя
     icon: mdi:paw
-    options: ["—", "Кот", "Птица", "Улитка", "Снеговик", "Сова", "Бабочка", "Ёжик", "Тыква"]
+    options: ["—", "Кот", "Птица", "Улитка", "Снеговик", "Сова", "Бабочка", "Ёжик", "Тыква", "Кот и мышь"]
     initial_option: "—"
     optimistic: true
     on_value:
@@ -102,7 +102,7 @@ select:
             - lambda: |-
                 using namespace critters;
                 static const Show SHOWS[] = {SHOW_NONE, SHOW_CAT_RUN, SHOW_BIRD, SHOW_SNAIL, SHOW_SNOWMAN,
-                                             SHOW_OWL, SHOW_BUTTERFLY, SHOW_HEDGEHOG, SHOW_PUMPKIN};
+                                             SHOW_OWL, SHOW_BUTTERFLY, SHOW_HEDGEHOG, SHOW_PUMPKIN, SHOW_MOUSE};
                 if (i == 1)
                   id(crit)->start_cat();
                 else if (i < sizeof(SHOWS) / sizeof(SHOWS[0]))

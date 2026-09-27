@@ -50,6 +50,29 @@ static const int CAP_Y = 24, CAP_W = 220;
 static const float CON_MIN_ALT = 0.4226f;  // sin 25°
 // Сменять созвездие раз в 10 минут, пересчитывать поворот раз в 5
 static const int CON_SLOT_S = 600, CON_RECALC_MIN = 5;
+// Планеты — столбиком справа от строки погоды: точка и название
+static const int PL_X = 336, PL_Y0 = 124, PL_DY = 18;
+static const lv_area_t PL_AREA = {PL_X - 8, PL_Y0 - 11, 432, PL_Y0 + 3 * PL_DY + 11};
+struct PlanetEl {
+  const char *name;
+  uint32_t color;
+  int size;
+  float el[6], rate[6];  // a, e, I, L, долгота перигелия, долгота узла и их изменение за век
+};
+// Орбиты по приближённым формулам JPL (E. M. Standish), годятся на 1800–2050
+// годы с точностью лучше градуса. [0] — Земля, остальные — по яркости
+static const PlanetEl PLANETS[5] = {
+    {"", 0, 0, {1.00000261f, 0.01671123f, -0.00001531f, 100.46457166f, 102.93768193f, 0.0f},
+     {0.00000562f, -0.00004392f, -0.01294668f, 35999.37244981f, 0.32327364f, 0.0f}},
+    {"Венера", 0xFFF4D6, 10, {0.72333566f, 0.00677672f, 3.39467605f, 181.97909950f, 131.60246718f, 76.67984255f},
+     {0.00000390f, -0.00004107f, -0.00078890f, 58517.81538729f, 0.00268329f, -0.27769418f}},
+    {"Юпитер", 0xFFE0B0, 8, {5.20288700f, 0.04838624f, 1.30439695f, 34.39644051f, 14.72847983f, 100.47390909f},
+     {-0.00011607f, -0.00013253f, -0.00183714f, 3034.74612775f, 0.21252668f, 0.20469106f}},
+    {"Марс", 0xFF8A5C, 7, {1.52371034f, 0.09339410f, 1.84969142f, -4.55343205f, -23.94362959f, 49.55953891f},
+     {0.00001847f, 0.00007882f, -0.00813131f, 19140.30268499f, 0.44441088f, -0.29257343f}},
+    {"Сатурн", 0xE8D08C, 7, {9.53667594f, 0.05386179f, 2.48599187f, 49.95424423f, 92.59887831f, 113.66242448f},
+     {-0.00125060f, -0.00050991f, 0.00193609f, 1222.49362201f, -0.41897216f, -0.28867794f}},
+};
 // Луна — слева от строки погоды, в стороне от созвездия и цифр
 static const int MOON_X = 84, MOON_Y = 150, MOON_R = 15;
 // Радуга — дугой по верху круга, над строкой погоды
@@ -116,6 +139,8 @@ void WeatherFx::bind(lv_obj_t *root, lv_obj_t *clouds, lv_obj_t *bolt, lv_obj_t 
   this->paint_ = canvas(paint_front_cb);
   this->back_ = canvas(paint_back_cb);
   lv_obj_move_to_index(this->back_, 0);
+
+  this->build_frost_();
 
   // Лампочки гирлянды — по кругу у самого края экрана
   for (int i = 0; i < NG; i++) {
@@ -364,6 +389,30 @@ void WeatherFx::paint_back(lv_layer_t *layer) {
     }
   }
 
+  // Планеты: цветная точка и название
+  if (this->npl_) {
+    lv_area_t pa = {PL_AREA.x1 + oc.x1, PL_AREA.y1 + oc.y1, PL_AREA.x2 + oc.x1, PL_AREA.y2 + oc.y1};
+    if (hit(pa, clip)) {
+      lv_draw_label_dsc_t lb;
+      lv_draw_label_dsc_init(&lb);
+      lb.font = this->font_cap_;
+      lb.color = lv_color_hex(dim ? 0x8898B8 : 0x4C5A74);
+      lb.opa = LV_OPA_COVER;
+      fill.radius = LV_RADIUS_CIRCLE;
+      fill.opa = LV_OPA_COVER;
+      for (int i = 0; i < this->npl_; i++) {
+        const PlanetEl &pl = PLANETS[this->pl_idx_[i]];
+        const int cx = PL_X + oc.x1, cy = PL_Y0 + i * PL_DY + oc.y1, r = pl.size / 2;
+        lv_area_t dot = {cx - r, cy - r, cx - r + pl.size - 1, cy - r + pl.size - 1};
+        fill.color = lv_color_hex(pl.color);
+        lv_draw_fill(layer, &fill, &dot);
+        lv_area_t ta = {cx + 10, cy - 9, cx + 95, cy + 10};
+        lb.text = pl.name;
+        lv_draw_label(layer, &lb, &ta);
+      }
+    }
+  }
+
   // Метеор: хвост из трёх отрезков — от тусклого к яркому, и яркая голова
   if (place(this->met_spot_)) {
     ln.width = 2;
@@ -468,6 +517,25 @@ void WeatherFx::paint_front(lv_layer_t *layer) {
     // Обратно из прямоугольника знака к точке рисования
     lv_point_t pt = {abs.x1 - this->fox_[set][i], abs.y1 - this->foy_[set][i]};
     lv_draw_letter(layer, &let, &pt);
+  }
+
+  // Иней: светлые веточки по краю стекла
+  if (this->frost_on_) {
+    lv_draw_line_dsc_t fl;
+    lv_draw_line_dsc_init(&fl);
+    fl.width = 1;
+    fl.color = lv_color_hex(this->dim_ ? 0xEAF4FF : 0xC8DCF0);
+    for (int i = 0; i < this->nfr_; i++) {
+      const int16_t *s = this->fr_[i];
+      lv_area_t b = {std::min(s[0], s[2]) + oc.x1 - 1, std::min(s[1], s[3]) + oc.y1 - 1,
+                     std::max(s[0], s[2]) + oc.x1 + 1, std::max(s[1], s[3]) + oc.y1 + 1};
+      if (!hit(b, clip))
+        continue;
+      fl.opa = this->fr_opa_[i];
+      fl.p1 = {(lv_value_precise_t) (s[0] + oc.x1), (lv_value_precise_t) (s[1] + oc.y1)};
+      fl.p2 = {(lv_value_precise_t) (s[2] + oc.x1), (lv_value_precise_t) (s[3] + oc.y1)};
+      lv_draw_line(layer, &fl);
+    }
   }
 
   // Салют: искры цветом вспышки, гаснут со временем
@@ -578,6 +646,10 @@ void WeatherFx::end_strike_() {
     return;
   this->striking_ = false;
   this->bolt_on_ = false;
+  if (this->shake_) {
+    this->shake_ = 0;
+    lv_obj_set_style_translate_x(lv_screen_active(), 0, 0);
+  }
   show_(this->bolt_, false);
   show_(this->glow_, false);
   this->next_strike_ = millis() + rnd_(5000, 15000);
@@ -621,7 +693,7 @@ void WeatherFx::apply_(const Params &p, bool relayout) {
   if (!this->storm_)
     this->end_strike_();
   show_(this->root_, this->nd_ || this->nf_ || this->ncl_ || this->storm_ || this->stars_on_ || this->sun_on_ ||
-                         this->gar_on_ || this->fw_on_ || this->kite_mode_ || this->rainbow_on_);
+                         this->gar_on_ || this->fw_on_ || this->kite_mode_ || this->rainbow_on_ || p.frost);
   // Луна — вместе со звёздами; фазу задаёт moon_()
   if (!this->stars_on_) {
     this->mark_(this->moon_spot_, false, 0, 0, 1, 1);
@@ -684,7 +756,8 @@ void WeatherFx::apply_(const Params &p, bool relayout) {
         y = rnd_(30, 220);
       } while ((x - 233) * (x - 233) + (y - 233) * (y - 233) > 215 * 215 ||
                (x > 82 && x < 372 && y > 22 && y < 122) ||
-               (std::abs(x - MOON_X) < MOON_R + 12 && std::abs(y - MOON_Y) < MOON_R + 12));
+               (std::abs(x - MOON_X) < MOON_R + 12 && std::abs(y - MOON_Y) < MOON_R + 12) ||
+               (x > PL_X - 12 && y > PL_Y0 - 12 && y < PL_Y0 + 4 * PL_DY));
       this->stx_[i] = x;
       this->sty_[i] = y;
       this->stph_[i] = rnd_(0, 628) / 100.0f;
@@ -715,6 +788,13 @@ void WeatherFx::apply_(const Params &p, bool relayout) {
     this->invalidate_(this->cap_area_);
     this->con_on_ = false;
   }
+  if (!this->stars_on_ && this->npl_) {
+    this->npl_ = 0;
+    this->invalidate_(PL_AREA);
+  }
+  if (p.frost != this->frost_on_)
+    lv_obj_invalidate(this->paint_);
+  this->frost_on_ = p.frost;
   if (!this->stars_on_ && this->met_on_) {
     this->mark_(this->met_spot_, false, 0, 0, 1, 1);
     this->met_on_ = false;
@@ -1003,6 +1083,12 @@ void WeatherFx::lightning_(uint32_t now) {
     this->end_strike_();
     return;
   }
+  // Гром: экран вздрагивает на первых долях удара
+  const int off = t < 50 ? 3 : (t < 100 ? -3 : (t < 150 ? 2 : 0));
+  if (off != this->shake_) {
+    this->shake_ = off;
+    lv_obj_set_style_translate_x(lv_screen_active(), off, 0);
+  }
   const bool on = t < 80 || t >= 160;
   if (on != this->bolt_on_) {
     this->bolt_on_ = on;
@@ -1198,6 +1284,97 @@ void WeatherFx::layout_con_(int idx, const float (*pts)[2], int n) {
   this->invalidate_(this->cap_area_);
 }
 
+// Гелиоцентрические координаты планеты в плоскости эклиптики, а. е.
+static void helio(const PlanetEl &p, double T, double &x, double &y, double &z) {
+  double v[6];
+  for (int i = 0; i < 6; i++)
+    v[i] = p.el[i] + p.rate[i] * T;
+  const double a = v[0], e = v[1], inc = v[2] * M_PI / 180.0;
+  const double w = v[4] * M_PI / 180.0, node = v[5] * M_PI / 180.0;
+  double m = fmod(v[3] - v[4], 360.0) * M_PI / 180.0;
+  double ea = m;
+  for (int i = 0; i < 8; i++)
+    ea -= (ea - e * sin(ea) - m) / (1.0 - e * cos(ea));
+  const double xp = a * (cos(ea) - e), yp = a * sqrt(1.0 - e * e) * sin(ea);
+  const double om = w - node;
+  const double co = cos(om), so = sin(om), cn = cos(node), sn = sin(node), ci = cos(inc), si = sin(inc);
+  x = (co * cn - so * sn * ci) * xp + (-so * cn - co * sn * ci) * yp;
+  y = (co * sn + so * cn * ci) * xp + (-so * sn + co * cn * ci) * yp;
+  z = (so * si) * xp + (co * si) * yp;
+}
+
+void WeatherFx::planets_(double jd, float lst, float sphi, float cphi) {
+  // Какие планеты сейчас выше 5° над горизонтом — в порядке яркости
+  const double T = (jd - 2451545.0) / 36525.0;
+  double ex, ey, ez;
+  helio(PLANETS[0], T, ex, ey, ez);
+  const double eps = 23.43928 * M_PI / 180.0;
+  int idx[4], n = 0;
+  for (int k = 1; k < 5; k++) {
+    double x, y, z;
+    helio(PLANETS[k], T, x, y, z);
+    x -= ex;
+    y -= ey;
+    z -= ez;
+    const double ye = y * cos(eps) - z * sin(eps), ze = y * sin(eps) + z * cos(eps);
+    SkyStar s;
+    s.ra = (float) (atan2(ye, x) * 12.0 / M_PI);
+    s.dec = (float) (asin(ze / sqrt(x * x + ye * ye + ze * ze)) * 180.0 / M_PI);
+    s.mag = 0;
+    if (star_dir(s, lst, sphi, cphi).u > 0.087f)
+      idx[n++] = k;
+  }
+  bool same = n == this->npl_;
+  for (int i = 0; same && i < n; i++)
+    same = idx[i] == this->pl_idx_[i];
+  if (same)
+    return;
+  this->npl_ = n;
+  for (int i = 0; i < n; i++)
+    this->pl_idx_[i] = idx[i];
+  this->invalidate_(PL_AREA);
+}
+
+void WeatherFx::build_frost_() {
+  // Иней по краю круга: 24 «веточки» от края внутрь, у каждой ствол из трёх
+  // отрезков и по боковой веточке с двух сторон на каждом изгибе. Узор
+  // одинаковый при каждом запуске — генератор с постоянным зерном
+  uint32_t seed = 20260927u;
+  auto rnd01 = [&seed]() {
+    seed = seed * 1664525u + 1013904223u;
+    return (seed >> 8) / 16777216.0f;
+  };
+  this->nfr_ = 0;
+  auto add = [this](float x0, float y0, float x1, float y1, int opa) {
+    if (this->nfr_ >= NFROST)
+      return;
+    int16_t *s = this->fr_[this->nfr_];
+    s[0] = (int16_t) lroundf(x0);
+    s[1] = (int16_t) lroundf(y0);
+    s[2] = (int16_t) lroundf(x1);
+    s[3] = (int16_t) lroundf(y1);
+    this->fr_opa_[this->nfr_++] = (uint8_t) opa;
+  };
+  for (int f = 0; f < 24; f++) {
+    const float a = f * 2.0f * PI_F / 24 + (rnd01() - 0.5f) * 0.18f;
+    float x = 233.0f + 232.0f * cosf(a), y = 233.0f + 232.0f * sinf(a);
+    float d = a + PI_F + (rnd01() - 0.5f) * 0.6f;
+    const float len = 18.0f + rnd01() * 30.0f;
+    for (int s = 0; s < 3; s++) {
+      const float l = len / 3.0f;
+      const float nx = x + cosf(d) * l, ny = y + sinf(d) * l;
+      add(x, y, nx, ny, 170 - s * 35);
+      for (int side = -1; side <= 1; side += 2) {
+        const float bl = l * (0.75f - s * 0.15f), bd = d + side * (0.7f + rnd01() * 0.3f);
+        add(nx, ny, nx + cosf(bd) * bl, ny + sinf(bd) * bl, 120 - s * 25);
+      }
+      x = nx;
+      y = ny;
+      d += (rnd01() - 0.5f) * 0.35f;
+    }
+  }
+}
+
 void WeatherFx::sky_(const Params &p) {
   if (!this->stars_on_)
     return;
@@ -1229,6 +1406,7 @@ void WeatherFx::sky_(const Params &p) {
     gmst += 360.0;
   const float lst = (float) (gmst * M_PI / 180.0);
   const float phi = p.lat * (PI_F / 180.0f), sphi = sinf(phi), cphi = cosf(phi);
+  this->planets_(p.utc / 86400.0 + 2440587.5, lst, sphi, cphi);
 
   // Какие фигуры сейчас над горизонтом и хорошо видны. Совсем мелкие на
   // экране (Лира в неудачном повороте) — только если больше показать нечего
@@ -1465,18 +1643,19 @@ void WeatherFx::frame(const Params &p) {
   const int sig = p.mode | (cnt << 4) | (std::min(std::max(p.clouds, 0), NC) << 10) | ((p.storm ? 1 : 0) << 12) |
                   ((p.dim ? 1 : 0) << 13) | ((p.stars ? 1 : 0) << 14) | ((p.rain_style ? 1 : 0) << 15) |
                   ((p.sun ? 1 : 0) << 16) | ((p.garland ? 1 : 0) << 17) | ((p.fireworks ? 1 : 0) << 18) |
-                  ((std::min(std::max(p.kite, 0), 3)) << 19) | ((p.rainbow ? 1 : 0) << 21);
+                  ((std::min(std::max(p.kite, 0), 3)) << 19) | ((p.rainbow ? 1 : 0) << 21) |
+                  ((p.frost ? 1 : 0) << 22);
   if (sig != this->applied_) {
     // Если поменялись только яркость, солнце или гирлянда — перекрашиваем,
     // но осадки не перемешиваем
-    const int keep = ~((1 << 13) | (1 << 16) | (1 << 17) | (1 << 18) | (3 << 19) | (1 << 21));
+    const int keep = ~((1 << 13) | (1 << 16) | (1 << 17) | (1 << 18) | (3 << 19) | (1 << 21) | (1 << 22));
     const bool relayout = this->applied_ < 0 || (sig & keep) != (this->applied_ & keep);
     this->applied_ = sig;
     this->apply_(p, relayout);
   }
 
   const bool any = this->nd_ || this->nf_ || this->ncl_ || this->storm_ || this->stars_on_ || this->sun_on_ ||
-                   this->gar_on_ || this->fw_on_ || this->kite_mode_ || this->rainbow_on_;
+                   this->gar_on_ || this->fw_on_ || this->kite_mode_ || this->rainbow_on_ || this->frost_on_;
   if (!any || !p.active) {
     this->end_strike_();
     this->last_ms_ = 0;
