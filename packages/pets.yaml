@@ -1,0 +1,71 @@
+# ---------------------------------------------------------------------------
+# Поилка кота. Когда в ней кончилась вода (pet_water_entity — «off»), поверх
+# всего экрана горит значок: перечёркнутая капля, «Нет воды у кота». Висит,
+# пока воду не нальют, и только когда кто-то дома (zone.home). Если экран в
+# этот момент приглушён — просыпается; ночью (экран погашен по расписанию) не
+# будит, значок будет виден утром. Касание прячет значок на 30 минут, потом он
+# вернётся, если воды всё ещё нет.
+# ---------------------------------------------------------------------------
+
+binary_sensor:
+  - platform: homeassistant
+    id: ha_pet_water
+    entity_id: ${pet_water_entity}
+    internal: true
+    on_state:
+      - script.execute: pet_alert_eval
+
+globals:
+  # До какого момента (millis) значок спрятан касанием
+  - id: pet_snooze_until
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+
+script:
+  # Показать или спрятать значок: воды нет, кто-то дома и не отложено касанием
+  - id: pet_alert_eval
+    mode: queued
+    max_runs: 2
+    then:
+      - lambda: |-
+          const bool no_water = id(ha_pet_water).has_state() && !id(ha_pet_water).state;
+          const float people = id(ha_people_home).state;
+          const bool home = std::isnan(people) || people >= 0.5f;
+          const bool snoozed = (int32_t) (id(pet_snooze_until) - millis()) > 0;
+          const bool show = no_water && home && !snoozed;
+          static bool shown = false;
+          lv_obj_t *card = id(pet_alert);
+          if (show == shown)
+            return;
+          shown = show;
+          if (!show) {
+            lv_anim_delete(id(pet_icon), nullptr);
+            lv_obj_add_flag(card, LV_OBJ_FLAG_HIDDEN);
+            return;
+          }
+          // Поверх всего, в том числе гостей и сообщений
+          lv_obj_move_foreground(card);
+          lv_obj_clear_flag(card, LV_OBJ_FLAG_HIDDEN);
+          // Капля мягко «дышит»: прозрачность 45 → 100 % и обратно за 2,4 с
+          lv_anim_t a;
+          lv_anim_init(&a);
+          lv_anim_set_var(&a, id(pet_icon));
+          lv_anim_set_values(&a, 115, 255);
+          lv_anim_set_duration(&a, 1200);
+          lv_anim_set_reverse_duration(&a, 1200);
+          lv_anim_set_repeat_count(&a, LV_ANIM_REPEAT_INFINITE);
+          lv_anim_set_path_cb(&a, lv_anim_path_ease_in_out);
+          lv_anim_set_exec_cb(&a, [](void *o, int32_t v) {
+            lv_obj_set_style_opa((lv_obj_t *) o, (lv_opa_t) v, 0);
+          });
+          lv_anim_start(&a);
+          // Разбудить, если экран просто приглушён. Погашенный ночью не будим
+          if (!id(screen_off))
+            id(wake_screen)->execute();
+
+interval:
+  # Кончилась отсрочка после касания — показать снова, если воды всё нет
+  - interval: 1min
+    then:
+      - script.execute: pet_alert_eval
