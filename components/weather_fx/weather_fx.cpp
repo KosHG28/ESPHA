@@ -2,6 +2,10 @@
 
 #include <algorithm>
 
+// Список участков к перерисовке (inv_areas) есть только во внутренних
+// заголовках LVGL
+#include <lvgl_private.h>
+
 #include "esphome/core/hal.h"
 #include "esphome/core/helpers.h"
 #include "sky.h"
@@ -108,6 +112,45 @@ static void frame_timer_cb(lv_timer_t *t) {
   self->frame(self->params_for_timer());
 }
 
+// Порог склейки участков перерисовки, px (см. set_area_join)
+static int32_t area_join_px = 2500;
+
+void WeatherFx::set_area_join(int px) { area_join_px = std::max(px, 0); }
+
+// Перед кадром: жадно склеиваем пары участков, пока общий прямоугольник
+// выходит не больше чем на area_join_px лишних пикселей и влезает в буфер
+// отрисовки за один проход. LVGL сам склеивает только перекрывающиеся
+// участки, а 20 капель дождя в разных местах — это 20 проходов и 20 посылок
+static void join_areas_cb(lv_event_t *e) {
+  auto *d = static_cast<lv_display_t *>(lv_event_get_user_data(e));
+  if (area_join_px <= 0 || d == nullptr || d->inv_p < 2 || d->buf_act == nullptr)
+    return;
+  const int32_t buf_px = (int32_t) (d->buf_act->data_size / lv_color_format_get_size(d->color_format));
+  lv_area_t *a = d->inv_areas;
+  uint32_t n = d->inv_p;
+  for (int pass = 0; pass < 4; pass++) {
+    bool changed = false;
+    for (uint32_t i = 0; i < n; i++) {
+      for (uint32_t j = i + 1; j < n;) {
+        lv_area_t u;
+        lv_area_join(&u, &a[i], &a[j]);
+        const int32_t su = (int32_t) lv_area_get_size(&u);
+        const int32_t waste = su - (int32_t) lv_area_get_size(&a[i]) - (int32_t) lv_area_get_size(&a[j]);
+        if (su <= buf_px && waste <= area_join_px) {
+          a[i] = u;
+          a[j] = a[--n];
+          changed = true;
+        } else {
+          j++;
+        }
+      }
+    }
+    if (!changed)
+      break;
+  }
+  d->inv_p = n;
+}
+
 static bool hit(const lv_area_t &a, const lv_area_t &clip) {
   return a.x1 <= clip.x2 && a.x2 >= clip.x1 && a.y1 <= clip.y2 && a.y2 >= clip.y1;
 }
@@ -137,6 +180,13 @@ void WeatherFx::bind(lv_obj_t *root, lv_obj_t *clouds, lv_obj_t *bolt, lv_obj_t 
     lv_obj_add_event_cb(pt, cb, LV_EVENT_DRAW_MAIN, this);
     return pt;
   };
+  static bool join_hooked = false;
+  if (!join_hooked) {
+    join_hooked = true;
+    lv_display_t *d = lv_obj_get_display(root);
+    lv_display_add_event_cb(d, join_areas_cb, LV_EVENT_REFR_START, d);
+  }
+
   this->paint_ = canvas(paint_front_cb);
   this->back_ = canvas(paint_back_cb);
   lv_obj_move_to_index(this->back_, 0);
@@ -1024,13 +1074,16 @@ void WeatherFx::clouds_() {
 }
 
 void WeatherFx::stars_(uint32_t now) {
-  // Звёзды мерцают: яркость меняется по синусу, у каждой свой ритм. Раз в
-  // 200 мс — чаще глаз не заметит, а перерисовок меньше
-  if (!this->stars_on_ || now - this->star_ms_ < 200)
+  // Звёзды мерцают: яркость меняется по синусу, у каждой свой ритм. Каждая
+  // звезда меняется раз в 200 мс — чаще глаз не заметит. Звёзды поделены на
+  // три группы, которые меняются по очереди раз в ~67 мс: если менять все
+  // 12 разом, этот кадр выходит втрое тяжелее и на нём спотыкается метеор
+  if (!this->stars_on_ || now - this->star_ms_ < 60)
     return;
   this->star_ms_ = now;
+  this->star_grp_ = (this->star_grp_ + 1) % 3;
   const int hi = this->dim_ ? 0xFF : 0xC8;
-  for (int i = 0; i < NST; i++) {
+  for (int i = this->star_grp_; i < NST; i += 3) {
     this->stph_[i] += 0.25f + (i % 4) * 0.07f;
     const float k = 0.35f + 0.65f * (0.5f + 0.5f * sinf(this->stph_[i]));
     const int v = (int) (hi * k);

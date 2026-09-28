@@ -14,6 +14,23 @@
 #   «Время кадра (ms)» — сколько в среднем занимает одна перерисовка (рисование +
 #     отправка в экран), мс. Меньше 33 мс — плата успевает 30 кадров;
 #   «Время кадра, максимум (ms)» — самый долгий кадр за эти 5 секунд, мс.
+#
+# Из чего складывается кадр:
+#   «Участков за кадр (avg)» — на сколько кусков в среднем делится кадр.
+#     Каждый кусок — отдельный проход отрисовки и отдельная посылка в экран
+#     со своими накладными расходами: 20 мелких кусков заметно дороже одного
+#     покрупнее. Во весь экран — от 8 кусков (столько проходов буфера);
+#   «Отправка в экран (% кадра)» — какая доля времени кадра уходит на
+#     передачу в экран, остальное — рисование. Асинхронный драйвер дисплея
+#     мог бы спрятать не больше этой доли;
+#   «Буфер экрана (RAM)» — где лежит буфер отрисовки: во внутренней памяти
+#     (быстро) или в PSRAM (рисование заметно медленнее).
+#
+# «Склейка участков экрана (px)» — настройка: перед кадром близкие куски
+# объединяются в один, если лишних пикселей выходит не больше этого числа
+# (components/weather_fx). 0 — без склейки, как раньше. Подбирается по
+# «Время кадра (ms)» в дождь или снег: больше — меньше кусков, но больше
+# лишних пикселей.
 # ---------------------------------------------------------------------------
 
 globals:
@@ -37,6 +54,19 @@ globals:
     type: uint32_t
     restore_value: false
     initial_value: '0'
+  # Посылки в экран: сколько и сколько микросекунд заняли
+  - id: fl_count
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+  - id: fl_sum_us
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+  - id: fl_start_us
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
 
 interval:
   - interval: 5s
@@ -56,7 +86,23 @@ interval:
               if (dt > id(fr_max_us))
                 id(fr_max_us) = dt;
             }, LV_EVENT_REFR_READY, nullptr);
+            lv_display_add_event_cb(d, [](lv_event_t *e) { id(fl_start_us) = micros(); }, LV_EVENT_FLUSH_START,
+                                    nullptr);
+            lv_display_add_event_cb(d, [](lv_event_t *e) {
+              id(fl_count) += 1;
+              id(fl_sum_us) += micros() - id(fl_start_us);
+            }, LV_EVENT_FLUSH_FINISH, nullptr);
             id(fr_window_ms) = millis();
+            // Буфер отрисовки: внешняя PSRAM на ESP32-S3 видна по адресам
+            // 0x3C000000..0x3DFFFFFF, внутренняя память — выше
+            lv_draw_buf_t *b = lv_display_get_buf_active(d);
+            if (b != nullptr) {
+              const uintptr_t a = (uintptr_t) b->data;
+              const bool ext = a >= 0x3C000000u && a < 0x3E000000u;
+              char txt[48];
+              snprintf(txt, sizeof(txt), "%s, %u КБ", ext ? "PSRAM" : "внутренняя", (unsigned) (b->data_size / 1024));
+              id(draw_buf_text).publish_state(txt);
+            }
             return;
           }
           const uint32_t now = millis();
@@ -66,9 +112,13 @@ interval:
           id(fps_sensor).publish_state(secs > 0 ? n / secs : NAN);
           id(frame_ms_sensor).publish_state(n ? id(fr_sum_us) / 1000.0f / n : NAN);
           id(frame_max_sensor).publish_state(n ? id(fr_max_us) / 1000.0f : NAN);
+          id(areas_sensor).publish_state(n ? id(fl_count) / (float) n : NAN);
+          id(flush_share_sensor).publish_state(id(fr_sum_us) ? 100.0f * id(fl_sum_us) / id(fr_sum_us) : NAN);
           id(fr_count) = 0;
           id(fr_sum_us) = 0;
           id(fr_max_us) = 0;
+          id(fl_count) = 0;
+          id(fl_sum_us) = 0;
 
 debug:
   update_interval: 10s
@@ -117,8 +167,47 @@ sensor:
     accuracy_decimals: 1
     state_class: measurement
     update_interval: never
+  - platform: template
+    id: areas_sensor
+    name: Участков за кадр (avg)
+    icon: mdi:view-grid-outline
+    entity_category: diagnostic
+    accuracy_decimals: 1
+    state_class: measurement
+    update_interval: never
+  - platform: template
+    id: flush_share_sensor
+    name: Отправка в экран (% кадра)
+    icon: mdi:transfer
+    entity_category: diagnostic
+    unit_of_measurement: "%"
+    accuracy_decimals: 0
+    state_class: measurement
+    update_interval: never
+
+number:
+  - platform: template
+    id: area_join_px
+    name: Склейка участков экрана (px)
+    icon: mdi:vector-combine
+    entity_category: config
+    unit_of_measurement: px
+    min_value: 0
+    max_value: 20000
+    step: 500
+    initial_value: 2500
+    optimistic: true
+    restore_value: true
+    on_value:
+      - lambda: 'weather_fx::WeatherFx::set_area_join((int) x);'
 
 text_sensor:
+  - platform: template
+    id: draw_buf_text
+    name: Буфер экрана (RAM)
+    icon: mdi:memory
+    entity_category: diagnostic
+    update_interval: never
   # Если плата перезагрузилась сама — здесь будет видно почему
   - platform: debug
     reset_reason:
