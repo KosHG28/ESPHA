@@ -325,6 +325,9 @@ script:
           if (sel == 9 || (sel == 0 && mode == 0 && dry && valentine)) {
             mode = 6;
             cnt = 12;
+            // Сердечки — на тёмном фоне: ночное небо (звёзды, созвездие,
+            // луна, планеты) с ними только мешает
+            id(weather_stars) = false;
           }
           // Воздушный змей — ясным ветреным днём, изредка
           id(weather_kite) = sel == 10 ? 2 : (sel == 0 && id(weather_sun) && windy ? 1 : 0);
