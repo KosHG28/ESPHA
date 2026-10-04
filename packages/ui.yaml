@@ -98,7 +98,18 @@ font:
     size: 22
     bpp: 4
     glyphsets: [GF_Latin_Kernel, GF_Cyrillic_Core]
-    glyphs: ["°"]
+    # «→» и «·» — карточка самолёта на радаре
+    glyphs: ["°", "→", "·", "…"]
+    ignore_missing_glyphs: true
+
+  # Радар: подписи самолётов, километры колец, стороны света, строка
+  # «ближайший»
+  - file: "gfonts://Montserrat@500"
+    id: font_radar
+    size: 14
+    bpp: 4
+    glyphsets: [GF_Latin_Kernel, GF_Cyrillic_Core]
+    glyphs: ["·", "…", "→"]
     ignore_missing_glyphs: true
 
   # Текст вперемешку с иконками Material Design Icons
@@ -551,6 +562,7 @@ lvgl:
             - obj: { id: dot_2, styles: style_dot, bg_color: 0x33383E, align: CENTER, x: -20, y: 7 }
             - obj: { id: dot_3, styles: style_dot, bg_color: 0x33383E, align: CENTER, x: 20, y: 7 }
             - obj: { id: dot_4, styles: style_dot, bg_color: 0x33383E, align: CENTER, x: 58, y: -1 }
+            - obj: { id: dot_5, styles: style_dot, bg_color: 0x33383E, align: CENTER, x: 76, y: -9, hidden: true }
 
   pages:
     # =====================================================================
@@ -1125,3 +1137,87 @@ lvgl:
                   align: CENTER
                   y: 100
                   clickable: false
+
+    # =====================================================================
+    # Страница 5 — радар самолётов (packages/radar.yaml). Карта с сервера,
+    # поверх — холст компонента radar, внизу — ближайший самолёт
+    # =====================================================================
+    - id: page_radar
+      styles: style_page
+      scrollable: false
+      on_load:
+        - script.execute:
+            id: mark_page
+            idx: 4
+      widgets:
+        - image:
+            id: radar_map
+            src: radar_map_img
+            align: CENTER
+        - obj:
+            id: radar_view
+            width: 466
+            height: 466
+            align: CENTER
+            bg_opa: TRANSP
+            border_width: 0
+            pad_all: 0
+            scrollable: false
+            clickable: true
+        - label:
+            id: radar_title
+            text: "Радар"
+            text_font: font_radar
+            text_color: 0xA9B8CC
+            align: CENTER
+            y: -175
+        - label:
+            id: radar_status
+            text: ""
+            text_font: font_radar
+            text_color: 0xD8E2EE
+            bg_color: 0x000000
+            bg_opa: 60%
+            radius: 10
+            pad_left: 8
+            pad_right: 8
+            pad_top: 3
+            pad_bottom: 3
+            align: CENTER
+            y: 172
+        # Карточка самолёта: открывается касанием по нему, касание по
+        # карточке — закрыть. Рамка — цветом высоты
+        - obj:
+            id: radar_card
+            align: CENTER
+            width: 310
+            height: SIZE_CONTENT
+            radius: 24
+            bg_color: 0x14181D
+            bg_opa: 92%
+            border_width: 3
+            border_color: 0x5AC8FA
+            pad_all: 16
+            hidden: true
+            clickable: true
+            scrollable: false
+            layout:
+              type: flex
+              flex_flow: COLUMN
+              flex_align_main: CENTER
+              flex_align_cross: CENTER
+              flex_align_track: CENTER
+              pad_row: 6
+            widgets:
+              - label:
+                  id: radar_card_title
+                  text: ""
+                  text_font: font_m
+                  text_color: 0xFFFFFF
+              - label:
+                  id: radar_card_body
+                  text: ""
+                  text_font: font_s
+                  text_color: 0xC8D4E0
+                  text_align: CENTER
+

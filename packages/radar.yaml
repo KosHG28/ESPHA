@@ -1,0 +1,78 @@
+# ---------------------------------------------------------------------------
+# Страница «Радар»: самолёты вокруг дома на тёмной карте с городами.
+#
+# Данные отдаёт свой сервер в Docker — server/radar (как поставить — в
+# README, «Радар самолётов»). Самолёты он берёт из FlightRadar24 и сразу
+# переводит в пиксели экрана, а карту склеивает из тайлов CartoDB под нужный
+# радиус и подписывает города по-русски. Адрес сервера — radar_url в
+# espha.yaml. Страница включается выключателем «Страница радара» в HA.
+#
+# На экране:
+#   - кольца дальности с километрами, стороны света, дом в центре;
+#   - самолёты силуэтом по курсу, цветом по высоте (голубой — низко, дальше
+#     зелёный, жёлтый, оранжевый, красный — выше 11 км), с маршрутом рядом и
+#     хвостом, откуда прилетел; между обновлениями (раз в 8 с) летят плавно;
+#   - красные точки на ободе — самолёты за пределами круга;
+#   - внизу — ближайший к дому самолёт.
+# Касание по самолёту — карточка: позывной, тип, авиакомпания, маршрут,
+# высота, скорость, расстояние. Свайп вверх — ближе (25 / 50 / 100 / 200 км),
+# вниз — дальше.
+#
+# Пока страница не на экране, плата сервер не опрашивает.
+# ---------------------------------------------------------------------------
+
+radar:
+  id: radar_comp
+  url: ${radar_url}
+  update_interval: 8s
+
+image:
+  # Карта под текущий радиус — JPEG 466×466 с сервера; хранится в PSRAM
+  - platform: online_image
+    id: radar_map_img
+    url: "${radar_url}/map.jpg?r=100"
+    format: JPEG
+    type: RGB565
+    update_interval: never
+    on_download_finished:
+      - lvgl.image.update:
+          id: radar_map
+          src: radar_map_img
+    on_error:
+      - logger.log:
+          level: WARN
+          format: "Не удалось скачать карту радара"
+
+switch:
+  - platform: template
+    id: sw_page_radar
+    name: Страница радара
+    icon: mdi:radar
+    entity_category: config
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    on_turn_on:
+      - script.execute: layout_dots
+    on_turn_off:
+      - script.execute: layout_dots
+
+interval:
+  - interval: 500ms
+    then:
+      - lambda: |-
+          static bool bound = false;
+          if (!bound) {
+            bound = true;
+            id(radar_comp)->bind(id(radar_view), id(radar_status), id(radar_title), id(radar_card), id(radar_card_title),
+                            id(radar_card_body), id(font_radar)->get_lv_font());
+          }
+          // Запросы к серверу — только пока страница на экране
+          id(radar_comp)->set_active(id(current_page) == 4 && !id(screen_off));
+      # Радиус сменился или страницу открыли впервые — новая карта
+      - if:
+          condition:
+            lambda: 'return id(radar_comp)->take_map_request();'
+          then:
+            - online_image.set_url:
+                id: radar_map_img
+                url: !lambda 'return id(radar_comp)->map_url();'

@@ -145,6 +145,18 @@ touchscreen:
       - lambda: |-
           id(touch_active) = false;
           id(touch_release_ms) = millis();
+      # Радар: свайп вверх — ближе, вниз — дальше
+      - if:
+          condition:
+            lambda: |-
+              if (id(touch_woke) || id(current_page) != 4)
+                return false;
+              int dx = id(swipe_dx), dy = id(swipe_dy);
+              int adx = dx < 0 ? -dx : dx;
+              int ady = dy < 0 ? -dy : dy;
+              return ady >= ${swipe_threshold} && ady > adx;
+          then:
+            - lambda: 'id(radar_comp)->zoom(id(swipe_dy) < 0 ? -1 : 1);'
       - if:
           condition:
             lambda: |-

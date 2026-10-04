@@ -1,0 +1,18 @@
+services:
+  radar:
+    build: .
+    container_name: espha-radar
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      # Центр радара — ваш дом (те же координаты, что home_latitude /
+      # home_longitude в espha.yaml)
+      CENTER_LAT: "55.7558"
+      CENTER_LON: "37.6173"
+      # Яркость карты: 1.0 — как у CartoDB, больше — светлее
+      MAP_BRIGHTNESS: "1.15"
+      TZ: Europe/Moscow
+    volumes:
+      # Кэш тайлов и готовых карт — чтобы не качать их заново после перезапуска
+      - ./data:/data

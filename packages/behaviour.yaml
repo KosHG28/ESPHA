@@ -4,7 +4,7 @@
 # ---------------------------------------------------------------------------
 
 globals:
-  # Номер страницы на экране: 0 часы, 1 дом, 2 принтер, 3 устройство.
+  # Номер страницы на экране: 0 часы, 1 дом, 2 принтер, 3 устройство, 4 радар.
   # По нему анимации понимают, видно ли их вообще.
   - id: current_page
     type: int
@@ -28,9 +28,9 @@ script:
       - lambda: |-
           id(current_page) = idx;
           // Активная точка — цветом страницы, остальные тёмные
-          static const uint32_t ACCENT[4] = {0x5AC8FA, 0x2DD4BF, 0x22DD44, 0x9AA4AE};
-          lv_obj_t *dots[4] = {id(dot_1), id(dot_2), id(dot_3), id(dot_4)};
-          for (int i = 0; i < 4; i++)
+          static const uint32_t ACCENT[5] = {0x5AC8FA, 0x2DD4BF, 0x22DD44, 0x9AA4AE, 0x00E676};
+          lv_obj_t *dots[5] = {id(dot_1), id(dot_2), id(dot_3), id(dot_4), id(dot_5)};
+          for (int i = 0; i < 5; i++)
             lv_obj_set_style_bg_color(dots[i], lv_color_hex(i == idx ? ACCENT[i] : 0x33383E), 0);
       - script.execute: dots_autohide
 
@@ -49,15 +49,17 @@ script:
           id(page_home)->skip = !id(sw_page_climate).state;
           id(page_printer)->skip = !id(sw_page_printer).state;
           id(page_system)->skip = !id(sw_page_system).state;
-          lv_obj_t *dots[4] = {id(dot_1), id(dot_2), id(dot_3), id(dot_4)};
-          bool on[4] = {true, id(sw_page_climate).state, id(sw_page_printer).state, id(sw_page_system).state};
+          id(page_radar)->skip = !id(sw_page_radar).state;
+          lv_obj_t *dots[5] = {id(dot_1), id(dot_2), id(dot_3), id(dot_4), id(dot_5)};
+          bool on[5] = {true, id(sw_page_climate).state, id(sw_page_printer).state, id(sw_page_system).state,
+                        id(sw_page_radar).state};
           int n = 0;
-          for (int i = 0; i < 4; i++)
+          for (int i = 0; i < 5; i++)
             if (on[i]) n++;
           // Дуга радиусом 188 px от центра экрана, шаг 12°; контейнер точек
           // стоит на 180 px ниже центра
           int k = 0;
-          for (int i = 0; i < 4; i++) {
+          for (int i = 0; i < 5; i++) {
             if (!on[i]) {
               lv_obj_add_flag(dots[i], LV_OBJ_FLAG_HIDDEN);
               continue;
@@ -74,7 +76,7 @@ script:
             lambda: |-
               int p = id(current_page);
               return (p == 1 && id(page_home)->skip) || (p == 2 && id(page_printer)->skip) ||
-                     (p == 3 && id(page_system)->skip);
+                     (p == 3 && id(page_system)->skip) || (p == 4 && id(page_radar)->skip);
           then:
             - lvgl.page.show:
                 id: page_clock

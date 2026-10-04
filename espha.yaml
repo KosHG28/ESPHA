@@ -132,6 +132,11 @@ substitutions:
   # Поилка кота: «off» — воды нет. Тогда поверх экрана горит значок
   pet_water_entity: binary_sensor.mmgg_s1_346f0_que_shui_1_you_shui
 
+  # Сервер радара самолётов в Docker (server/radar, см. README). Адрес без
+  # «/» на конце. Пока сервер не запущен, оставьте как есть и не включайте
+  # «Страница радара» в Home Assistant
+  radar_url: "http://192.168.1.10:8080"
+
   # Координаты дома для созвездий на ночном небе — пока Home Assistant не
   # прислал свои (из зоны «Дом»). Градусы, восточная долгота — плюс
   home_latitude: "55.75"
@@ -208,7 +213,7 @@ esphome:
 # репозитория в Home Assistant он искал бы /config/esphome/components.
 external_components:
   - source: github://koshg28/ESPHA@main
-    components: [ft3168, weather_fx, critters]
+    components: [ft3168, weather_fx, critters, radar]
 
 packages:
   hardware: !include packages/hardware.yaml
@@ -225,6 +230,7 @@ packages:
   pets: !include packages/pets.yaml
   gestures: !include packages/gestures.yaml
   ota_screen: !include packages/ota_screen.yaml
+  radar: !include packages/radar.yaml
   behaviour: !include packages/behaviour.yaml
 
 logger:
