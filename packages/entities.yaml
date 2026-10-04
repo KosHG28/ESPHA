@@ -66,7 +66,8 @@ script:
           last_h = now.hour;
           last_m = now.minute;
           // Часы убраны в режиме ожидания — не показывать новую цифру
-          if (id(screen_off) || id(current_page) != 0 || id(clock_hidden) || !id(sw_clock).state)
+          if (id(screen_off) || id(current_page) != 0 || id(clock_hidden) || !id(sw_clock).state ||
+              id(clock_style).active_index().value_or(0) == 0)
             return;
           auto fade_in = [](lv_obj_t *o) {
             lv_anim_delete(o, nullptr);

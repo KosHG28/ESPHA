@@ -82,6 +82,20 @@ number:
     on_value:
       - script.execute: power_eval
 
+select:
+  # Вид страницы часов. «Небо» — и днём так же, как в ожидании: без цифр
+  # времени, погода на улице слева по центру, небо на весь круг (созвездие,
+  # планеты, солнце с лучами). «Часы» — прежний вид с крупным временем
+  - platform: template
+    id: clock_style
+    name: Вид страницы часов
+    icon: mdi:weather-night
+    entity_category: config
+    options: ["Небо", "Часы"]
+    initial_option: "Небо"
+    optimistic: true
+    restore_value: true
+
 switch:
   # В режиме ожидания: экран на обычной яркости, погодные эффекты горят
   # в полную силу, а надписи на часах — полупрозрачные, чтобы выглядели так же
@@ -397,7 +411,11 @@ script:
     then:
       - lambda: |-
           id(clock_hidden) = !show;
-          enum Kind : uint8_t { PLAIN, DIGITS, OUTSIDE };
+          // «Небо» — и в активном режиме всё как в ожидании: без цифр и
+          // нижних строк; значок двери и огонёк намёка — только в активном
+          const bool sky = id(clock_style).active_index().value_or(0) == 0;
+          const bool active = show;
+          enum Kind : uint8_t { PLAIN, DIGITS, OUTSIDE, EXTRA };
           struct Step {
             lv_obj_t *obj;
             int dx, dy;
@@ -409,8 +427,8 @@ script:
               {id(lbl_time_m), 26, 0, 40, 240, DIGITS},
               {id(lbl_binary), 0, 0, 40, 240, DIGITS},
               {lv_obj_get_parent(id(lbl_slot1)), 0, -16, 150, 150, OUTSIDE},
-              {id(lbl_door), 0, -16, 150, 150, PLAIN},
-              {id(lbl_hint), 0, 0, 200, 0, PLAIN},
+              {id(lbl_door), 0, -16, 150, 150, EXTRA},
+              {id(lbl_hint), 0, 0, 200, 0, EXTRA},
               {id(lbl_wstatus), 0, 14, 220, 100, PLAIN},
               {id(lbl_sun), 0, 14, 280, 50, PLAIN},
               {id(lbl_slot2), 0, 14, 340, 0, PLAIN},
@@ -420,11 +438,13 @@ script:
           const bool instant = id(current_page) != 0;
           for (size_t i = 0; i < sizeof(steps) / sizeof(steps[0]); i++) {
             const Step &st = steps[i];
-            bool want = show;
+            bool want = active && !sky;
             if (st.kind == DIGITS && !id(sw_clock).state)
               want = false;
             if (st.kind == OUTSIDE)
               want = true;
+            if (st.kind == EXTRA)
+              want = active;
             if (shown[i] == want && !(force && want))
               continue;
             shown[i] = want;
@@ -465,8 +485,9 @@ script:
           // Params::full)
           lv_obj_t *row = lv_obj_get_parent(id(lbl_slot1));
           static int32_t rx0, ry0, rx1, ry1;
-          const int32_t x1 = show ? 0 : -140;
-          const int32_t y1 = !show ? 0 : (id(sw_clock).state ? -100 : -12);
+          const bool left = !active || sky;
+          const int32_t x1 = left ? -140 : 0;
+          const int32_t y1 = left ? 0 : (id(sw_clock).state ? -100 : -12);
           const int32_t x0 = lv_obj_get_x_aligned(row), y0 = lv_obj_get_y_aligned(row);
           lv_anim_delete(&rx0, nullptr);
           if (force || instant) {
@@ -482,7 +503,7 @@ script:
             lv_anim_set_values(&a, 0, 256);
             lv_anim_set_duration(&a, 700);
             // В ожидание — когда цифры начали уходить; обратно — сразу
-            lv_anim_set_delay(&a, show ? 0 : 200);
+            lv_anim_set_delay(&a, left ? 200 : 0);
             lv_anim_set_path_cb(&a, lv_anim_path_ease_in_out);
             lv_anim_set_exec_cb(&a, [](void *, int32_t v) {
               lv_obj_set_pos(lv_obj_get_parent(id(lbl_slot1)), rx0 + (rx1 - rx0) * v / 256, ry0 + (ry1 - ry0) * v / 256);
@@ -490,8 +511,8 @@ script:
             lv_anim_start(&a);
           }
 
-  # «Часы на экране» переключили: цифры уходят или возвращаются, погода на
-  # улице переезжает в центр или обратно наверх
+  # «Часы на экране» или «Вид страницы часов» переключили: цифры уходят или
+  # возвращаются, погода на улице переезжает
   - id: clock_layout
     mode: restart
     then:
@@ -622,7 +643,7 @@ interval:
     then:
       - lambda: |-
           static int last = -1;
-          const int on = id(sw_clock).state ? 1 : 0;
+          const int on = (id(sw_clock).state ? 1 : 0) | (id(clock_style).active_index().value_or(0) << 1);
           if (on == last)
             return;
           last = on;
