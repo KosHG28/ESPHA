@@ -1,0 +1,250 @@
+# ---------------------------------------------------------------------------
+# Взрослый юмор, романтика и розыгрыш.
+#
+# «Романтика» (выключатель в HA — удобно включать из сцены): экран
+# приглушается и не гаснет, по нижнему краю горят свечи (weather_fx), кот
+# прибегает, смущается — «ой…» — и тактично уходит, а у верхнего края
+# повисает табличка «Не беспокоить». Гости, пока режим включён, не приходят.
+# Через 3 часа режим выключается сам.
+#
+# «Взрослый юмор» (выключатель в HA):
+#   - обиженный кот: если плату не трогали «Кот обижается без касаний через»
+#     часов (а дома кто-то есть и не ночь), кот приходит и показывает лапой
+#     неприличный жест — лапа под цензурной мозаикой. Касание — и он делает
+#     вид, что просто чесался. Не чаще раза в 20 часов;
+#   - тайный намёк: справа на часах тусклый огонёк. Касание — огонёк
+#     вспыхивает, а Home Assistant получает событие esphome.espha_hint.
+#     Автоматизация в HA шлёт по нему уведомление второму человеку (пример —
+#     в README, «Взрослый юмор»). Не чаще раза в 30 секунд.
+#
+# «Розыгрыш 18+» (кнопка в HA): на весь экран «ГОРЯЧИЕ КИСКИ 18+», полоска
+# загрузки ползёт до 100 %, а потом — три котёнка и «Кисок заказывали?».
+# Касание или 10 секунд — и всё как было.
+# ---------------------------------------------------------------------------
+
+globals:
+  # «Романтика» включена: экран не гаснет и не меняет яркость от касаний
+  - id: romance_on
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  # Когда кот обижался в последний раз
+  - id: rude_last_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+  # Когда отправлен последний намёк
+  - id: hint_last_ms
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+  # Розыгрыш: 0 — нет, 1 — «загрузка», 2 — котята
+  - id: prank_stage
+    type: int
+    restore_value: false
+    initial_value: '0'
+
+switch:
+  - platform: template
+    id: sw_adult
+    name: Взрослый юмор
+    icon: mdi:emoticon-devil-outline
+    entity_category: config
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+
+  - platform: template
+    id: sw_romance
+    name: Романтика
+    icon: mdi:candle
+    optimistic: true
+    # Без восстановления: при загрузке выключатель не дёргает скрипты, пока
+    # экран ещё не создан, — после перезагрузки «Романтика» просто выключена
+    restore_mode: DISABLED
+    on_turn_on:
+      - script.execute: romance_start
+    on_turn_off:
+      - script.execute: romance_end
+
+number:
+  - platform: template
+    id: rude_hours
+    name: Кот обижается без касаний через
+    icon: mdi:emoticon-angry-outline
+    entity_category: config
+    unit_of_measurement: ч
+    min_value: 1
+    max_value: 48
+    step: 1
+    initial_value: 8
+    optimistic: true
+    restore_value: true
+
+button:
+  - platform: template
+    name: Розыгрыш 18+
+    icon: mdi:emoticon-wink-outline
+    on_press:
+      - script.execute: prank
+
+script:
+  # Включить «Романтику»: разбудить экран, открыть часы, приглушить, позвать
+  # смущённого кота и повесить табличку
+  - id: romance_start
+    mode: restart
+    then:
+      - if:
+          condition:
+            lambda: 'return id(nightlight_on);'
+          then:
+            - script.execute: nightlight_off
+      - lambda: 'id(romance_on) = false;'
+      - script.execute: wake_screen
+      - lvgl.page.show:
+          id: page_clock
+      - delay: 700ms
+      - script.stop: wake_screen
+      - lambda: |-
+          id(romance_on) = true;
+          id(screen_dimmed) = false;
+          id(crit)->set_quiet(true);
+          id(crit)->start_romance();
+          // Вполовину обычной яркости, но не темнее 15 % — свечи должны быть видны
+          const float pct = std::max(15.0f, id(screen_brightness).state * 0.5f);
+          id(fade_screen)->execute((int) (pct * 2.55f + 0.5f), 255, 2500);
+      # Кот ушёл — табличка проявляется
+      - delay: 6s
+      - lambda: |-
+          lv_obj_t *s = id(romance_sign);
+          lv_obj_move_foreground(s);
+          lv_obj_clear_flag(s, LV_OBJ_FLAG_HIDDEN);
+          lv_obj_fade_in(s, 900, 0);
+      - delay: 3h
+      - switch.turn_off: sw_romance
+
+  - id: romance_end
+    mode: single
+    then:
+      - script.stop: romance_start
+      - if:
+          condition:
+            lambda: 'return !id(romance_on) && lv_obj_has_flag(id(romance_sign), LV_OBJ_FLAG_HIDDEN);'
+          then:
+            - script.stop: romance_end
+      - lambda: |-
+          id(romance_on) = false;
+          id(crit)->set_quiet(false);
+          lv_obj_add_flag(id(romance_sign), LV_OBJ_FLAG_HIDDEN);
+      - script.execute: wake_screen
+
+  # Тайный намёк: огонёк вспыхивает, HA получает событие
+  - id: hint_send
+    mode: single
+    then:
+      - if:
+          condition:
+            lambda: |-
+              return id(sw_adult).state &&
+                     (id(hint_last_ms) == 0 || millis() - id(hint_last_ms) > 30000);
+          then:
+            - lambda: |-
+                id(hint_last_ms) = millis();
+                lv_obj_t *f = id(lbl_hint);
+                lv_obj_set_style_text_opa(f, LV_OPA_COVER, 0);
+                lv_obj_set_style_text_color(f, lv_color_hex(0xFF3D00), 0);
+            - homeassistant.event:
+                event: esphome.espha_hint
+                data:
+                  message: Кот намекает
+            - delay: 1500ms
+            - lambda: |-
+                lv_obj_t *f = id(lbl_hint);
+                lv_obj_set_style_text_opa(f, 89, 0);
+                lv_obj_set_style_text_color(f, lv_color_hex(0xFF7043), 0);
+
+  # Розыгрыш «18+»
+  - id: prank
+    mode: single
+    then:
+      - script.execute: wake_screen
+      - lambda: |-
+          id(prank_stage) = 1;
+          for (lv_obj_t *w : {id(prank_badge), id(prank_title), id(prank_status), id(prank_bar), id(prank_pct),
+                              id(prank_warn)})
+            lv_obj_clear_flag(w, LV_OBJ_FLAG_HIDDEN);
+          for (lv_obj_t *w : {id(prank_caption), id(prank_sub)})
+            lv_obj_add_flag(w, LV_OBJ_FLAG_HIDDEN);
+          lv_bar_set_value(id(prank_bar), 0, LV_ANIM_OFF);
+          lv_label_set_text(id(prank_pct), "0 %");
+          lv_label_set_text(id(prank_status), "Загрузка…");
+          lv_obj_t *o = id(prank_overlay);
+          lv_obj_move_foreground(o);
+          lv_obj_clear_flag(o, LV_OBJ_FLAG_HIDDEN);
+      # Полоска ползёт быстро, к концу всё медленнее, а на 97–99 % — тянет время
+      - repeat:
+          count: 100
+          then:
+            - lambda: |-
+                const int v = (int) iteration + 1;
+                lv_bar_set_value(id(prank_bar), v, LV_ANIM_OFF);
+                char buf[8];
+                snprintf(buf, sizeof(buf), "%d %%", v);
+                lv_label_set_text(id(prank_pct), buf);
+                if (v == 35)
+                  lv_label_set_text(id(prank_status), "Проверка возраста…");
+                else if (v == 70)
+                  lv_label_set_text(id(prank_status), "Снимаем всё лишнее…");
+                else if (v == 97)
+                  lv_label_set_text(id(prank_status), "Ещё чуть-чуть…");
+            - delay: !lambda 'return iteration < 60 ? 45 : (iteration < 95 ? 80 : 650);'
+      - delay: 400ms
+      # Котята!
+      - lambda: |-
+          id(prank_stage) = 2;
+          for (lv_obj_t *w : {id(prank_badge), id(prank_title), id(prank_status), id(prank_bar), id(prank_pct),
+                              id(prank_warn)})
+            lv_obj_add_flag(w, LV_OBJ_FLAG_HIDDEN);
+          for (lv_obj_t *w : {id(prank_caption), id(prank_sub)})
+            lv_obj_clear_flag(w, LV_OBJ_FLAG_HIDDEN);
+          id(crit)->kittens(true);
+      - delay: 10s
+      - script.execute: prank_end
+
+  - id: prank_end
+    mode: single
+    then:
+      - script.stop: prank
+      - lambda: |-
+          id(prank_stage) = 0;
+          id(crit)->kittens(false);
+          lv_obj_add_flag(id(prank_overlay), LV_OBJ_FLAG_HIDDEN);
+
+interval:
+  # Огонёк намёка виден только при «Взрослом юморе»
+  - interval: 1s
+    then:
+      - lambda: |-
+          const bool on = id(sw_adult).state;
+          lv_obj_t *f = id(lbl_hint);
+          if (on == lv_obj_has_flag(f, LV_OBJ_FLAG_HIDDEN)) {
+            if (on)
+              lv_obj_clear_flag(f, LV_OBJ_FLAG_HIDDEN);
+            else
+              lv_obj_add_flag(f, LV_OBJ_FLAG_HIDDEN);
+          }
+
+  # Обиженный кот: плату давно не трогали, дома кто-то есть, не ночь
+  - interval: 1min
+    then:
+      - lambda: |-
+          if (!id(sw_adult).state || id(screen_off) || id(is_night) || id(nobody_home) || id(romance_on) ||
+              id(prank_stage) || id(crit)->active())
+            return;
+          const uint32_t now = millis();
+          const uint32_t need = (uint32_t) (id(rude_hours).state * 3600000.0f);
+          if (now - id(touch_release_ms) < need)
+            return;
+          if (id(rude_last_ms) && now - id(rude_last_ms) < 20u * 3600000u)
+            return;
+          id(rude_last_ms) = now;
+          id(crit)->start_rude();

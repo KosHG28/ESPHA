@@ -230,6 +230,7 @@ packages:
   gestures: !include packages/gestures.yaml
   ota_screen: !include packages/ota_screen.yaml
   radar: !include packages/radar.yaml
+  adult: !include packages/adult.yaml
   behaviour: !include packages/behaviour.yaml
 
 logger:

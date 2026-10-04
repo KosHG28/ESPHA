@@ -129,6 +129,7 @@ font:
           - "\U000F1A45"   # mdi-heat-wave — стол
           - "\U000F0F58"   # mdi-layers-triple — слои
           - "\U000F0150"   # mdi-clock-outline — остаток времени
+          - "\U000F0238"   # mdi-fire — тайный намёк (packages/adult.yaml)
 
   # Подпись созвездия на ночном небе — только буквы из названий
   - file: "gfonts://Montserrat@400"
@@ -420,6 +421,153 @@ lvgl:
                 text_color: 0xFFFFFF
                 align: CENTER
                 y: 110
+                hidden: true
+
+      # «Романтика»: табличка «Не беспокоить» висит на гвоздике у верхнего
+      # края (packages/adult.yaml)
+      - obj:
+          id: romance_sign
+          width: 230
+          height: 86
+          align: TOP_MID
+          y: 4
+          bg_opa: TRANSP
+          border_width: 0
+          pad_all: 0
+          hidden: true
+          clickable: false
+          scrollable: false
+          widgets:
+            - line:
+                points: ["115, 8", "38, 42"]
+                line_width: 2
+                line_color: 0xC8A15A
+            - line:
+                points: ["115, 8", "192, 42"]
+                line_width: 2
+                line_color: 0xC8A15A
+            - obj:
+                x: 110
+                y: 3
+                width: 10
+                height: 10
+                radius: 5
+                bg_color: 0xFFD180
+                border_width: 0
+                clickable: false
+            - obj:
+                x: 20
+                y: 40
+                width: 190
+                height: 42
+                radius: 10
+                bg_color: 0x8E1B2E
+                bg_opa: COVER
+                border_width: 2
+                border_color: 0xFFD180
+                pad_all: 0
+                clickable: false
+                scrollable: false
+                widgets:
+                  - label:
+                      text: "Не беспокоить"
+                      text_font: font_s
+                      text_color: 0xFFF3E0
+                      align: CENTER
+
+      # Розыгрыш «18+»: «загрузка горячих кисок», а потом — котята
+      # (packages/adult.yaml). Котят добавляет компонент critters
+      - obj:
+          id: prank_overlay
+          width: 466
+          height: 466
+          align: CENTER
+          radius: 233
+          bg_color: 0x000000
+          bg_opa: COVER
+          border_width: 0
+          pad_all: 0
+          hidden: true
+          scrollable: false
+          on_click:
+            - if:
+                condition:
+                  lambda: 'return id(prank_stage) == 2;'
+                then:
+                  - script.execute: prank_end
+          widgets:
+            - label:
+                id: prank_badge
+                text: "18+"
+                text_font: font_l
+                text_color: 0xFFFFFF
+                bg_color: 0xD50000
+                bg_opa: COVER
+                radius: 36
+                pad_left: 16
+                pad_right: 16
+                pad_top: 8
+                pad_bottom: 8
+                align: CENTER
+                y: -125
+            - label:
+                id: prank_title
+                text: "ГОРЯЧИЕ КИСКИ"
+                text_font: font_l
+                text_color: 0xFF4D8D
+                align: CENTER
+                y: -55
+            - label:
+                id: prank_status
+                text: "Загрузка…"
+                text_font: font_s
+                text_color: 0xB0B0B0
+                align: CENTER
+                y: -8
+            - bar:
+                id: prank_bar
+                align: CENTER
+                y: 32
+                width: 300
+                height: 16
+                min_value: 0
+                max_value: 100
+                value: 0
+                bg_color: 0x2A2A2A
+                bg_opa: COVER
+                radius: 8
+                indicator:
+                  bg_color: 0xFF4D8D
+                  radius: 8
+            - label:
+                id: prank_pct
+                text: "0 %"
+                text_font: font_m
+                text_color: 0xFFFFFF
+                align: CENTER
+                y: 74
+            - label:
+                id: prank_warn
+                text: "Только для взрослых"
+                text_font: font_s
+                text_color: 0x777777
+                align: CENTER
+                y: 128
+            - label:
+                id: prank_caption
+                text: "Кисок заказывали?"
+                text_font: font_l
+                text_color: 0xFF4D8D
+                align: CENTER
+                y: -95
+                hidden: true
+            - label:
+                id: prank_sub
+                text: "А вы что подумали?"
+                text_font: font_m
+                text_color: 0xFFFFFF
+                align: CENTER
+                y: 112
                 hidden: true
 
       # Обновление прошивки: кольцо прогресса и процент (ota_screen.yaml)
@@ -760,6 +908,24 @@ lvgl:
                   text_color: 0xFFFFFF
                   align: CENTER
                   y: 140
+
+              # Тайный намёк: тусклый огонёк справа, только при «Взрослом
+              # юморе». Касание — HA получает событие esphome.espha_hint
+              # (packages/adult.yaml). Отступы — чтобы попасть пальцем
+              - label:
+                  id: lbl_hint
+                  text: "\U000F0238"
+                  text_font: font_icon
+                  text_color: 0xFF7043
+                  text_opa: 35%
+                  align: CENTER
+                  x: 184
+                  y: 52
+                  pad_all: 14
+                  hidden: true
+                  clickable: true
+                  on_click:
+                    - script.execute: hint_send
 
     # =====================================================================
     # Страница 2 — «Климат»: температура в комнате крупно, словом — как

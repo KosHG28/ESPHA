@@ -490,6 +490,8 @@ interval:
           p.plane = fx_sel == 15 ? 2 : (fx_sel != 1 && id(is_night) ? 1 : 0);
           if (fx_sel == 15)
             p.night = true;
+          // «Романтика» (packages/adult.yaml) — свечи по нижнему краю
+          p.candles = id(romance_on);
           id(wfx)->set_params(p);
           // Кот смотрит в небо — пусть пролетит метеор
           if (id(crit)->take_meteor())

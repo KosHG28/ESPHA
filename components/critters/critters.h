@@ -104,6 +104,20 @@ class Critters : public Component {
   /// блины, тыква, кот задом наперёд или просто кот в праздничной вещи
   void start_holiday_scene();
 
+  /// «Романтика»: кот прибегает, смущается («ой…») и тактично уходит.
+  /// quiet — пока режим включён, гости сами не приходят
+  void start_romance();
+  void set_quiet(bool quiet) { this->quiet_ = quiet; }
+
+  /// «Взрослый юмор»: кота давно не трогали — он обиделся и показывает
+  /// лапой неприличный жест под мозаикой. Касание — делает вид, что чесался
+  void start_rude();
+
+  /// Розыгрыш «18+»: три котёнка внутри карточки parent (packages/ui.yaml).
+  /// kittens(true) — показать и оживить, false — спрятать
+  void bind_kittens(lv_obj_t *parent);
+  void kittens(bool on);
+
   /// Кто-то коснулся экрана. Кот на экране замечает это: останавливается,
   /// садится, говорит «мяу» и бежит дальше. Спящий кот просыпается и убегает
   void poke();
@@ -136,6 +150,9 @@ class Critters : public Component {
     VAR_PANCAKES,  ///< Масленица: ест блины
     VAR_BLACK,     ///< пятница, 13-е: провожает взглядом чёрного кота
     VAR_HOT,       ///< жара: лежит пластом
+    VAR_ROMANCE,   ///< «Романтика»: смущается и уходит
+    VAR_RUDE,      ///< обиделся: неприличный жест под мозаикой
+    VAR_SCRATCH,   ///< застукали — делает вид, что чесался
   };
 
   void stop_();
@@ -147,7 +164,15 @@ class Critters : public Component {
   const lv_image_dsc_t *run_frame_(int f) const;
   static int rnd_(int lo, int hi);
 
+  void kittens_frame_(uint32_t now);
+
   Sprite img_, hat_, item_;
+  static const int NKIT = 3;
+  Sprite kit_[NKIT];
+  bool kit_on_{false};
+  uint32_t kit_t0_{0};
+  int kit_f_[NKIT]{};
+  bool quiet_{false};
   lv_obj_t *zzz_{nullptr};
   const char *said_{nullptr};
   bool festive_{false}, stars_{false}, meteor_req_{false}, meteor_sent_{false};

@@ -43,6 +43,7 @@ struct Params {
   bool dawn{false};       ///< зарево утреннее (розовое), иначе вечернее (оранжевое)
   bool heat{false};       ///< жара: марево над нижним краем
   int plane{0};           ///< самолёт ночью: 0 нет, 1 изредка, 2 часто (проверка)
+  bool candles{false};    ///< «Романтика»: свечи по нижнему краю
   // Для созвездия: где и когда смотрим на небо. utc 0 — время неизвестно
   float lat{NAN}, lon{NAN};  ///< градусы, восточная долгота — плюс
   uint32_t utc{0};           ///< секунды Unix
@@ -156,6 +157,7 @@ class WeatherFx : public Component {
   void frost_sparks_(uint32_t now);
   void heat_();
   void plane_(uint32_t now);
+  void candles_(uint32_t now);
   /// Показать слой погоды, если на нём хоть что-то есть
   void update_root_();
   void bstar_(uint32_t now);
@@ -167,7 +169,8 @@ class WeatherFx : public Component {
   /// Есть ли что рисовать сверх погоды: праздник, зарево, марево, самолёт
   bool extras_drawn_() const {
     return this->bstar_on_ || this->hol_ == HOL_COSMOS || this->hol_ == HOL_EASTER || this->ff_on_ ||
-           this->bats_on_ || this->mx_on_ || this->horizon_ > 0.01f || this->heat_on_ || this->plane_mode_;
+           this->bats_on_ || this->mx_on_ || this->horizon_ > 0.01f || this->heat_on_ || this->plane_mode_ ||
+           this->cnd_on_;
   }
 
   /// Перенести частицу: отметить к перерисовке старое и новое место
@@ -223,6 +226,12 @@ class WeatherFx : public Component {
   uint32_t air_t0_{0}, next_air_{0};
   float air_x_{0}, air_y_{0}, air_v_{0};
   Spot air_spot_{};
+  // «Романтика»: свечи по нижнему краю, пламя дрожит, вокруг тёплый ореол
+  static const int NCND = 5;
+  bool cnd_on_{false};
+  uint32_t cnd_ms_{0};
+  float cnd_fh_[NCND]{}, cnd_dx_[NCND]{}, cnd_glow_[NCND]{};
+  Spot cnd_spot_[NCND]{};
   int shake_{0};
   // Луна: фаза 0..1 (0 — новолуние, 0,5 — полнолуние), нарисована ли
   float moon_phase_{-1};

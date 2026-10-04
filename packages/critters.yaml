@@ -74,6 +74,8 @@ interval:
             lv_obj_add_flag(item, LV_OBJ_FLAG_HIDDEN);
             lv_obj_clear_flag(item, LV_OBJ_FLAG_CLICKABLE);
             id(crit)->bind(img, zzz, hat, item);
+            // Котята для розыгрыша «18+» (packages/adult.yaml)
+            id(crit)->bind_kittens(id(prank_overlay));
           }
           // Зима ли — достаточно проверять раз в минуту
           static bool winter = false;
@@ -100,7 +102,8 @@ select:
     id: guest_select
     name: Позвать гостя
     icon: mdi:paw
-    options: ["—", "Кот", "Птица", "Улитка", "Снеговик", "Сова", "Бабочка", "Ёжик", "Тыква", "Кот и мышь", "Чёрный кот"]
+    options: ["—", "Кот", "Птица", "Улитка", "Снеговик", "Сова", "Бабочка", "Ёжик", "Тыква", "Кот и мышь", "Чёрный кот",
+              "Обиженный кот"]
     initial_option: "—"
     optimistic: true
     on_value:
@@ -116,6 +119,8 @@ select:
                                              SHOW_BLACK_CAT};
                 if (i == 1)
                   id(crit)->start_cat();
+                else if (i == 11)
+                  id(crit)->start_rude();  // «Взрослый юмор», packages/adult.yaml
                 else if (i < sizeof(SHOWS) / sizeof(SHOWS[0]))
                   id(crit)->start(SHOWS[i]);
             - select.set:

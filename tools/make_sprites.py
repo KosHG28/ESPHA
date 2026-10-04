@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Рисует пиксельные спрайты «гостей» экрана (кот, птица, улитка, снеговик,
-сова, бабочка, ёжик, тыква, мышка, чёрный кот) и праздничные вещи кота
+сова, бабочка, ёжик, тыква, мышка, чёрный кот, котята для розыгрыша) и
+праздничные вещи кота
 (колпак, шапка Деда Мороза, пилотка, корона, шлем космонавта, ранец, зонтик,
 миска, кулич, блины, снежинка) и записывает их в components/critters/sprites.h
 как изображения LVGL (RGB565A8). Запуск: python3 tools/make_sprites.py [папка_для_png]
@@ -105,6 +106,31 @@ def cat_sit(blink=False, look=False, paw=False):
         d.point((21, 6), fill=NOSE)
     else:
         d.line([16, 13, 16, 15], fill=FUR)
+    return im
+
+
+# Цензурная мозаика: квадраты по 2×2 клетки в тонах шерсти и лапы
+MOSAIC = [FUR, FUR_D, BELLY, NOSE, (255, 190, 140, 255), (220, 120, 60, 255)]
+
+
+def cat_rude(variant):
+    """Обиженный кот показывает лапой неприличный жест, а лапа закрыта
+    мозаикой. variant 0/1 — два узора мозаики: они чередуются, и цензура
+    «шевелится», как в телевизоре."""
+    im = cat_sit(blink=True)
+    d = ImageDraw.Draw(im)
+    # Убрать опущенную переднюю лапу и поднять её вверх у морды
+    d.line([16, 13, 16, 15], fill=BELLY)
+    d.line([19, 12, 22, 5], fill=FUR)
+    d.line([20, 12, 23, 5], fill=FUR)
+    d.line([21, 12, 23, 6], fill=FUR_D)
+    # Брови домиком наоборот — кот недоволен
+    d.point((13, 3), fill=EYE)
+    d.point((18, 3), fill=EYE)
+    # Мозаика поверх кончика лапы
+    for i, (x, y) in enumerate([(20, 0), (22, 0), (24, 0), (20, 2), (22, 2), (24, 2), (20, 4), (22, 4), (24, 4)]):
+        c = MOSAIC[(i * 5 + variant * 3 + (i // 3) * variant) % len(MOSAIC)]
+        d.rectangle([x, y, x + 1, y + 1], fill=c)
     return im
 
 
@@ -435,6 +461,11 @@ def pancakes():
     return im
 
 
+# Котята для розыгрыша «18+»: серый и белый
+GRAY = {FUR: (150, 150, 160, 255), FUR_D: (105, 105, 115, 255), BELLY: (210, 210, 218, 255)}
+WHITE = {FUR: (240, 238, 232, 255), FUR_D: (190, 188, 182, 255), BELLY: (255, 255, 250, 255),
+         EYE: (40, 120, 210, 255)}
+
 # Чёрный кот для пятницы, 13-го: тот же бегущий кот, перекрашенный
 BLACK = {FUR: (46, 46, 56, 255), FUR_D: (24, 24, 30, 255), BELLY: (70, 70, 82, 255),
          EYE: (255, 214, 0, 255), NOSE: (150, 100, 120, 255)}
@@ -476,6 +507,8 @@ def cat_anchors():
         a[f"cat_drink_r{f}"] = pts
         a[f"cat_drink_l{f}"] = tuple(m(q) for q in pts)
     both("cat_flat", (21.5, 7), (21.0, 11.0), (11.0, 10.0), (18.5, 12.5))
+    for v in (0, 1):
+        both(f"cat_rude{v}", (16.0, 2), (15.5, 4.5), (8.0, 9.5), (15.0, 8.5))
     a["cat_sleep"] = ((20.0, 6), (19.0, 8.5), (10.0, 7.0), (16.5, 10.0))
     return a
 
@@ -598,6 +631,13 @@ def sprites():
     out["cat_sleep"] = cat_sleep()
     out["cat_flat_r"] = cat_flat()
     out["cat_flat_l"] = mirrored(cat_flat())
+    for v in (0, 1):
+        out[f"cat_rude{v}_r"] = cat_rude(v)
+        out[f"cat_rude{v}_l"] = mirrored(cat_rude(v))
+    for name, table in (("gray", GRAY), ("white", WHITE)):
+        # Смотрят влево — на рыжего котёнка рядом
+        out[f"kit_{name}"] = mirrored(recolor(cat_sit(), table))
+        out[f"kit_{name}_blink"] = mirrored(recolor(cat_sit(True), table))
     for f in (0, 1):
         out[f"cat_drink_r{f}"] = cat_drink(f == 1)
         out[f"cat_drink_l{f}"] = mirrored(cat_drink(f == 1))

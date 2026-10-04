@@ -42,8 +42,9 @@ static const int OFF_L = -CAT_W - 10, OFF_R = 476;  // за краем экра�
 static const int CENTER_X = 233 - CAT_W / 2;
 static const uint32_t MEOW_MS = 1600;  // сколько кот сидит и мяукает после касания
 // Сколько кот сидит посередине: просто так, ловя снежинку, глядя в небо, у
-// принтера, у миски, у кулича, над блинами, провожая чёрного кота, в жару
-static const uint32_t SIT_MS[9] = {3000, 4200, 4300, 6000, 5200, 5000, 5200, 4600, 6500};
+// принтера, у миски, у кулича, над блинами, провожая чёрного кота, в жару,
+// смущаясь в «Романтике», обидевшись и «почёсываясь»
+static const uint32_t SIT_MS[12] = {3000, 4200, 4300, 6000, 5200, 5000, 5200, 4600, 6500, 4200, 7000, 3200};
 
 int Critters::rnd_(int lo, int hi) { return lo + (int) (random_uint32() % (uint32_t) (hi - lo)); }
 
@@ -238,6 +239,64 @@ void Critters::start_drink() {
   this->variant_ = VAR_DRINK;
 }
 
+void Critters::start_romance() {
+  this->start(SHOW_CAT_VISIT);
+  this->variant_ = VAR_ROMANCE;
+}
+
+void Critters::start_rude() {
+  this->start(SHOW_CAT_VISIT);
+  this->variant_ = VAR_RUDE;
+}
+
+void Critters::bind_kittens(lv_obj_t *parent) {
+  for (auto &k : this->kit_) {
+    k.obj = lv_image_create(parent);
+    lv_obj_add_flag(k.obj, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(k.obj, LV_OBJ_FLAG_CLICKABLE);
+  }
+}
+
+void Critters::kittens(bool on) {
+  this->kit_on_ = on;
+  this->kit_t0_ = millis();
+  for (int i = 0; i < NKIT; i++) {
+    this->kit_f_[i] = -1;
+    this->kit_[i].show(on);
+  }
+  if (on)
+    this->kittens_frame_(this->kit_t0_);
+}
+
+void Critters::kittens_frame_(uint32_t now) {
+  // Рыжий, серый и белый котята сидят рядком, моргают невпопад и чуть
+  // подпрыгивают. Рыжий смотрит вправо, остальные — влево, на него
+  static const int K_KIT = 4;
+  static const int KX[NKIT] = {233 - 165, 233 - 52, 233 + 61}, KY = 233 - 8;
+  const uint32_t t = now - this->kit_t0_;
+  for (int i = 0; i < NKIT; i++) {
+    Sprite &k = this->kit_[i];
+    if (!k.obj)
+      continue;
+    const uint32_t ph = (t + i * 700) % 2300;
+    const bool blink = ph < 160;
+    const int hop = ((t + i * 400) % 1600) < 180 ? 6 : 0;
+    const int f = (blink ? 1 : 0) | (hop ? 2 : 0);
+    if (f == this->kit_f_[i])
+      continue;
+    this->kit_f_[i] = f;
+    const lv_image_dsc_t *img;
+    if (i == 0)
+      img = blink ? &spr_cat_blink_r : &spr_cat_sit_r;
+    else if (i == 1)
+      img = blink ? &spr_kit_gray_blink : &spr_kit_gray;
+    else
+      img = blink ? &spr_kit_white_blink : &spr_kit_white;
+    k.set(img, K_KIT);
+    lv_obj_set_pos(k.obj, KX[i], KY - hop);
+  }
+}
+
 void Critters::start_printer_visit() {
   this->start(SHOW_CAT_VISIT);
   this->variant_ = VAR_PRINTER;
@@ -311,6 +370,13 @@ void Critters::start_holiday_scene() {
 void Critters::poke() {
   if (!this->img_.obj)
     return;
+  // Застукали обиженного кота — он делает вид, что просто чесался
+  if (this->show_ == SHOW_CAT_VISIT && this->stage_ == 1 && this->variant_ == VAR_RUDE) {
+    this->variant_ = VAR_SCRATCH;
+    this->stage_t0_ = millis();
+    this->said_ = nullptr;
+    return;
+  }
   const bool cat = this->show_ == SHOW_CAT_RUN || this->show_ == SHOW_CAT_VISIT || this->show_ == SHOW_CAT_SLEEP;
   // Уже мяукает или ещё не выбежал на экран — не замечает
   if (!cat || (this->show_ == SHOW_CAT_VISIT && this->stage_ == 3))
@@ -473,6 +539,35 @@ void Critters::sit_(uint32_t st) {
       }
       break;
     }
+    case VAR_ROMANCE: {
+      // Прибежал, увидел, что происходит, смутился и тактично уходит
+      if (st > 300 && st < 1500)
+        img = look;
+      else if ((st > 1700 && st < 1850) || (st > 2300 && st < 2450))
+        img = blink;
+      this->say_(st > 500 && st < 2200 ? "ой…" : (st > 2600 ? "…ухожу" : nullptr));
+      break;
+    }
+    case VAR_RUDE: {
+      // Сначала молча смотрит, потом поднимает лапу — мозаика «шевелится»
+      if (st > 1400 && st < 6000) {
+        const bool v = (st / 250) % 2;
+        img = r ? (v ? &spr_cat_rude1_r : &spr_cat_rude0_r) : (v ? &spr_cat_rude1_l : &spr_cat_rude0_l);
+      } else if (st < 1400) {
+        img = blink;
+      }
+      this->say_(st > 300 && st < 1300 ? "хм." : (st > 1600 && st < 5800 ? "вот." : nullptr));
+      break;
+    }
+    case VAR_SCRATCH: {
+      // Чешет за ухом, как ни в чём не бывало
+      if (st < 2400)
+        img = (st / 180) % 2 ? paw : look;
+      else if (st > 2600 && st < 2750)
+        img = blink;
+      this->say_(st > 200 && st < 2800 ? "я чешусь" : nullptr);
+      break;
+    }
     case VAR_HOT: {
       // Жара: кот ложится пластом, высунув язык, и вздыхает
       img = r ? &spr_cat_flat_r : &spr_cat_flat_l;
@@ -541,9 +636,17 @@ void Critters::frame(bool can_show, bool night, bool winter) {
   this->winter_ = winter;
   const uint32_t now = millis();
 
+  if (this->kit_on_)
+    this->kittens_frame_(now);
+
   if (this->show_ == SHOW_NONE) {
     if ((int32_t) (now - this->next_) < 0)
       return;
+    if (this->quiet_) {
+      // «Романтика» — гости не беспокоят
+      this->next_ = now + 300000u;
+      return;
+    }
     if (!can_show) {
       // Экран погашен — попробуем через 5 минут
       this->next_ = now + 300000u;

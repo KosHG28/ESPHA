@@ -201,10 +201,11 @@ script:
   - id: wake_screen
     mode: restart
     then:
-      # Горит ночник — он сам решает, когда вернуть обычный экран
+      # Горит ночник или включена «Романтика» — они сами решают, когда
+      # вернуть обычный экран
       - if:
           condition:
-            lambda: 'return id(nightlight_on);'
+            lambda: 'return id(nightlight_on) || id(romance_on);'
           then:
             - script.stop: wake_screen
       # Разбудили посреди плавного гашения — не доводить его до конца
@@ -480,7 +481,7 @@ script:
           then:
             - if:
                 condition:
-                  lambda: 'return !id(wake_screen)->is_running() && !id(nightlight_on);'
+                  lambda: 'return !id(wake_screen)->is_running() && !id(nightlight_on) && !id(romance_on);'
                 then:
                   - script.execute: screen_sleep
       # Ночь кончилась или кто-то пришёл — включить

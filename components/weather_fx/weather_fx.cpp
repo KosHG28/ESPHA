@@ -129,6 +129,11 @@ static const int16_t ICICLES[][3] = {
 };
 // Самолёт: скорость, px/мс
 static const float AIR_SPEED = 0.022f;
+// Свечи «Романтики»: основание на дуге радиусом 200 px по низу круга, высота
+// у каждой своя; пламя — над фитилём
+static const int CND_X[5] = {75, 145, 233, 321, 391}, CND_Y[5] = {356, 413, 433, 413, 356};
+static const int CND_H[5] = {30, 38, 26, 36, 32};
+static const int CND_GLOW = 24;
 // «Матрица»: шаг столбцов и высота знака
 static const int MX_X0 = 45, MX_DX = 47, MX_STEP = 18;
 // Гирлянда: радиус, цвета лампочек
@@ -821,6 +826,69 @@ void WeatherFx::paint_front(lv_layer_t *layer) {
       }
       fill.opa = LV_OPA_COVER;
     }
+  }
+
+  // Свечи: тёплый ореол, восковое тело с бликом, фитиль и дрожащее пламя
+  if (this->cnd_on_) {
+    lv_draw_triangle_dsc_t ft;
+    lv_draw_triangle_dsc_init(&ft);
+    lv_draw_line_dsc_t wl;
+    lv_draw_line_dsc_init(&wl);
+    wl.width = 2;
+    wl.color = lv_color_hex(0x3A2A1A);
+    for (int i = 0; i < NCND; i++) {
+      if (!place(this->cnd_spot_[i]))
+        continue;
+      const int x = CND_X[i] + oc.x1, base = CND_Y[i] + oc.y1, top = base - CND_H[i];
+      const float fh = this->cnd_fh_[i], dx = this->cnd_dx_[i];
+      const int fy = top - 4 - (int) (fh * 0.5f);
+      fill.radius = LV_RADIUS_CIRCLE;
+      fill.color = lv_color_hex(0xFF9F43);
+      // Ореол — три круга друг в друге: к пламени теплее и ярче
+      static const int GR[3] = {CND_GLOW, 17, 10};
+      static const float GO[3] = {18.0f, 26.0f, 40.0f};
+      for (int k = 0; k < 3; k++) {
+        fill.opa = (lv_opa_t) (GO[k] * this->cnd_glow_[i]);
+        lv_area_t g = {x - GR[k], fy - GR[k], x + GR[k], fy + GR[k]};
+        lv_draw_fill(layer, &fill, &g);
+      }
+      lv_area_t b;
+      // Тело свечи
+      fill.radius = 3;
+      fill.opa = LV_OPA_COVER;
+      fill.color = lv_color_hex(0xF3E3C3);
+      b = {x - 6, top, x + 6, base};
+      lv_draw_fill(layer, &fill, &b);
+      fill.color = lv_color_hex(0xD6C29C);
+      b = {x + 3, top + 3, x + 5, base - 1};
+      lv_draw_fill(layer, &fill, &b);
+      fill.radius = LV_RADIUS_CIRCLE;
+      fill.color = lv_color_hex(0xFFF6E0);
+      b = {x - 6, top + 2, x - 3, top + 8};  // потёк воска
+      lv_draw_fill(layer, &fill, &b);
+      // Фитиль
+      wl.p1 = {(lv_value_precise_t) x, (lv_value_precise_t) top};
+      wl.p2 = {(lv_value_precise_t) (x + dx * 0.4f), (lv_value_precise_t) (top - 4)};
+      lv_draw_line(layer, &wl);
+      // Пламя: капля — овал и острый язычок сверху, внутри светлое ядро
+      const float cx = x + dx;
+      fill.color = lv_color_hex(0xFFA726);
+      fill.opa = 235;
+      b = {(int32_t) (cx - 4), (int32_t) (fy - fh * 0.25f), (int32_t) (cx + 4), (int32_t) (fy + fh * 0.5f)};
+      lv_draw_fill(layer, &fill, &b);
+      ft.color = lv_color_hex(0xFFA726);
+      ft.opa = 235;
+      ft.p[0] = {(lv_value_precise_t) (cx - 4), (lv_value_precise_t) (fy)};
+      ft.p[1] = {(lv_value_precise_t) (cx + 4), (lv_value_precise_t) (fy)};
+      ft.p[2] = {(lv_value_precise_t) (cx + dx * 1.5f), (lv_value_precise_t) (fy - fh * 0.75f)};
+      lv_draw_triangle(layer, &ft);
+      fill.color = lv_color_hex(0xFFF3C4);
+      fill.opa = LV_OPA_COVER;
+      b = {(int32_t) (cx - 2), (int32_t) (fy), (int32_t) (cx + 2), (int32_t) (fy + fh * 0.45f)};
+      lv_draw_fill(layer, &fill, &b);
+    }
+    fill.radius = 0;
+    fill.opa = LV_OPA_COVER;
   }
 
   // Марево в жару: волнистые струйки тёплого воздуха поднимаются и тают
@@ -2052,6 +2120,21 @@ void WeatherFx::plane_(uint32_t now) {
   this->mark_(this->air_spot_, true, x - 10, yy - 6, 21, 13);
 }
 
+void WeatherFx::candles_(uint32_t now) {
+  if (!this->cnd_on_ || now - this->cnd_ms_ < 70)
+    return;
+  this->cnd_ms_ = now;
+  // Пламя дрожит: высота, наклон и яркость ореола бродят понемногу
+  for (int i = 0; i < NCND; i++) {
+    this->cnd_fh_[i] = std::min(16.0f, std::max(10.0f, this->cnd_fh_[i] + rnd_(-15, 16) / 10.0f));
+    this->cnd_dx_[i] = std::min(1.6f, std::max(-1.6f, this->cnd_dx_[i] * 0.7f + rnd_(-10, 11) / 10.0f));
+    this->cnd_glow_[i] = std::min(1.0f, std::max(0.6f, this->cnd_glow_[i] + rnd_(-12, 13) / 100.0f));
+    const int x = CND_X[i], top = CND_Y[i] - CND_H[i];
+    lv_area_t a = {x - CND_GLOW - 1, top - 16 - CND_GLOW, x + CND_GLOW + 1, top + 18};
+    this->invalidate_(a);
+  }
+}
+
 void WeatherFx::update_root_() {
   show_(this->root_, this->nd_ || this->nf_ || this->ncl_ || this->storm_ || this->stars_on_ || this->sun_on_ ||
                          this->gar_on_ || this->fw_on_ || this->kite_mode_ || this->rainbow_on_ || this->frost_on_ ||
@@ -2589,6 +2672,18 @@ void WeatherFx::frame(const Params &p) {
     }
     this->update_root_();
   }
+  if (p.candles != this->cnd_on_) {
+    this->cnd_on_ = p.candles;
+    for (int i = 0; i < NCND; i++) {
+      this->cnd_fh_[i] = 13;
+      this->cnd_dx_[i] = 0;
+      this->cnd_glow_[i] = 0.8f;
+      const int x = CND_X[i], top = CND_Y[i] - CND_H[i];
+      this->mark_(this->cnd_spot_[i], p.candles, x - CND_GLOW - 1, top - 16 - CND_GLOW, 2 * CND_GLOW + 3,
+                  CND_Y[i] - top + 16 + CND_GLOW + 2);
+    }
+    this->update_root_();
+  }
   if (p.plane != this->plane_mode_) {
     this->plane_mode_ = p.plane;
     this->next_air_ = 0;
@@ -2635,6 +2730,7 @@ void WeatherFx::frame(const Params &p) {
   this->frost_sparks_(now);
   this->heat_();
   this->plane_(now);
+  this->candles_(now);
   this->meteor_(now);
   this->sun_(now);
   this->garland_(now);
