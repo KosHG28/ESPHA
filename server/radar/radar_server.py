@@ -25,6 +25,7 @@ import time
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import BytesIO
+import urllib.error
 import urllib.parse
 from urllib.parse import parse_qs, urlparse
 
@@ -410,6 +411,44 @@ def tile_bytes(style, z, x, y):
     return data
 
 
+LOGO_URL = os.environ.get("LOGO_URL", "https://raw.githubusercontent.com/sexym0nk3y/airline-logos/master/logos/{icao}.png")
+LOGO_MISS_TTL = 7 * 86400  # логотипа нет в наборе — спросить снова через неделю
+_logo_lock = threading.Lock()
+
+
+def logo_bytes(icao):
+    """Логотип авиакомпании по коду ИКАО — из data/logos или из набора на
+    GitHub. None — такого логотипа нет"""
+    icao = icao.upper()
+    if not (2 <= len(icao) <= 4 and icao.isascii() and icao.isalnum()):
+        return None
+    path = os.path.join(CACHE_DIR, "logos", f"{icao}.png")
+    miss = path + ".none"
+    with _logo_lock:
+        if os.path.exists(path):
+            with open(path, "rb") as f:
+                return f.read()
+        if os.path.exists(miss) and time.time() - os.path.getmtime(miss) < LOGO_MISS_TTL:
+            return None
+    req = urllib.request.Request(LOGO_URL.format(icao=icao), headers={"User-Agent": USER_AGENT})
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = resp.read()
+        Image.open(BytesIO(data)).verify()
+    except urllib.error.HTTPError as e:
+        if e.code == 404:  # в наборе нет — запомнить, чтобы не спрашивать каждый раз
+            open(miss, "wb").close()
+        return None
+    except Exception as e:  # noqa: BLE001  нет сети — попробуем в следующий раз
+        print(f"Логотип {icao}: {e}")
+        return None
+    with _logo_lock:
+        with open(path, "wb") as f:
+            f.write(data)
+    return data
+
+
 def tile(style, z, x, y):
     return Image.open(BytesIO(tile_bytes(style, z, x, y))).convert("RGB")
 
@@ -653,7 +692,7 @@ HTML_PAGE = """
             if (!icao) return null;
             if (!iconCache[icao]) {
                 const img = new Image();
-                img.src = `https://raw.githubusercontent.com/sexym0nk3y/airline-logos/master/logos/${icao}.png`;
+                img.src = `/logo/${encodeURIComponent(icao)}.png`;  // через сервер и его кэш
                 iconCache[icao] = img;
             }
             return iconCache[icao];
@@ -733,8 +772,19 @@ HTML_PAGE = """
                             hdg: p.hdg, data: p 
                         };
                     } else {
-                        planesState[p.id].vLat = (p.lat - planesState[p.id].currLat) / 8000;
-                        planesState[p.id].vLon = (p.lon - planesState[p.id].currLon) / 8000;
+                        // Далеко разошёлся с данными (больше ~5 км) — сразу на место
+                        // и дальше по курсу и скорости
+                        if (Math.abs(p.lat - planesState[p.id].currLat) > 0.05 || Math.abs(p.lon - planesState[p.id].currLon) > 0.08) {
+                            const speedKmh = (p.speed || 400) * 1.852;
+                            const hdgRad = (p.hdg * Math.PI) / 180.0;
+                            planesState[p.id].currLat = p.lat;
+                            planesState[p.id].currLon = p.lon;
+                            planesState[p.id].vLat = Math.cos(hdgRad) * speedKmh / 3600000 / 111.0;
+                            planesState[p.id].vLon = Math.sin(hdgRad) * speedKmh / 3600000 / (111.0 * Math.cos(CENTER_LAT * Math.PI/180.0));
+                        } else {
+                            planesState[p.id].vLat = (p.lat - planesState[p.id].currLat) / 8000;
+                            planesState[p.id].vLon = (p.lon - planesState[p.id].currLon) / 8000;
+                        }
                         
                         let diff = p.hdg - planesState[p.id].hdg;
                         diff = ((diff + 180) % 360) - 180;
@@ -754,7 +804,9 @@ HTML_PAGE = """
             const isDay = localConfig.theme === 'day';
             
             const now = performance.now();
-            const dt = now - lastFrameTime;
+            // Вкладку сворачивали — кадров не было; не двигаем самолёты на всё
+            // пропущенное время разом, иначе они улетают от своих хвостов
+            const dt = Math.min(now - lastFrameTime, 100);
             lastFrameTime = now;
             
             const gridHex = isDay ? 'rgba(120, 130, 140, 0.35)' : 'rgba(100, 120, 140, 0.3)';
@@ -881,6 +933,10 @@ HTML_PAGE = """
         }
 
         setInterval(fetchRadarData, 8000); 
+        // Вкладку развернули — сразу свежие данные
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden) { lastFrameTime = performance.now(); fetchRadarData(); }
+        });
         fetchRadarData();
         requestAnimationFrame(renderLoop); 
     </script>
@@ -944,6 +1000,12 @@ class RadarHandler(BaseHTTPRequestHandler):
             except Exception as e:  # noqa: BLE001
                 print(f"Тайл {url.path}: {e}")
                 self.reply(502, "text/plain", b"tile error")
+        elif url.path.startswith("/logo/") and url.path.endswith(".png"):
+            data = logo_bytes(url.path[6:-4])
+            if data:
+                self.reply(200, "image/png", data, "max-age=604800")
+            else:
+                self.reply(404, "text/plain", b"no logo", "max-age=86400")
         elif url.path == "/health":
             self.reply(200, "text/plain", b"ok")
         else:
