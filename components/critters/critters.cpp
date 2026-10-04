@@ -433,9 +433,9 @@ void Critters::sit_(uint32_t st) {
       // куда рыжий смотрит. Рыжий провожает его взглядом
       const uint32_t T0 = 400;
       if (st > T0 && this->item_.obj) {
-        static const lv_image_dsc_t *BR[4] = {&spr_black_run_r0, &spr_black_run_r1, &spr_black_run_r2,
+        static const lv_image_dsc_t *BLK_R[4] = {&spr_black_run_r0, &spr_black_run_r1, &spr_black_run_r2,
                                               &spr_black_run_r3};
-        static const lv_image_dsc_t *BL[4] = {&spr_black_run_l0, &spr_black_run_l1, &spr_black_run_l2,
+        static const lv_image_dsc_t *BLK_L[4] = {&spr_black_run_l0, &spr_black_run_l1, &spr_black_run_l2,
                                               &spr_black_run_l3};
         // Бежит навстречу взгляду рыжего: смотрит вправо — чёрный бежит справа налево
         const float d = BLACK_SPEED * (st - T0);
@@ -443,7 +443,7 @@ void Critters::sit_(uint32_t st) {
         const int f = (st / 80) % 4;
         const bool on = r ? this->bx_ > OFF_L : this->bx_ < OFF_R;
         if (on) {
-          this->item_.set(r ? BL[f] : BR[f], K_CAT);
+          this->item_.set(r ? BLK_L[f] : BLK_R[f], K_CAT);
           this->item_.pos((int) this->bx_, (int) this->y_);
           this->item_.show(true);
         } else {
