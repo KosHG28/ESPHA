@@ -60,7 +60,7 @@ class Radar : public Component {
   void zoom(int dir);
   int radius() const { return ZOOMS[this->zoom_idx_.load()]; }
   /// Адрес картинки карты для текущего радиуса
-  std::string map_url() const;
+  std::string map_url();
   /// Радиус сменился или страницу открыли впервые — пора скачать карту
   bool take_map_request() {
     bool r = this->map_req_;
@@ -77,6 +77,7 @@ class Radar : public Component {
 
  protected:
   static void task_fn(void *arg);
+  std::string url_copy_();
   void fetch_();
   void apply_(std::vector<Plane> &fresh, int r);
   void layout_labels_();

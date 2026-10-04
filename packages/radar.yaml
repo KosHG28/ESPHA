@@ -4,8 +4,9 @@
 # Данные отдаёт свой сервер в Docker — server/radar (как поставить — в
 # README, «Радар самолётов»). Самолёты он берёт из FlightRadar24 и сразу
 # переводит в пиксели экрана, а карту склеивает из тайлов CartoDB под нужный
-# радиус и подписывает города по-русски. Адрес сервера — radar_url в
-# espha.yaml. Страница включается выключателем «Страница радара» в HA.
+# радиус и подписывает города по-русски. Адрес сервера — «Адрес сервера
+# радара» в HA (по умолчанию radar_url из espha.yaml). Страница включается
+# выключателем «Страница радара» в HA.
 #
 # На экране:
 #   - кольца дальности с километрами, стороны света, дом в центре;
@@ -42,6 +43,22 @@ image:
       - logger.log:
           level: WARN
           format: "Не удалось скачать карту радара"
+
+text:
+  # Адрес сервера радара — меняется в Home Assistant без перепрошивки,
+  # например http://192.168.1.103:8088. По умолчанию — radar_url из espha.yaml
+  - platform: template
+    id: radar_url_text
+    name: Адрес сервера радара
+    icon: mdi:server-network
+    entity_category: config
+    mode: text
+    max_length: 100
+    optimistic: true
+    restore_value: true
+    initial_value: "${radar_url}"
+    on_value:
+      - lambda: 'id(radar_comp)->set_url(x);'
 
 switch:
   - platform: template

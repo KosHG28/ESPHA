@@ -22,12 +22,31 @@ static const size_t BODY_MAX = 32 * 1024;
 static const float BLEND_MS = 1500.0f;
 
 void Radar::set_url(const std::string &url) {
-  this->url_ = url;
-  while (!this->url_.empty() && this->url_.back() == '/')
-    this->url_.pop_back();
+  std::string u = url;
+  while (!u.empty() && (u.back() == '/' || u.back() == ' '))
+    u.pop_back();
+  while (!u.empty() && u.front() == ' ')
+    u.erase(0, 1);
+  {
+    std::lock_guard<std::mutex> lock(this->mtx_);
+    if (u == this->url_)
+      return;
+    this->url_ = u;
+    this->fails_ = 0;
+    this->fail_changed_ = true;
+  }
+  // Новый сервер — заново карта и самолёты
+  this->map_req_ = this->map_shown_;
+  if (this->task_)
+    xTaskNotifyGive(this->task_);
 }
 
-std::string Radar::map_url() const { return this->url_ + "/map.jpg?r=" + std::to_string(this->radius()); }
+std::string Radar::url_copy_() {
+  std::lock_guard<std::mutex> lock(this->mtx_);
+  return this->url_;
+}
+
+std::string Radar::map_url() { return this->url_copy_() + "/map.jpg?r=" + std::to_string(this->radius()); }
 
 void Radar::setup() {
   // Буфер ответа — в PSRAM: внутренней памяти на плате немного
@@ -73,7 +92,7 @@ void Radar::zoom(int dir) {
 void Radar::task_fn(void *arg) {
   auto *self = static_cast<Radar *>(arg);
   for (;;) {
-    if (!self->active_.load() || self->url_.empty() || !self->body_) {
+    if (!self->active_.load() || self->url_copy_().empty() || !self->body_) {
       ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(1000));
       continue;
     }
@@ -85,7 +104,7 @@ void Radar::task_fn(void *arg) {
 
 void Radar::fetch_() {
   const int r = this->radius();
-  const std::string url = this->url_ + "/esp?r=" + std::to_string(r);
+  const std::string url = this->url_copy_() + "/esp?r=" + std::to_string(r);
   esp_http_client_config_t cfg{};
   cfg.url = url.c_str();
   cfg.timeout_ms = 7000;
@@ -186,7 +205,7 @@ void Radar::bind(lv_obj_t *view, lv_obj_t *status, lv_obj_t *title, lv_obj_t *ca
     lv_label_set_text(title, buf);
   }
   if (status)
-    lv_label_set_text(status, this->url_.empty() ? "Сервер радара не задан" : "Загрузка…");
+    lv_label_set_text(status, this->url_copy_().empty() ? "Сервер радара не задан" : "Загрузка…");
   // Самолёты ползут медленно: 4 шага в секунду хватает с запасом
   lv_timer_create(tick_cb, 250, this);
 }
@@ -304,6 +323,10 @@ void Radar::layout_labels_() {
 void Radar::update_status_() {
   if (!this->status_)
     return;
+  if (this->url_copy_().empty()) {
+    lv_label_set_text(this->status_, "Сервер радара не задан");
+    return;
+  }
   if (this->fails_ >= 2) {
     lv_label_set_text(this->status_, "Нет связи с сервером радара");
     return;
