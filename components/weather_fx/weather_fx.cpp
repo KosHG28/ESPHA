@@ -78,13 +78,14 @@ static uint32_t glyph_cp(int set, int i) {
 static const int SUN_X = 300, SUN_Y = 74, SUN_R = 40;
 // Созвездие вписывается в «шапку» над строкой погоды: центр и размеры
 // прямоугольника, подпись — над ним. Когда часы убраны (режим ожидания) —
-// в большой прямоугольник посередине круга, под строкой погоды
+// в большой прямоугольник справа: слева по центру там погода на улице, над
+// ней луна
 struct SkyBox {
   float cx, cy, w, h;
-  int cap_y;
+  int cap_x, cap_y;
 };
-static const SkyBox BOX_TOP = {233.0f, 82.0f, 280.0f, 60.0f, 24};
-static const SkyBox BOX_FULL = {233.0f, 278.0f, 300.0f, 170.0f, 166};
+static const SkyBox BOX_TOP = {233.0f, 82.0f, 280.0f, 60.0f, 233, 24};
+static const SkyBox BOX_FULL = {300.0f, 236.0f, 210.0f, 250.0f, 300, 78};
 static SkyBox g_box = BOX_TOP;
 static const int CAP_W = 220;
 // Созвездие видно, если его середина не ниже 25° над горизонтом
@@ -1312,8 +1313,8 @@ void WeatherFx::apply_(const Params &p, bool relayout) {
       this->fph_[i] = rnd_(0, 628) / 100.0f;
     }
     // Звёзды — в верхней половине круга, вокруг и выше времени, но не на
-    // месте созвездия. Без часов — по всему кругу, кроме строки погоды,
-    // середины с созвездием и строки планет
+    // месте созвездия. Без часов — по всему кругу, кроме погоды слева,
+    // созвездия справа с подписью и строки планет
     this->nst_ = this->full_ ? NST : 12;
     for (int i = 0; i < this->nst_; i++) {
       int x, y;
@@ -1324,8 +1325,8 @@ void WeatherFx::apply_(const Params &p, bool relayout) {
         bad = (x - 233) * (x - 233) + (y - 233) * (y - 233) > 215 * 215 ||
               (std::abs(x - MOON_X) < MOON_R + 12 && std::abs(y - MOON_Y) < MOON_R + 12);
         if (this->full_)
-          bad = bad || (x > 125 && x < 341 && y > 100 && y < 186) ||  // строка погоды и подпись
-                (x > 70 && x < 396 && y > 186 && y < 372) ||            // созвездие
+          bad = bad || (x < 182 && y > 192 && y < 274) ||                // погода на улице
+                (x > 182 && x < 424 && y > 70 && y < 370) ||            // созвездие и подпись
                 (x > 75 && x < 391 && y > 388 && y < 428);              // планеты
         else
           bad = bad || x < 50 || x > 416 || (x > 82 && x < 372 && y > 22 && y < 122);
@@ -1858,7 +1859,7 @@ void WeatherFx::layout_con_(int idx, const float (*pts)[2], int n) {
     }
   }
   this->con_area_ = a;
-  this->cap_area_ = {233 - CAP_W / 2, g_box.cap_y, 233 + CAP_W / 2,
+  this->cap_area_ = {g_box.cap_x - CAP_W / 2, g_box.cap_y, g_box.cap_x + CAP_W / 2,
                      g_box.cap_y + lv_font_get_line_height(this->font_cap_)};
   this->con_on_ = true;
   this->invalidate_(this->con_area_);

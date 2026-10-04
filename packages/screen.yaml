@@ -460,23 +460,33 @@ script:
             });
             lv_anim_start(&a);
           }
-          // Погода на улице — наверху; без цифр днём — в центре. В ожидании
-          // всегда наверху: середина — небу (weather_fx, Params::full)
+          // Погода на улице: наверху; без цифр — в центре; в ожидании —
+          // слева по центру, а остальное небо — созвездию (weather_fx,
+          // Params::full)
           lv_obj_t *row = lv_obj_get_parent(id(lbl_slot1));
-          const int32_t y1 = (!id(sw_clock).state && show) ? -12 : -100;
-          const int32_t y0 = lv_obj_get_y_aligned(row);
-          lv_anim_delete(row, (lv_anim_exec_xcb_t) lv_obj_set_y);
+          static int32_t rx0, ry0, rx1, ry1;
+          const int32_t x1 = show ? 0 : -140;
+          const int32_t y1 = !show ? 0 : (id(sw_clock).state ? -100 : -12);
+          const int32_t x0 = lv_obj_get_x_aligned(row), y0 = lv_obj_get_y_aligned(row);
+          lv_anim_delete(&rx0, nullptr);
           if (force || instant) {
-            lv_obj_set_y(row, y1);
-          } else if (y0 != y1) {
+            lv_obj_set_pos(row, x1, y1);
+          } else if (x0 != x1 || y0 != y1) {
+            rx0 = x0;
+            ry0 = y0;
+            rx1 = x1;
+            ry1 = y1;
             lv_anim_t a;
             lv_anim_init(&a);
-            lv_anim_set_var(&a, row);
-            lv_anim_set_values(&a, y0, y1);
-            lv_anim_set_duration(&a, 600);
-            lv_anim_set_delay(&a, y1 == -12 ? 250 : 0);  // в центр — когда цифры ушли
+            lv_anim_set_var(&a, &rx0);
+            lv_anim_set_values(&a, 0, 256);
+            lv_anim_set_duration(&a, 700);
+            // В ожидание — когда цифры начали уходить; обратно — сразу
+            lv_anim_set_delay(&a, show ? 0 : 200);
             lv_anim_set_path_cb(&a, lv_anim_path_ease_in_out);
-            lv_anim_set_exec_cb(&a, (lv_anim_exec_xcb_t) lv_obj_set_y);
+            lv_anim_set_exec_cb(&a, [](void *, int32_t v) {
+              lv_obj_set_pos(lv_obj_get_parent(id(lbl_slot1)), rx0 + (rx1 - rx0) * v / 256, ry0 + (ry1 - ry0) * v / 256);
+            });
             lv_anim_start(&a);
           }
 
