@@ -11,8 +11,10 @@ https://github.com/JeanExtreme002/FlightRadarAPI) вокруг дома и от�
   /map.jpg?r=100  тёмная карта 466×466 с городами — фон страницы радара
   /health      проверка, что сервер жив
 
+  /tile/<стиль>/z/x/y  тайлы карты для веб-страницы — через сервер и его кэш
+
 Настройки — переменные окружения (см. docker-compose.yml): CENTER_LAT,
-CENTER_LON, PORT, CACHE_DIR, MAP_BRIGHTNESS, CITIES_FILE.
+CENTER_LON, PORT, CACHE_DIR, MAP_STYLE, MAP_BRIGHTNESS, CITIES_FILE.
 """
 
 import json
@@ -30,7 +32,7 @@ try:  # FlightRadarAPI 1.4+ — модуль FlightRadarAPI
 except ImportError:  # старые версии — модуль FlightRadar24
     from FlightRadar24 import FlightRadar24API
 
-from PIL import Image, ImageDraw, ImageEnhance, ImageFont
+from PIL import Image, ImageDraw, ImageEnhance, ImageFont, ImageOps
 
 CENTER_LAT = float(os.environ.get("CENTER_LAT", "55.7558"))
 CENTER_LON = float(os.environ.get("CENTER_LON", "37.6173"))
@@ -38,7 +40,8 @@ PORT = int(os.environ.get("PORT", "8080"))
 CACHE_DIR = os.environ.get("CACHE_DIR", "/data")
 MAP_BRIGHTNESS = float(os.environ.get("MAP_BRIGHTNESS", "1.15"))
 CITIES_FILE = os.environ.get("CITIES_FILE", os.path.join(os.path.dirname(os.path.abspath(__file__)), "cities.json"))
-TILE_URL = os.environ.get("TILE_URL", "https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}.png")
+MAP_STYLE = os.environ.get("MAP_STYLE", "dark")
+TILE_URL = os.environ.get("TILE_URL", "")  # свой источник тайлов {z}/{x}/{y} вместо MAP_STYLE
 FONT_FILE = os.environ.get("FONT_FILE", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf")
 
 # Экран платы: 466×466, круг дальности — 220 px от центра
@@ -216,47 +219,110 @@ def esp_payload(r_km):
 
 
 # ---------------------------------------------------------------------------
-# Карта: тёмные тайлы CartoDB без подписей, склеенные в картинку 466×466 под
-# нужный радиус, и свои подписи городов по-русски. Тайлы и готовые карты
-# кэшируются на диске
+# Карта: тайлы без ключей API, склеенные в картинку 466×466 под нужный
+# радиус, и свои подписи городов по-русски. Тайлы и готовые карты
+# кэшируются на диске.
+#
+# Стили (MAP_STYLE):
+#   dark      тёмно-серая Esri без подписей — по умолчанию
+#   sat       спутник Esri, притемнённый
+#   osm-dark  OpenStreetMap, перевёрнутая в тёмные тона
+#   osm       обычная светлая OpenStreetMap
+# Если тайлы стиля не качаются, карта собирается из osm-dark.
+
+ESRI = "https://server.arcgisonline.com/ArcGIS/rest/services/"
+OSM = "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+TILE_SOURCES = {
+    "dark": ESRI + "Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}",
+    "dark-ref": ESRI + "Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}",
+    "sat": ESRI + "World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    "sat-ref": ESRI + "Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
+    "osm": OSM,
+    "osm-dark": OSM,
+}
+if TILE_URL:
+    TILE_SOURCES["custom"] = TILE_URL
+    MAP_STYLE = "custom"
+# Яркость стиля на плате: спутник притемняем, чтобы самолёты были видны
+STYLE_BRIGHTNESS = {"sat": 0.6}
+# OpenStreetMap просит, чтобы программа представлялась
+USER_AGENT = "ESPHA-radar/1.0 (+https://github.com/KosHG28/ESPHA)"
 
 _map_lock = threading.Lock()
 _maps = {}
 
 
-def tile(z, x, y):
-    path = os.path.join(CACHE_DIR, "tiles", str(z), str(x), f"{y}.png")
+def _osm_dark(data):
+    """Светлую OSM — в тёмные синеватые тона: суша тёмная, вода чуть светлее"""
+    g = ImageOps.invert(ImageOps.grayscale(Image.open(BytesIO(data)).convert("RGB")))
+    img = ImageOps.colorize(g, black=(8, 11, 18), white=(175, 195, 220), mid=(40, 52, 70))
+    out = BytesIO()
+    img.save(out, "PNG")
+    return out.getvalue()
+
+
+def tile_bytes(style, z, x, y):
+    """Тайл как есть (PNG или JPEG) — из кэша или из сети"""
+    path = os.path.join(CACHE_DIR, "tiles", style, str(z), str(x), str(y))
     if os.path.exists(path):
-        return Image.open(path).convert("RGB")
-    url = TILE_URL.format(s="abcd"[(x + y) % 4], z=z, x=x, y=y)
-    req = urllib.request.Request(url, headers={"User-Agent": "ESPHA-radar/1.0"})
+        with open(path, "rb") as f:
+            return f.read()
+    url = TILE_SOURCES[style].format(s="abc"[(x + y) % 3], z=z, x=x, y=y)
+    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     with urllib.request.urlopen(req, timeout=15) as resp:
         data = resp.read()
+    Image.open(BytesIO(data)).verify()  # не картинка — ошибка, в кэш не кладём
+    if style == "osm-dark":
+        data = _osm_dark(data)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "wb") as f:
         f.write(data)
-    return Image.open(BytesIO(data)).convert("RGB")
+    return data
 
 
-def render_map(r_km):
+def tile(style, z, x, y):
+    return Image.open(BytesIO(tile_bytes(style, z, x, y))).convert("RGB")
+
+
+def render_map(r_km, style):
+    """Карта и как она собрана: "ok" — из своего стиля, "fallback" — из
+    osm-dark, потому что свой не качается, "holes" — не все тайлы на месте"""
+    img, ok = render_base(r_km, style)
+    if ok:
+        return label_cities(img, r_km), "ok"
+    if style != "osm-dark":
+        print(f"Карта {r_km} км: тайлы {style} не скачались, пробую osm-dark")
+        img2, ok2 = render_base(r_km, "osm-dark")
+        if ok2:
+            return label_cities(img2, r_km), "fallback"
+    return label_cities(img, r_km), "holes"
+
+
+def render_base(r_km, style):
     z, s = scale_for(r_km)
     cx, cy = merc(CENTER_LAT, CENTER_LON, z)
     span = W / s  # сколько пикселей тайлов на экран
     x0, y0 = cx - span / 2, cy - span / 2
     tx0, ty0 = int(x0 // 256), int(y0 // 256)
     tx1, ty1 = int((x0 + span) // 256), int((y0 + span) // 256)
-    canvas = Image.new("RGB", ((tx1 - tx0 + 1) * 256, (ty1 - ty0 + 1) * 256))
+    canvas = Image.new("RGB", ((tx1 - tx0 + 1) * 256, (ty1 - ty0 + 1) * 256), (18, 20, 24))
+    ok = True
     for tx in range(tx0, tx1 + 1):
         for ty in range(ty0, ty1 + 1):
             try:
-                canvas.paste(tile(z, tx, ty), ((tx - tx0) * 256, (ty - ty0) * 256))
+                canvas.paste(tile(style, z, tx, ty), ((tx - tx0) * 256, (ty - ty0) * 256))
             except Exception as e:  # noqa: BLE001
-                print(f"Тайл {z}/{tx}/{ty}: {e}")
+                ok = False
+                print(f"Тайл {style} {z}/{tx}/{ty}: {e}")
     left, top = x0 - tx0 * 256, y0 - ty0 * 256
     img = canvas.crop((int(left), int(top), int(left + span), int(top + span))).resize((W, W), Image.LANCZOS)
-    if MAP_BRIGHTNESS != 1.0:
-        img = ImageEnhance.Brightness(img).enhance(MAP_BRIGHTNESS)
+    k = MAP_BRIGHTNESS * STYLE_BRIGHTNESS.get(style, 1.0)
+    if k != 1.0:
+        img = ImageEnhance.Brightness(img).enhance(k)
+    return img, ok
 
+
+def label_cities(img, r_km):
     # Города: точка и название; ближние к центру — в первую очередь, без наложений
     draw = ImageDraw.Draw(img)
     try:
@@ -282,19 +348,26 @@ def render_map(r_km):
     return out.getvalue()
 
 
-def get_map(r_km):
+def get_map(r_km, style=None):
+    style = style if style in TILE_SOURCES and not style.endswith("-ref") else MAP_STYLE
+    key = (style, r_km)
     with _map_lock:
-        if r_km not in _maps:
-            path = os.path.join(CACHE_DIR, "maps", f"{CENTER_LAT:.4f}_{CENTER_LON:.4f}_{r_km}.jpg")
-            if os.path.exists(path):
-                with open(path, "rb") as f:
-                    _maps[r_km] = f.read()
-            else:
-                _maps[r_km] = render_map(r_km)
-                os.makedirs(os.path.dirname(path), exist_ok=True)
-                with open(path, "wb") as f:
-                    f.write(_maps[r_km])
-        return _maps[r_km]
+        if key in _maps:
+            return _maps[key]
+        path = os.path.join(CACHE_DIR, "maps", f"{style}_{CENTER_LAT:.4f}_{CENTER_LON:.4f}_{r_km}.jpg")
+        if os.path.exists(path):
+            with open(path, "rb") as f:
+                _maps[key] = f.read()
+            return _maps[key]
+        data, how = render_map(r_km, style)
+        if how == "fallback":  # до перезапуска; на диск — только из своего стиля
+            _maps[key] = data
+        elif how == "ok":  # с дырами не запоминаем — в следующий раз соберём заново
+            _maps[key] = data
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "wb") as f:
+                f.write(data)
+        return data
 
 
 # ---------------------------------------------------------------------------
@@ -336,7 +409,7 @@ HTML_PAGE = """
 <html>
 <head>
     <meta charset="utf-8">
-    <title>Радар PRO: CartoDB Display</title>
+    <title>Радар ESPHA</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     
@@ -385,7 +458,7 @@ HTML_PAGE = """
 </head>
 <body id="body">
     <div class="card">
-        <h2>ATC Terminal: CartoDB</h2>
+        <h2>ATC Terminal</h2>
         
         <div class="group">
             <label>Масштаб: <span id="radVal" class="val">200 км</span></label>
@@ -395,8 +468,10 @@ HTML_PAGE = """
         <div class="group">
             <label>Базовый навигационный слой:</label>
             <select id="theme" onchange="sendConfig()">
-                <option value="night">CartoDB Dark Matter</option>
-                <option value="day">CartoDB Voyager (Color)</option>
+                <option value="night">Тёмная (Esri)</option>
+                <option value="sat">Спутник (Esri)</option>
+                <option value="osm-dark">Тёмная (OpenStreetMap)</option>
+                <option value="day">Светлая (OpenStreetMap)</option>
             </select>
         </div>
         <hr>
@@ -437,10 +512,23 @@ HTML_PAGE = """
             attributionControl: false
         });
 
-        // Инициализируем единственный слой, который гарантирует стабильность загрузки тайлов
-        const mapLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { 
-            maxZoom: 20, className: 'carto-layer'
-        }).addTo(map);
+        // Тайлы без ключей API — через сервер радара, он их кэширует.
+        // Тема → [подложка, подписи поверх неё или null]
+        const TILE_STYLES = {
+            'night': ['dark', 'dark-ref'],
+            'sat': ['sat', 'sat-ref'],
+            'osm-dark': ['osm-dark', null],
+            'day': ['osm', null]
+        };
+        const tileUrl = (st) => '/tile/' + st + '/{z}/{x}/{y}';
+        const mapLayer = L.tileLayer(tileUrl('dark'), { maxZoom: 14, className: 'carto-layer' }).addTo(map);
+        const refLayer = L.tileLayer(tileUrl('dark-ref'), { maxZoom: 14 }).addTo(map);
+        function applyTiles(theme) {
+            const st = TILE_STYLES[theme] || TILE_STYLES['night'];
+            mapLayer.setUrl(tileUrl(st[0]));
+            if (st[1]) { refLayer.setUrl(tileUrl(st[1])); if (!map.hasLayer(refLayer)) refLayer.addTo(map); }
+            else if (map.hasLayer(refLayer)) map.removeLayer(refLayer);
+        }
 
         function updateMapBounds() {
             const rKm = localConfig.radius * (200.0 / 190.0); 
@@ -479,11 +567,8 @@ HTML_PAGE = """
             
             document.getElementById('body').className = localConfig.theme === 'day' ? 'day-mode' : '';
             
-            // Бесшовная смена URL слоя без разрушения карты
-            const newUrl = localConfig.theme === 'day' 
-                ? 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png'
-                : 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png';
-            mapLayer.setUrl(newUrl);
+            // Бесшовная смена слоя без разрушения карты
+            applyTiles(localConfig.theme);
             
             updateMapBounds();
             fetch('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(localConfig) });
@@ -731,7 +816,7 @@ class RadarHandler(BaseHTTPRequestHandler):
             self.reply(200, "application/json", json.dumps(esp_payload(r), ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
         elif url.path == "/map.jpg":
             try:
-                self.reply(200, "image/jpeg", get_map(r), "max-age=86400")
+                self.reply(200, "image/jpeg", get_map(r, q.get("s", [None])[0]), "max-age=86400")
             except Exception as e:  # noqa: BLE001
                 print(f"Ошибка карты: {e}")
                 self.reply(500, "text/plain", b"map error")
@@ -743,6 +828,21 @@ class RadarHandler(BaseHTTPRequestHandler):
                 planes.append(p)
             body = {"config": CONFIG, "planes": planes, "weather": get_real_weather()}
             self.reply(200, "application/json", json.dumps(body).encode("utf-8"))
+        elif url.path.startswith("/tile/"):
+            # /tile/<стиль>/z/x/y — тайлы для веб-страницы через кэш сервера
+            parts = url.path.split("/")
+            try:
+                style, z, x, y = parts[2], int(parts[3]), int(parts[4]), int(parts[5])
+                if style not in TILE_SOURCES or not 0 <= z <= 14:
+                    raise ValueError(style)
+                data = tile_bytes(style, z, x, y)
+                ctype = "image/jpeg" if data[:2] == b"\xff\xd8" else "image/png"
+                self.reply(200, ctype, data, "max-age=604800")
+            except (ValueError, IndexError):
+                self.reply(404, "text/plain", b"not found")
+            except Exception as e:  # noqa: BLE001
+                print(f"Тайл {url.path}: {e}")
+                self.reply(502, "text/plain", b"tile error")
         elif url.path == "/health":
             self.reply(200, "text/plain", b"ok")
         else:

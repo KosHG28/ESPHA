@@ -539,7 +539,8 @@ Assistant (там же — «Чёрный кот»).
 **Сервер.** Данные готовит свой сервер в Docker — [`server/radar`](server/radar).
 Он берёт самолёты из FlightRadar24 (библиотека
 [FlightRadarAPI](https://github.com/JeanExtreme002/FlightRadarAPI)), сразу
-переводит их в пиксели экрана и склеивает карту из тайлов CartoDB. В браузере
+переводит их в пиксели экрана и склеивает карту из тайлов Esri или
+OpenStreetMap — без ключей API. В браузере
 он показывает веб-радар. Как установить — в
 [`server/radar/README.md`](server/radar/README.md). Коротко:
 1. Запустить сервер: в Dockge — стек из

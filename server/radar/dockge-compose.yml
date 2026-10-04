@@ -30,7 +30,10 @@ services:
       # Центр радара — ваш дом
       CENTER_LAT: "55.7558"
       CENTER_LON: "37.6173"
-      # Яркость карты: 1.0 — как у CartoDB, больше — светлее
+      # Карта платы: dark — тёмная Esri, sat — спутник, osm-dark — тёмная
+      # OpenStreetMap, osm — светлая OpenStreetMap. Все без ключей API
+      MAP_STYLE: "dark"
+      # Яркость карты: 1.0 — как у источника, больше — светлее
       MAP_BRIGHTNESS: "1.15"
       TZ: Europe/Moscow
     volumes:
