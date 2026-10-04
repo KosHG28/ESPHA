@@ -13,11 +13,13 @@ FreeRTOS, чтобы сеть не тормозила экран. Положен
 
 import esphome.codegen as cg
 import esphome.config_validation as cv
-from esphome.const import CONF_ID, CONF_UPDATE_INTERVAL, CONF_URL
+from esphome.const import CONF_ID, CONF_URL
 
 CODEOWNERS = ["@koshg28"]
 DEPENDENCIES = ["lvgl"]
 AUTO_LOAD = ["json"]
+
+CONF_FETCH_INTERVAL = "fetch_interval"
 
 radar_ns = cg.esphome_ns.namespace("radar")
 Radar = radar_ns.class_("Radar", cg.Component)
@@ -27,7 +29,7 @@ CONFIG_SCHEMA = cv.Schema(
         cv.GenerateID(): cv.declare_id(Radar),
         cv.Required(CONF_URL): cv.string,
         cv.Optional(
-            CONF_UPDATE_INTERVAL, default="8s"
+            CONF_FETCH_INTERVAL, default="8s"
         ): cv.positive_time_period_milliseconds,
     }
 ).extend(cv.COMPONENT_SCHEMA)
@@ -37,4 +39,4 @@ async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
     cg.add(var.set_url(config[CONF_URL]))
-    cg.add(var.set_interval(config[CONF_UPDATE_INTERVAL]))
+    cg.add(var.set_interval(config[CONF_FETCH_INTERVAL]))

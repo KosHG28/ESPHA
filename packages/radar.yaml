@@ -24,7 +24,7 @@
 radar:
   id: radar_comp
   url: ${radar_url}
-  update_interval: 8s
+  fetch_interval: 8s
 
 image:
   # Карта под текущий радиус — JPEG 466×466 с сервера; хранится в PSRAM
