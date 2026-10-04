@@ -320,14 +320,42 @@ script:
             const bool strong = (!std::isnan(ws) && ws >= 9.0f) || (!std::isnan(wg) && wg >= 14.0f);
             cnt = sel == 8 || strong ? 14 : 10;
           }
-          // 14 февраля вместо пустого неба всплывают сердечки
-          const bool valentine = now.is_valid() && now.month == 2 && now.day_of_month == 14;
+          // 14 февраля вместо пустого неба всплывают сердечки (если праздники
+          // не выключены — «Праздники: Все»)
+          const bool all_hol = id(holiday_mode_select).active_index().value_or(0) == 0;
+          const bool valentine = all_hol && now.is_valid() && now.month == 2 && now.day_of_month == 14;
           if (sel == 9 || (sel == 0 && mode == 0 && dry && valentine)) {
             mode = 6;
             cnt = 12;
             // Сердечки — на тёмном фоне: ночное небо (звёзды, созвездие,
             // луна, планеты) с ними только мешает
             id(weather_stars) = false;
+          }
+          // Праздники (packages/holidays.yaml): вместо пустого неба 8 Марта
+          // падают тюльпаны и мимоза, 1 июня всплывают шарики, 1 сентября
+          // падают кленовые листья. При «Показать праздник» — в любую погоду
+          using namespace weather_fx;
+          const int hol = id(holiday);
+          const bool preview = id(hol_preview) != 0;
+          if ((hol == HOL_MAR8 || hol == HOL_CHILDREN || hol == HOL_SEPT1) && sel != 1 &&
+              (preview || (sel == 0 && mode == 0 && dry))) {
+            mode = hol == HOL_MAR8 ? 7 : (hol == HOL_CHILDREN ? 8 : 9);
+            cnt = 12;
+            if (preview) {
+              clouds = 0;
+              storm = false;
+            }
+          }
+          // Проверка ночных праздников днём: показать ясное ночное небо
+          if (preview && sel != 1 &&
+              (hol == HOL_METEORS || hol == HOL_FULL_MOON || hol == HOL_SUPERMOON || hol == HOL_ECLIPSE ||
+               hol == HOL_HALLOWEEN || hol == HOL_KUPALA)) {
+            id(weather_stars) = true;
+            id(weather_sun) = false;
+            mode = 0;
+            cnt = 0;
+            clouds = 0;
+            storm = false;
           }
           // Воздушный змей — ясным ветреным днём, изредка
           id(weather_kite) = sel == 10 ? 2 : (sel == 0 && id(weather_sun) && windy ? 1 : 0);
@@ -401,6 +429,30 @@ interval:
           p.wind_gust = id(ha_wind_gust).state;
           // «Стиль дождя»: 0 — капли на стекле, 1 — падающий
           p.rain_style = (int) id(rain_style_select).active_index().value_or(0);
+          // Праздник: звезда, ракета, яйца, летучие мыши, «матрица», цвета салюта.
+          // При «Фоне погоды: Выкл» — ничего
+          using namespace weather_fx;
+          const int hol = fx_sel == 1 ? 0 : id(holiday);
+          const bool preview = id(hol_preview) != 0;
+          p.holiday = hol;
+          p.night = id(is_night) || (preview && (hol == HOL_HALLOWEEN || hol == HOL_KUPALA));
+          // Светлячки — на Ивана Купалу и тёплыми летними ночами без осадков
+          // (на улице от 16°, гаснут ниже 15°)
+          static bool warm = false;
+          static uint32_t warm_ms = 0;
+          static bool summer = false;
+          if (warm_ms == 0 || millis() - warm_ms > 60000) {
+            warm_ms = millis();
+            auto t = id(ha_time).now();
+            summer = t.is_valid() && t.month >= 6 && t.month <= 8;
+            if (!std::isnan(t_out))
+              warm = t_out >= 16.0f || (warm && t_out >= 15.0f);
+          }
+          p.fireflies = fx_sel != 1 && p.night &&
+                        (hol == HOL_KUPALA || (summer && warm && id(weather_mode) == 0 && !id(weather_storm)));
+          p.matrix = fx_sel != 1 && (int32_t) (id(binary_until) - millis()) > 0;
+          p.fw_palette = id(fw_palette);
+          p.moon_force = preview && (hol == HOL_FULL_MOON || hol == HOL_SUPERMOON || hol == HOL_ECLIPSE) ? hol : 0;
           id(wfx)->set_params(p);
           // Кот смотрит в небо — пусть пролетит метеор
           if (id(crit)->take_meteor())

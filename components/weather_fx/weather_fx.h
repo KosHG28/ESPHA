@@ -7,13 +7,16 @@
 
 #include "esphome/core/component.h"
 #include "esphome/core/hal.h"
+#include "astro.h"
 
 namespace esphome {
 namespace weather_fx {
 
 /// Что показывать в этом кадре. Заполняет packages/weather.yaml.
 struct Params {
-  int mode{0};  ///< 0 нет, 1 дождь, 2 снег, 3 мокрый снег, 4 град, 5 листопад, 6 сердечки
+  /// 0 нет, 1 дождь, 2 снег, 3 мокрый снег, 4 град, 5 листопад, 6 сердечки,
+  /// 7 тюльпаны и мимоза, 8 воздушные шарики, 9 кленовые листья
+  int mode{0};
   int count{0};       ///< сколько частиц: капель до 32, снежинок и листьев до 16
   int clouds{0};      ///< сколько облаков, до 3
   bool storm{false};  ///< гроза: молнии
@@ -30,6 +33,12 @@ struct Params {
   bool rainbow{false};    ///< радуга: днём после дождя прояснилось
   bool frost{false};      ///< мороз ниже −15°: иней по краю экрана
   int kite{0};            ///< воздушный змей: 0 нет, 1 изредка, 2 часто (проверка)
+  int holiday{0};         ///< праздник (HOL_* из astro.h): звезда, ракета, яйца, мыши…
+  bool night{false};      ///< солнце за горизонтом (летучие мыши — только ночью)
+  bool fireflies{false};  ///< светлячки: Иван Купала или тёплая летняя ночь
+  bool matrix{false};     ///< «матрица»: падающие столбцы нулей и единиц
+  int fw_palette{0};      ///< салют: 0 разноцветный, 1 бело-сине-красный, 2 красно-золотой
+  int moon_force{0};      ///< проверка: HOL_FULL_MOON / HOL_SUPERMOON / HOL_ECLIPSE, 0 — по небу
   // Для созвездия: где и когда смотрим на небо. utc 0 — время неизвестно
   float lat{NAN}, lon{NAN};  ///< градусы, восточная долгота — плюс
   uint32_t utc{0};           ///< секунды Unix
@@ -105,6 +114,13 @@ class WeatherFx : public Component {
   static const int NB = 3;       // вспышек салюта одновременно
   static const int NP = 14;      // искр во вспышке
   static const int NTAIL = 9;    // точек хвоста воздушного змея
+  static const int NSET = 6;     // наборов падающих знаков: снег, листья, сердечки, цветы, шарики, клёны
+  static const int NFF = 10;     // светлячков
+  static const int NBAT = 4;     // летучих мышей
+  static const int NEGG = 3;     // пасхальных яиц
+  static const int NMX = 9;      // столбцов «матрицы»
+  static const int MX_LEN = 8;   // знаков в столбце
+  static const int NPUFF = 6;    // клубов дыма за ракетой
 
   /// Что сейчас нарисовано для частицы: прямоугольник относительно холста
   struct Spot {
@@ -129,9 +145,20 @@ class WeatherFx : public Component {
   void garland_(uint32_t now);
   void fireworks_(uint32_t now);
   void kite_(uint32_t now, float wind);
-  void moon_(uint32_t utc);
+  void moon_(uint32_t utc, int force);
   void planets_(double jd, float lst, float sphi, float cphi);
   void build_frost_();
+  void bstar_(uint32_t now);
+  void rocket_(uint32_t now);
+  void fireflies_(uint32_t now);
+  void bats_();
+  void eggs_(uint32_t now);
+  void matrix_();
+  /// Есть ли что рисовать для праздника (тогда слой погоды нужен, даже без погоды)
+  bool holiday_drawn_() const {
+    return this->bstar_on_ || this->hol_ == HOL_COSMOS || this->hol_ == HOL_EASTER || this->ff_on_ ||
+           this->bats_on_ || this->mx_on_;
+  }
 
   /// Перенести частицу: отметить к перерисовке старое и новое место
   void mark_(Spot &s, bool on, int x, int y, int w, int h);
@@ -190,10 +217,56 @@ class WeatherFx : public Component {
   float fx_[NF]{}, fy_[NF]{}, fph_[NF]{};
   Spot fs_[NF]{};
   // Прямоугольник знака относительно точки рисования и его размер: [0] —
-  // снежинки, [1] — листья, [2] — сердечки
-  int fox_[3][NF]{}, foy_[3][NF]{}, fw_[3][NF]{}, fh_[3][NF]{};
-  int fset_{0};  // что падает (или всплывает): 0 снежинки, 1 листья, 2 сердечки
+  // снежинки, [1] — листья, [2] — сердечки, [3] — тюльпаны и мимоза,
+  // [4] — шарики, [5] — клёны
+  int fox_[NSET][NF]{}, foy_[NSET][NF]{}, fw_[NSET][NF]{}, fh_[NSET][NF]{};
+  // Что падает (или всплывает): 0 снежинки, 1 листья, 2 сердечки, 3 цветы,
+  // 4 шарики, 5 клёны
+  int fset_{0};
   lv_color_t c_leaf_[4]{}, c_leaf_s_[4]{}, c_heart_[4]{}, c_heart_s_[4]{};
+  lv_color_t c_set_[NSET][4]{}, c_set_s_[NSET][4]{};
+
+  // Праздник и то, что для него рисуется
+  int hol_{0};
+  bool night_{false}, bats_on_{false}, ff_on_{false}, mx_on_{false};
+  int fw_pal_{0};
+  // Вифлеемская звезда: фаза мерцания
+  bool bstar_on_{false};
+  float bstar_ph_{0};
+  uint32_t bstar_ms_{0};
+  Spot bstar_spot_{};
+  // Ракета: летит ли, когда вылетела, когда следующая; положение, курс,
+  // длина пламени и клубы дыма позади
+  bool rk_on_{false};
+  uint32_t rk_t0_{0}, next_rk_{0}, rk_puff_ms_{0};
+  float rk_x_{0}, rk_y_{0}, rk_a_{0}, rk_flame_{0};
+  float puff_x_[NPUFF]{}, puff_y_[NPUFF]{}, puff_age_[NPUFF]{};
+  Spot rk_spot_{};
+  // Светлячки: место «дома», фазы движения и мерцания
+  float ffx_[NFF]{}, ffy_[NFF]{}, ffph_[NFF][3]{};
+  float ffk_[NFF]{};
+  int ffpx_[NFF]{}, ffpy_[NFF]{};
+  uint32_t ff_ms_{0};
+  Spot ff_spot_[NFF]{};
+  // Летучие мыши: где, скорость, фаза взмахов; рамка знака для двух размеров
+  float bat_x_[NBAT]{}, bat_y_[NBAT]{}, bat_v_[NBAT]{}, bat_ph_[NBAT]{};
+  int bat_ox_[2]{}, bat_oy_[2]{}, bat_w_[2]{}, bat_h_[2]{};
+  Spot bat_spot_[NBAT]{};
+  // Пасхальные яйца катятся по низу: когда покатились, когда следующие
+  bool egg_on_{false};
+  uint32_t egg_t0_{0}, next_egg_{0};
+  float egg_x_[NEGG]{};
+  Spot egg_spot_[NEGG]{};
+  // «Матрица»: голова каждого столбца, скорость, знаки
+  float mx_y_[NMX]{}, mx_v_[NMX]{};
+  uint8_t mx_ch_[NMX][MX_LEN]{};
+  Spot mx_spot_[NMX]{};
+  int mx_ox_{0}, mx_oy_{0};
+  // Луна по небу или по выбору «Показать праздник»: событие, краснота при
+  // затмении, радиус
+  int moon_ev_{0}, moon_r_{15};
+  float moon_red_{0};
+  int64_t moon_ev_min_{-1};
 
   // Салют: вспышки, у каждой — центр, начало, цвет и разлетающиеся искры
   struct Burst {

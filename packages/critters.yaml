@@ -7,8 +7,15 @@
 #   - птица пролетает по верху;
 #   - улитка медленно ползёт по низу, а зимой вместо неё проходит снеговик;
 #   - ночью кот может прийти поспать — свернётся внизу, над ним «z z z».
-# В Новый год (15.12–14.01) и в дни рождения приходит только кот — чаще, раз в
-# 30–60 минут, и в праздничном колпаке.
+# В праздники (packages/holidays.yaml) приходит только кот — чаще, раз в
+# 30–60 минут, и в праздничной вещи: в новогодние дни — в шапке Деда Мороза,
+# в день рождения, 8 Марта, 1 и 12 июня — в колпаке, 23 февраля и 9 Мая — в
+# пилотке, в День кошек — в короне, 12 апреля — в шлеме космонавта, 1 сентября
+# — с ранцем. На Пасху сидит у кулича, на Масленицу ест блины, в пятницу,
+# 13-е, перед ним пробегает чёрный кот, 1 апреля он бегает задом наперёд.
+#
+# Кот крупный — 156×96: спрайты хранятся маленькими и увеличиваются в 6 раз
+# при показе (components/critters, Sprite).
 #
 # Кот и погода: в дождь пробегает под зонтиком; в снег садится посередине и
 # ловит лапой снежинку; ясной ночью иногда садится и смотрит в небо — и там
@@ -79,6 +86,9 @@ interval:
               id(crit)->set_date(now.month, now.day_of_month);
           }
           id(crit)->set_festive(id(festive_day));
+          // Праздник — вещь на коте и сценки (packages/holidays.yaml)
+          id(crit)->set_holiday(id(holiday), !id(birthday_line).empty() || id(holiday) == weather_fx::HOL_BIRTHDAY,
+                                id(holiday_new_year));
           // Дождь, мокрый снег и град — кот под зонтиком; снег — ловит снежинку
           const int m = id(weather_mode);
           id(crit)->set_weather(m == 1 || m == 3 || m == 4 ? 1 : (m == 2 ? 2 : 0), id(weather_stars));
@@ -90,7 +100,7 @@ select:
     id: guest_select
     name: Позвать гостя
     icon: mdi:paw
-    options: ["—", "Кот", "Птица", "Улитка", "Снеговик", "Сова", "Бабочка", "Ёжик", "Тыква", "Кот и мышь"]
+    options: ["—", "Кот", "Птица", "Улитка", "Снеговик", "Сова", "Бабочка", "Ёжик", "Тыква", "Кот и мышь", "Чёрный кот"]
     initial_option: "—"
     optimistic: true
     on_value:
@@ -102,7 +112,8 @@ select:
             - lambda: |-
                 using namespace critters;
                 static const Show SHOWS[] = {SHOW_NONE, SHOW_CAT_RUN, SHOW_BIRD, SHOW_SNAIL, SHOW_SNOWMAN,
-                                             SHOW_OWL, SHOW_BUTTERFLY, SHOW_HEDGEHOG, SHOW_PUMPKIN, SHOW_MOUSE};
+                                             SHOW_OWL, SHOW_BUTTERFLY, SHOW_HEDGEHOG, SHOW_PUMPKIN, SHOW_MOUSE,
+                                             SHOW_BLACK_CAT};
                 if (i == 1)
                   id(crit)->start_cat();
                 else if (i < sizeof(SHOWS) / sizeof(SHOWS[0]))

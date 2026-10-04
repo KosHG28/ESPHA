@@ -4,7 +4,8 @@
 Компонент только ведёт анимацию: картинку и надпись «z z z» для него
 объявляет packages/critters.yaml и передаёт вызовом bind(), а раз в кадр
 вызывает frame(). Спрайты — components/critters/sprites.h, их рисует
-tools/make_sprites.py.
+tools/make_sprites.py. Номера праздников — общие с погодным фоном
+(components/weather_fx/astro.h).
 """
 
 import esphome.codegen as cg
@@ -12,7 +13,7 @@ import esphome.config_validation as cv
 from esphome.const import CONF_ID
 
 CODEOWNERS = ["@koshg28"]
-DEPENDENCIES = ["lvgl"]
+DEPENDENCIES = ["lvgl", "weather_fx"]
 
 critters_ns = cg.esphome_ns.namespace("critters")
 Critters = critters_ns.class_("Critters", cg.Component)

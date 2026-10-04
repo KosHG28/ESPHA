@@ -41,8 +41,37 @@ static const uint32_t HEART_COLORS_DIM[4] = {0xFF80AB, 0xFF4F8B, 0xFF5C7A, 0xFF9
 // Салют: цвета вспышек
 static const uint32_t FW_COLORS[6] = {0xFF5252, 0xFFD740, 0x69F0AE, 0x40C4FF, 0xE040FB, 0xFFFFFF};
 
+// 8 Марта: тюльпаны (розовые, коралловые) и веточки мимозы (жёлтые)
+static const uint32_t FLOWER_CP[2] = {0xF09F1, 0xF024A};
+static const uint32_t FLOWER_COLORS[4] = {0xFF4F7B, 0xFFD23F, 0xFF6B4A, 0xFFE45C};
+// 1 июня: воздушные шарики
+static const uint32_t BALLOON_CP[1] = {0xF0A26};
+static const uint32_t BALLOON_COLORS[4] = {0xFF5252, 0x40C4FF, 0xFFD740, 0x69F0AE};
+// 1 сентября: кленовые листья
+static const uint32_t MAPLE_CP[1] = {0xF0C93};
+// Хэллоуин: летучая мышь
+static const uint32_t BAT_CP[1] = {0xF0B5F};
+// Салют: бело-сине-красный (12 июня) и красно-золотой (23 февраля)
+static const uint32_t FW_TRICOLOR[3] = {0xFFFFFF, 0x2962FF, 0xFF1744};
+static const uint32_t FW_RED[3] = {0xFF1744, 0xFFC400, 0xFF6D00};
+// Пасхальные яйца
+static const uint32_t EGG_COLORS[4] = {0xE53935, 0x1E88E5, 0xFDD835, 0x43A047};
+
 static uint32_t glyph_cp(int set, int i) {
-  return set == 2 ? HEART_CP[(i / 2) % 2] : (set == 1 ? LEAF_CP[(i / 2) % 2] : FLAKE_CP[i % 5]);
+  switch (set) {
+    case 1:
+      return LEAF_CP[(i / 2) % 2];
+    case 2:
+      return HEART_CP[(i / 2) % 2];
+    case 3:
+      return FLOWER_CP[(i / 2) % 2];
+    case 4:
+      return BALLOON_CP[0];
+    case 5:
+      return MAPLE_CP[0];
+    default:
+      return FLAKE_CP[i % 5];
+  }
 }
 // Солнце — справа в «шапке» круга, мимо значка двери посередине
 static const int SUN_X = 300, SUN_Y = 74, SUN_R = 40;
@@ -83,6 +112,13 @@ static const int MOON_X = 84, MOON_Y = 150, MOON_R = 15;
 // Радуга — дугой по верху круга, над строкой погоды
 static const int RB_X = 233, RB_Y = 190, RB_R = 120, RB_W = 4;
 static const uint32_t RB_COLORS[7] = {0xFF3B30, 0xFF9500, 0xFFCC00, 0x34C759, 0x32ADE6, 0x3F51B5, 0x9C27B0};
+// Вифлеемская звезда — в «шапке» круга слева от середины, мимо солнца
+static const int BSTAR_X = 190, BSTAR_Y = 66, BSTAR_R = 36;
+// Ракета летит 4,5 с снизу слева вверх направо, над строкой погоды
+static const uint32_t RK_MS = 4500;
+static const float PUFF_MS = 900.0f;
+// «Матрица»: шаг столбцов и высота знака
+static const int MX_X0 = 45, MX_DX = 47, MX_STEP = 18;
 // Гирлянда: радиус, цвета лампочек
 static const int GAR_R = 221;
 static const uint32_t GAR_PAL[4] = {0xFF3B30, 0xFFD60A, 0x30D158, 0x0A84FF};
@@ -204,7 +240,7 @@ void WeatherFx::bind(lv_obj_t *root, lv_obj_t *clouds, lv_obj_t *bolt, lv_obj_t 
   // серединой знака по горизонтали и линией основания по вертикали, так что
   // знак лежит выше и левее точки. Участок к перерисовке должен закрывать его
   // целиком — иначе при сдвиге края знака не стираются и тянутся шлейфом
-  for (int set = 0; set < 3; set++) {
+  for (int set = 0; set < NSET; set++) {
     for (int i = 0; i < NF; i++) {
       const lv_font_t *f = (i % 2) ? flake_l : flake_s;
       lv_font_glyph_dsc_t g;
@@ -221,6 +257,34 @@ void WeatherFx::bind(lv_obj_t *root, lv_obj_t *clouds, lv_obj_t *bolt, lv_obj_t 
         this->fw_[set][i] = 2 * lh;
         this->fh_[set][i] = 2 * lh;
       }
+    }
+  }
+  // Летучая мышь — тот же расчёт рамки знака, мелкая и крупная
+  for (int sz = 0; sz < 2; sz++) {
+    const lv_font_t *f = sz ? flake_l : flake_s;
+    lv_font_glyph_dsc_t g;
+    const int lh = lv_font_get_line_height(f);
+    if (lv_font_get_glyph_dsc(f, &g, BAT_CP[0], 0) && g.box_w > 0 && g.box_h > 0) {
+      this->bat_ox_[sz] = g.ofs_x - g.adv_w / 2 - 2;
+      this->bat_oy_[sz] = -g.box_h - g.ofs_y - 2;
+      this->bat_w_[sz] = g.box_w + 4;
+      this->bat_h_[sz] = g.box_h + 4;
+    } else {
+      this->bat_ox_[sz] = -lh;
+      this->bat_oy_[sz] = -lh;
+      this->bat_w_[sz] = 2 * lh;
+      this->bat_h_[sz] = 2 * lh;
+    }
+  }
+  // Знак «матрицы» — цифра подписи созвездия: над линией основания
+  {
+    lv_font_glyph_dsc_t g;
+    if (lv_font_get_glyph_dsc(caption, &g, '0', 0) && g.box_h > 0) {
+      this->mx_ox_ = g.ofs_x - g.adv_w / 2 - 2;
+      this->mx_oy_ = -g.box_h - g.ofs_y - 2;
+    } else {
+      this->mx_ox_ = -10;
+      this->mx_oy_ = -16;
     }
   }
   this->bound_ = true;
@@ -317,6 +381,14 @@ void WeatherFx::paint_back(lv_layer_t *layer) {
   lv_draw_line_dsc_init(&ln);
   ln.opa = LV_OPA_COVER;
   const bool dim = this->dim_;
+  // Круг с центром (x, y) в экранных координатах
+  auto disc_at = [&](int x, int y, int r, uint32_t c, lv_opa_t o) {
+    lv_area_t a = {x - r, y - r, x + r, y + r};
+    fill.radius = LV_RADIUS_CIRCLE;
+    fill.color = lv_color_hex(c);
+    fill.opa = o;
+    lv_draw_fill(layer, &fill, &a);
+  };
 
   // Солнце: мягкий ореол, диск и медленно вращающиеся лучи
   if (place(this->sun_spot_)) {
@@ -344,10 +416,58 @@ void WeatherFx::paint_back(lv_layer_t *layer) {
       ln.p2.y = (lv_value_precise_t) (cy + r1 * sn);
       lv_draw_line(layer, &ln);
     }
-    disc(17, dim ? 0xFFD54F : 0xFFC21A, LV_OPA_COVER);
+    if (this->hol_ == HOL_MASLENITSA) {
+      // Масленица: солнце — румяный блин с весёлым лицом
+      disc(17, 0xF2B84B, LV_OPA_COVER);
+      static const int8_t SPOTS[5][3] = {{-9, -8, 2}, {10, -6, 2}, {-11, 6, 1}, {9, 9, 2}, {1, -12, 1}};
+      for (const auto &sp : SPOTS)
+        disc_at(cx + sp[0], cy + sp[1], sp[2], 0xC98A2E, 200);
+      fill.radius = 1;
+      fill.opa = LV_OPA_COVER;
+      fill.color = lv_color_hex(0x5A3A12);
+      lv_area_t eye_l = {cx - 7, cy - 5, cx - 5, cy - 3}, eye_r = {cx + 5, cy - 5, cx + 7, cy - 3};
+      lv_draw_fill(layer, &fill, &eye_l);
+      lv_draw_fill(layer, &fill, &eye_r);
+      lv_draw_arc_dsc_t smile;
+      lv_draw_arc_dsc_init(&smile);
+      smile.center = {cx, cy};
+      smile.radius = 9;
+      smile.width = 2;
+      smile.start_angle = 30;
+      smile.end_angle = 150;
+      smile.color = lv_color_hex(0x5A3A12);
+      smile.opa = LV_OPA_COVER;
+      lv_draw_arc(layer, &smile);
+    } else {
+      disc(17, dim ? 0xFFD54F : 0xFFC21A, LV_OPA_COVER);
+    }
     fill.opa = LV_OPA_COVER;
     ln.round_start = 0;
     ln.round_end = 0;
+  }
+
+  // Вифлеемская звезда: мягкое сияние, восемь лучей — длинный вниз — и
+  // яркая сердцевина. Лучи чуть «дышат»
+  if (place(this->bstar_spot_)) {
+    const int cx = BSTAR_X + oc.x1, cy = BSTAR_Y + oc.y1;
+    disc_at(cx, cy, 22, 0xFFE9A8, dim ? 40 : 26);
+    disc_at(cx, cy, 11, 0xFFF3C4, dim ? 90 : 64);
+    lv_draw_triangle_dsc_t tr;
+    lv_draw_triangle_dsc_init(&tr);
+    tr.color = lv_color_hex(dim ? 0xFFFFFF : 0xFFF3C4);
+    tr.opa = 235;
+    const float tw = 0.85f + 0.15f * sinf(this->bstar_ph_);
+    for (int k = 0; k < 8; k++) {
+      const float a = k * (PI_F / 4) - PI_F / 2;
+      const float len = (k == 4 ? 34.0f : (k % 2 ? 13.0f : 24.0f)) * (k % 2 ? 2.0f - tw : tw);
+      const float w = k % 2 ? 1.6f : 2.6f;
+      const float c = cosf(a), sn = sinf(a);
+      tr.p[0] = {(lv_value_precise_t) (cx - sn * w), (lv_value_precise_t) (cy + c * w)};
+      tr.p[1] = {(lv_value_precise_t) (cx + sn * w), (lv_value_precise_t) (cy - c * w)};
+      tr.p[2] = {(lv_value_precise_t) (cx + c * len), (lv_value_precise_t) (cy + sn * len)};
+      lv_draw_triangle(layer, &tr);
+    }
+    disc_at(cx, cy, 4, 0xFFFFFF, LV_OPA_COVER);
   }
 
   // Радуга: семь дуг от красной снаружи до фиолетовой внутри
@@ -372,11 +492,14 @@ void WeatherFx::paint_back(lv_layer_t *layer) {
   // Луна: светлый диск, на который наползает чёрная тень — от фазы. Растущая
   // светится справа, убывающая — слева. Поверх — слабый ореол: тёмная часть
   // диска от него чуть видна, как пепельный свет
+  // В полнолуние луна крупнее, в суперлуние — ещё крупнее, в затмение
+  // наливается красным
   if (place(this->moon_spot_) && this->moon_phase_ >= 0) {
-    const int cx = MOON_X + oc.x1, cy = MOON_Y + oc.y1, r = MOON_R;
+    const int cx = MOON_X + oc.x1, cy = MOON_Y + oc.y1, r = this->moon_r_;
     fill.radius = LV_RADIUS_CIRCLE;
     fill.opa = LV_OPA_COVER;
-    fill.color = lv_color_hex(dim ? 0xFFF8E1 : 0xE8E0C4);
+    fill.color = lv_color_mix(lv_color_hex(0xB5482B), lv_color_hex(dim ? 0xFFF8E1 : 0xE8E0C4),
+                              (uint8_t) (255 * this->moon_red_));
     lv_area_t disc = {cx - r, cy - r, cx + r, cy + r};
     lv_draw_fill(layer, &fill, &disc);
     const float ph = this->moon_phase_;
@@ -396,11 +519,29 @@ void WeatherFx::paint_back(lv_layer_t *layer) {
 
   // Мерцающие звёзды
   fill.radius = 1;
+  fill.opa = LV_OPA_COVER;
   for (int i = 0; i < NST; i++) {
     if (!place(this->sts_[i]))
       continue;
     fill.color = this->stc_[i];
     lv_draw_fill(layer, &fill, &abs);
+  }
+
+  // Хэллоуин: летучие мыши вместо звёзд
+  if (this->bats_on_) {
+    lv_draw_letter_dsc_t let;
+    lv_draw_letter_dsc_init(&let);
+    let.opa = LV_OPA_COVER;
+    let.unicode = BAT_CP[0];
+    for (int i = 0; i < NBAT; i++) {
+      if (!place(this->bat_spot_[i]))
+        continue;
+      const int sz = i % 2;
+      let.font = sz ? this->font_l_ : this->font_s_;
+      let.color = lv_color_hex(dim ? (sz ? 0xC9B6F0 : 0x9E8CC8) : (sz ? 0x8E7CC3 : 0x5E507F));
+      lv_point_t pt = {abs.x1 - this->bat_ox_[sz], abs.y1 - this->bat_oy_[sz]};
+      lv_draw_letter(layer, &let, &pt);
+    }
   }
 
   // Созвездие: пунктир, звёзды и подпись
@@ -564,8 +705,10 @@ void WeatherFx::paint_front(lv_layer_t *layer) {
       let.color = big ? this->c_heart_[(i / 2) % 4] : this->c_heart_s_[(i / 2) % 4];
     else if (set == 1)
       let.color = big ? this->c_leaf_[(i / 2) % 4] : this->c_leaf_s_[(i / 2) % 4];
-    else
+    else if (set == 0)
       let.color = big ? this->c_flake_l_ : this->c_flake_s_;
+    else
+      let.color = big ? this->c_set_[set][(i / 2) % 4] : this->c_set_s_[set][(i / 2) % 4];
     let.unicode = glyph_cp(set, i);
     // Обратно из прямоугольника знака к точке рисования
     lv_point_t pt = {abs.x1 - this->fox_[set][i], abs.y1 - this->foy_[set][i]};
@@ -654,6 +797,118 @@ void WeatherFx::paint_front(lv_layer_t *layer) {
     }
   }
 
+  // Ракета: дым позади, пламя, оперение, корпус, нос и иллюминатор.
+  // Рисуется в своих осях: x — вперёд по курсу
+  if (place(this->rk_spot_)) {
+    for (int j = 0; j < NPUFF; j++) {
+      const float age = this->puff_age_[j];
+      if (age >= PUFF_MS)
+        continue;
+      const int r = 3 + (int) (age / PUFF_MS * 5.0f);
+      lv_area_t a = {(int32_t) this->puff_x_[j] + oc.x1 - r, (int32_t) this->puff_y_[j] + oc.y1 - r,
+                     (int32_t) this->puff_x_[j] + oc.x1 + r, (int32_t) this->puff_y_[j] + oc.y1 + r};
+      fill.radius = LV_RADIUS_CIRCLE;
+      fill.color = lv_color_hex(0x9AA4AE);
+      fill.opa = (lv_opa_t) (110.0f * (1.0f - age / PUFF_MS));
+      lv_draw_fill(layer, &fill, &a);
+    }
+    fill.opa = LV_OPA_COVER;
+  }
+  if (place(this->rk_spot_) && this->rk_x_ > -500) {
+    const float ca = cosf(this->rk_a_), sa = sinf(this->rk_a_);
+    const float bx = this->rk_x_ + oc.x1, by = this->rk_y_ + oc.y1;
+    auto P = [&](float lx, float ly) {
+      return lv_point_precise_t{(lv_value_precise_t) (bx + lx * ca - ly * sa), (lv_value_precise_t) (by + lx * sa + ly * ca)};
+    };
+    lv_draw_triangle_dsc_t tr;
+    lv_draw_triangle_dsc_init(&tr);
+    tr.opa = LV_OPA_COVER;
+    auto tri = [&](lv_point_precise_t a, lv_point_precise_t b, lv_point_precise_t c, uint32_t col) {
+      tr.p[0] = a;
+      tr.p[1] = b;
+      tr.p[2] = c;
+      tr.color = lv_color_hex(col);
+      lv_draw_triangle(layer, &tr);
+    };
+    const float fl = this->rk_flame_;
+    tri(P(-12, -4), P(-12, 4), P(-12 - fl, 0), 0xFF9800);
+    tri(P(-12, -2), P(-12, 2), P(-12 - fl * 0.6f, 0), 0xFFEB3B);
+    tri(P(-12, -5), P(-4, -5), P(-17, -11), 0xE53935);
+    tri(P(-12, 5), P(-4, 5), P(-17, 11), 0xE53935);
+    tri(P(-12, -5), P(9, -5), P(9, 5), 0xECEFF1);
+    tri(P(-12, -5), P(9, 5), P(-12, 5), 0xECEFF1);
+    tri(P(9, -5), P(18, 0), P(9, 5), 0xE53935);
+    const lv_point_precise_t w = P(2, 0);
+    lv_area_t win = {(int32_t) w.x - 3, (int32_t) w.y - 3, (int32_t) w.x + 3, (int32_t) w.y + 3};
+    fill.radius = LV_RADIUS_CIRCLE;
+    fill.color = lv_color_hex(0x4FC3F7);
+    lv_draw_fill(layer, &fill, &win);
+  }
+
+  // Светлячки: мягкий жёлто-зелёный ореол и яркая точка, мерцают
+  if (this->ff_on_) {
+    fill.radius = LV_RADIUS_CIRCLE;
+    for (int i = 0; i < NFF; i++) {
+      if (!place(this->ff_spot_[i]))
+        continue;
+      const float k = this->ffk_[i];
+      const int x = this->ffpx_[i] + oc.x1, y = this->ffpy_[i] + oc.y1;
+      lv_area_t halo = {x - 6, y - 6, x + 6, y + 6};
+      fill.color = lv_color_hex(0xB8FF3C);
+      fill.opa = (lv_opa_t) (80.0f * k);
+      lv_draw_fill(layer, &fill, &halo);
+      lv_area_t core = {x - 2, y - 2, x + 2, y + 2};
+      fill.color = lv_color_hex(0xF4FF8A);
+      fill.opa = (lv_opa_t) (255.0f * k);
+      lv_draw_fill(layer, &fill, &core);
+    }
+    fill.opa = LV_OPA_COVER;
+  }
+
+  // Пасхальные яйца катятся по низу: цветное яйцо и светлая полоска,
+  // которая бежит по нему — будто оно вертится
+  for (int i = 0; i < NEGG; i++) {
+    if (!place(this->egg_spot_[i]))
+      continue;
+    const int cx = (abs.x1 + abs.x2) / 2, cy = (abs.y1 + abs.y2) / 2;
+    lv_area_t egg = {cx - 13, cy - 9, cx + 13, cy + 9};
+    fill.radius = 9;
+    fill.opa = LV_OPA_COVER;
+    fill.color = lv_color_hex(EGG_COLORS[i % 4]);
+    lv_draw_fill(layer, &fill, &egg);
+    const int off = (int) fmodf(this->egg_x_[i] * 0.8f, 30.0f) - 15;
+    if (std::abs(off) <= 9) {
+      lv_area_t band = {cx + off - 2, cy - 7, cx + off + 2, cy + 7};
+      fill.radius = 1;
+      fill.color = lv_color_hex(0xFFFFFF);
+      lv_draw_fill(layer, &fill, &band);
+    }
+    lv_area_t dot = {cx - off / 2 - 1, cy - 1, cx - off / 2 + 1, cy + 1};
+    fill.radius = 1;
+    fill.color = lv_color_hex(0xFFE082);
+    lv_draw_fill(layer, &fill, &dot);
+  }
+
+  // «Матрица»: столбцы нулей и единиц, яркая голова и гаснущий хвост
+  if (this->mx_on_) {
+    lv_draw_letter_dsc_t mx;
+    lv_draw_letter_dsc_init(&mx);
+    mx.font = this->font_cap_;
+    for (int c = 0; c < NMX; c++) {
+      if (!place(this->mx_spot_[c]))
+        continue;
+      const int x = MX_X0 + c * MX_DX + oc.x1;
+      for (int j = 0; j < MX_LEN; j++) {
+        const int y = (int) this->mx_y_[c] - j * MX_STEP + oc.y1;
+        mx.color = lv_color_hex(j == 0 ? 0xD8FFD8 : 0x22DD55);
+        mx.opa = (lv_opa_t) (j == 0 ? 255 : 230 - j * 26);
+        mx.unicode = '0' + this->mx_ch_[c][j];
+        lv_point_t pt = {x, y};
+        lv_draw_letter(layer, &mx, &pt);
+      }
+    }
+  }
+
   // Гирлянда: тёмно-зелёный провод по краю и перемигивающиеся лампочки
   if (this->gar_on_) {
     // Провод рисуем, только если участок задевает кольцо
@@ -723,8 +978,66 @@ void WeatherFx::apply_(const Params &p, bool relayout) {
   // Град всегда падает
   this->glass_on_ = !this->hail_ && p.rain_style == 0;
   this->nd_ = (p.mode == 1 || p.mode == 4) ? cnt : (p.mode == 3 ? cnt / 2 : 0);
-  this->nf_ = std::min(p.mode == 2 || p.mode == 5 || p.mode == 6 ? cnt : (p.mode == 3 ? cnt / 2 : 0), NF);
-  this->fset_ = p.mode == 6 ? 2 : (p.mode == 5 ? 1 : 0);
+  const bool signs = p.mode == 2 || (p.mode >= 5 && p.mode <= 9);
+  this->nf_ = std::min(signs ? cnt : (p.mode == 3 ? cnt / 2 : 0), NF);
+  static const int SET_OF_MODE[10] = {0, 0, 0, 0, 0, 1, 2, 3, 4, 5};
+  this->fset_ = p.mode >= 0 && p.mode <= 9 ? SET_OF_MODE[p.mode] : 0;
+
+  // Праздник: что рисовать сверх погоды
+  const int hol = p.holiday;
+  if (hol != this->hol_)
+    this->con_force_ = true;  // созвездие могло быть спрятано (Рождество, Хэллоуин)
+  this->hol_ = hol;
+  this->night_ = p.night;
+  this->bats_on_ = hol == HOL_HALLOWEEN && p.night;
+  this->bstar_on_ = hol == HOL_CHRISTMAS;
+  this->mark_(this->bstar_spot_, this->bstar_on_, BSTAR_X - BSTAR_R, BSTAR_Y - BSTAR_R, 2 * BSTAR_R + 1,
+              2 * BSTAR_R + 1);
+  if (hol != HOL_COSMOS && this->rk_on_) {
+    this->mark_(this->rk_spot_, false, 0, 0, 1, 1);
+    this->rk_on_ = false;
+  }
+  if (hol != HOL_COSMOS)
+    this->next_rk_ = 0;
+  if (hol != HOL_EASTER) {
+    for (auto &e : this->egg_spot_)
+      this->mark_(e, false, 0, 0, 1, 1);
+    this->egg_on_ = false;
+    this->next_egg_ = 0;
+  }
+  if (!this->bats_on_)
+    for (auto &b : this->bat_spot_)
+      this->mark_(b, false, 0, 0, 1, 1);
+  if (p.fireflies && !this->ff_on_) {
+    // Светлячки — над травой внизу круга, у каждого своё место и ритм
+    for (int i = 0; i < NFF; i++) {
+      int x, y;
+      do {
+        x = rnd_(60, 406);
+        y = rnd_(290, 420);
+      } while ((x - 233) * (x - 233) + (y - 233) * (y - 233) > 205 * 205);
+      this->ffx_[i] = x;
+      this->ffy_[i] = y;
+      for (auto &ph : this->ffph_[i])
+        ph = rnd_(0, 628) / 100.0f;
+    }
+  }
+  if (!p.fireflies)
+    for (auto &f : this->ff_spot_)
+      this->mark_(f, false, 0, 0, 1, 1);
+  this->ff_on_ = p.fireflies;
+  if (p.matrix && !this->mx_on_) {
+    for (int c = 0; c < NMX; c++) {
+      this->mx_y_[c] = -rnd_(0, 300);
+      this->mx_v_[c] = rnd_(40, 80) / 10.0f;
+      for (auto &ch : this->mx_ch_[c])
+        ch = rnd_(0, 2);
+    }
+  }
+  if (!p.matrix)
+    for (auto &m : this->mx_spot_)
+      this->mark_(m, false, 0, 0, 1, 1);
+  this->mx_on_ = p.matrix;
   this->fw_on_ = p.fireworks;
   if (p.rainbow != this->rainbow_on_) {
     lv_area_t rb = {RB_X - RB_R - 2, RB_Y - RB_R - 2, RB_X + RB_R + 2, RB_Y};
@@ -746,7 +1059,8 @@ void WeatherFx::apply_(const Params &p, bool relayout) {
   if (!this->storm_)
     this->end_strike_();
   show_(this->root_, this->nd_ || this->nf_ || this->ncl_ || this->storm_ || this->stars_on_ || this->sun_on_ ||
-                         this->gar_on_ || this->fw_on_ || this->kite_mode_ || this->rainbow_on_ || p.frost);
+                         this->gar_on_ || this->fw_on_ || this->kite_mode_ || this->rainbow_on_ || p.frost ||
+                         this->holiday_drawn_());
   // Луна — вместе со звёздами; фазу задаёт moon_()
   if (!this->stars_on_) {
     this->mark_(this->moon_spot_, false, 0, 0, 1, 1);
@@ -784,6 +1098,13 @@ void WeatherFx::apply_(const Params &p, bool relayout) {
     this->c_leaf_s_[k] = lv_color_mix(this->c_leaf_[k], lv_color_black(), dim ? 190 : 140);
     this->c_heart_[k] = lv_color_hex(dim ? HEART_COLORS_DIM[k] : HEART_COLORS[k]);
     this->c_heart_s_[k] = lv_color_mix(this->c_heart_[k], lv_color_black(), dim ? 190 : 140);
+    // Цветы, шарики и клёны: в приглушённом режиме светлее
+    const uint32_t base[3] = {FLOWER_COLORS[k], BALLOON_COLORS[k], LEAF_COLORS[k]};
+    for (int s = 3; s < NSET; s++) {
+      const lv_color_t c = lv_color_hex(base[s - 3]);
+      this->c_set_[s][k] = dim ? lv_color_mix(lv_color_white(), c, 60) : c;
+      this->c_set_s_[s][k] = lv_color_mix(this->c_set_[s][k], lv_color_black(), dim ? 190 : 140);
+    }
   }
 
   if (relayout) {
@@ -821,7 +1142,7 @@ void WeatherFx::apply_(const Params &p, bool relayout) {
     lv_obj_invalidate(this->back_);
     lv_obj_invalidate(this->paint_);
   }
-  if (this->stars_on_) {
+  if (this->stars_on_ && !this->bats_on_) {
     for (int i = 0; i < NST; i++)
       this->mark_(this->sts_[i], true, this->stx_[i], this->sty_[i], 3, 3);
   } else {
@@ -1027,8 +1348,8 @@ void WeatherFx::flakes_(float wind, float ks) {
     const float k = big ? this->k_ : ks;
     if (k <= 0)
       continue;
-    if (this->fset_ == 2) {
-      // Сердечки медленно всплывают снизу вверх, покачиваясь
+    if (this->fset_ == 2 || this->fset_ == 4) {
+      // Сердечки и воздушные шарики медленно всплывают снизу вверх, покачиваясь
       this->fy_[i] -= k * (big ? 0.9f + (i % 3) * 0.15f : 0.55f + (i % 3) * 0.1f);
       this->fph_[i] += k * ((big ? 0.06f : 0.05f) + i * 0.003f);
       this->fx_[i] = wrap_x(this->fx_[i] + k * (cosf(this->fph_[i]) * (big ? 0.9f : 0.6f) + wind * 0.5f));
@@ -1036,8 +1357,8 @@ void WeatherFx::flakes_(float wind, float ks) {
         this->fy_[i] = 490 + rnd_(0, 40);
         this->fx_[i] = rnd_(30, 430);
       }
-    } else if (this->fset_ == 1) {
-      // Листья падают медленнее, раскачиваются шире и сильнее летят по ветру
+    } else if (this->fset_ == 1 || this->fset_ == 3 || this->fset_ == 5) {
+      // Листья и цветы падают медленнее, раскачиваются шире и сильнее летят по ветру
       this->fy_[i] += k * (big ? 1.1f + (i % 3) * 0.2f : 0.6f + (i % 3) * 0.15f);
       this->fph_[i] += k * ((big ? 0.10f : 0.08f) + i * 0.004f);
       this->fx_[i] =
@@ -1078,7 +1399,7 @@ void WeatherFx::stars_(uint32_t now) {
   // звезда меняется раз в 200 мс — чаще глаз не заметит. Звёзды поделены на
   // три группы, которые меняются по очереди раз в ~67 мс: если менять все
   // 12 разом, этот кадр выходит втрое тяжелее и на нём спотыкается метеор
-  if (!this->stars_on_ || now - this->star_ms_ < 60)
+  if (!this->stars_on_ || this->bats_on_ || now - this->star_ms_ < 60)
     return;
   this->star_ms_ = now;
   this->star_grp_ = (this->star_grp_ + 1) % 3;
@@ -1433,6 +1754,21 @@ void WeatherFx::build_frost_() {
 void WeatherFx::sky_(const Params &p) {
   if (!this->stars_on_)
     return;
+  // На Рождество на месте созвездия — Вифлеемская звезда, на Хэллоуин в
+  // небе только летучие мыши
+  if (this->hol_ == HOL_CHRISTMAS || this->bats_on_) {
+    if (this->con_on_) {
+      this->invalidate_(this->con_area_);
+      this->invalidate_(this->cap_area_);
+      this->con_on_ = false;
+    }
+    if (this->bats_on_ && this->npl_) {
+      this->npl_ = 0;
+      this->invalidate_(PL_AREA);
+    }
+    this->con_force_ = true;
+    return;
+  }
   const bool known = p.utc > 1600000000u && !std::isnan(p.lat) && !std::isnan(p.lon);
   const int64_t minute = known ? (int64_t) (p.utc / 60) : -1;
   if (!this->con_force_) {
@@ -1509,8 +1845,10 @@ void WeatherFx::meteor_(uint32_t now) {
     return;
   }
   if (!this->met_on_) {
+    // В ночи звездопадов метеоры летят каждые несколько секунд
+    const bool shower = this->hol_ == HOL_METEORS;
     if (this->next_met_ == 0)
-      this->next_met_ = now + rnd_(15000, 45000);
+      this->next_met_ = now + (shower ? rnd_(1500, 4000) : rnd_(15000, 45000));
     if ((int32_t) (now - this->next_met_) < 0)
       return;
     // Пролетает по верхней части неба наискосок вниз, влево или вправо
@@ -1530,7 +1868,7 @@ void WeatherFx::meteor_(uint32_t now) {
   if (t >= this->met_len_) {
     this->mark_(this->met_spot_, false, 0, 0, 1, 1);
     this->met_on_ = false;
-    this->next_met_ = now + rnd_(30000, 90000);
+    this->next_met_ = now + (this->hol_ == HOL_METEORS ? rnd_(2000, 6000) : rnd_(30000, 90000));
     return;
   }
   const float sp = sqrtf(this->met_vx_ * this->met_vx_ + this->met_vy_ * this->met_vy_);
@@ -1578,22 +1916,45 @@ void WeatherFx::garland_(uint32_t now) {
       this->invalidate_(g.a);
 }
 
-void WeatherFx::moon_(uint32_t utc) {
-  if (!this->stars_on_ || utc < 1600000000u)
+void WeatherFx::moon_(uint32_t utc, int force) {
+  if (!this->stars_on_ || (utc < 1600000000u && !force))
     return;
+  // Полнолуние, суперлуние, затмение — по небу раз в минуту или по выбору
+  // «Показать праздник»
+  int ev = this->moon_ev_;
+  float red = this->moon_red_;
+  const int64_t minute = utc / 60;
+  if (force) {
+    ev = force;
+    red = force == HOL_ECLIPSE ? 1.0f : 0.0f;
+  } else if (minute != this->moon_ev_min_) {
+    this->moon_ev_min_ = minute;
+    ev = moon_event(utc, &red);
+  }
+  const int r_moon = ev == HOL_SUPERMOON ? 24 : (ev == HOL_FULL_MOON || ev == HOL_ECLIPSE ? 20 : MOON_R);
+  const bool changed = ev != this->moon_ev_ || r_moon != this->moon_r_ || std::fabs(red - this->moon_red_) > 0.02f;
   // Фаза по среднему синодическому месяцу от новолуния 6 января 2000 года.
-  // Точность — несколько часов, на рисунке 30 px это не видно
-  const double days = (utc - 947182440.0) / 86400.0;
-  double ph = fmod(days / 29.530588853, 1.0);
-  if (ph < 0)
-    ph += 1.0;
+  // Точность — несколько часов, на рисунке 30 px это не видно. В полнолуние
+  // по выбору — ровно полная
+  double ph = 0.5;
+  if (!force) {
+    const double days = (utc - 947182440.0) / 86400.0;
+    ph = fmod(days / 29.530588853, 1.0);
+    if (ph < 0)
+      ph += 1.0;
+    if (ev)
+      ph = 0.5;
+  }
   // Перерисовывать, только когда фаза заметно сменилась (раз в пару часов)
-  if (this->moon_spot_.on && std::fabs(ph - this->moon_phase_) < 0.003)
+  if (this->moon_spot_.on && !changed && std::fabs(ph - this->moon_phase_) < 0.003)
     return;
-  this->moon_phase_ = (float) ph;
-  const int r = MOON_R + 8;
   if (this->moon_spot_.on)
     this->invalidate_(this->moon_spot_.a);
+  this->moon_ev_ = ev;
+  this->moon_red_ = red;
+  this->moon_r_ = r_moon;
+  this->moon_phase_ = (float) ph;
+  const int r = r_moon + 8;
   this->mark_(this->moon_spot_, true, MOON_X - r, MOON_Y - r, 2 * r + 1, 2 * r + 1);
 }
 
@@ -1610,7 +1971,9 @@ void WeatherFx::fireworks_(uint32_t now) {
       b.t0 = now;
       b.x = rnd_(110, 357);
       b.y = rnd_(60, 175);
-      b.c = lv_color_hex(FW_COLORS[rnd_(0, 6)]);
+      b.c = lv_color_hex(this->fw_pal_ == 1   ? FW_TRICOLOR[rnd_(0, 3)]
+                         : this->fw_pal_ == 2 ? FW_RED[rnd_(0, 3)]
+                                              : FW_COLORS[rnd_(0, 6)]);
       const float sp = rnd_(7, 12) / 100.0f;  // px/мс
       const float a0 = rnd_(0, 628) / 100.0f;
       for (int k = 0; k < NP; k++) {
@@ -1690,6 +2053,191 @@ void WeatherFx::kite_(uint32_t now, float wind) {
   this->mark_(this->kite_spot_, true, bx, by, (int) (x1 - x0) + 17, (int) (y1 - by) + 10);
 }
 
+void WeatherFx::bstar_(uint32_t now) {
+  // Лучи Вифлеемской звезды чуть вытягиваются и укорачиваются, 8 раз в секунду
+  if (!this->bstar_on_ || now - this->bstar_ms_ < 120)
+    return;
+  this->bstar_ms_ = now;
+  this->bstar_ph_ += 0.35f;
+  if (this->bstar_spot_.on)
+    this->invalidate_(this->bstar_spot_.a);
+}
+
+void WeatherFx::rocket_(uint32_t now) {
+  if (this->hol_ != HOL_COSMOS)
+    return;
+  if (!this->rk_on_) {
+    if (this->next_rk_ == 0)
+      this->next_rk_ = now + 2000;
+    if ((int32_t) (now - this->next_rk_) < 0)
+      return;
+    this->rk_on_ = true;
+    this->rk_t0_ = now;
+    this->rk_puff_ms_ = now;
+    for (auto &a : this->puff_age_)
+      a = PUFF_MS;
+  }
+  const uint32_t t = now - this->rk_t0_;
+  // Дым: клубы остаются позади, расплываются и тают
+  for (auto &a : this->puff_age_)
+    a += this->dt_ms_;
+  if (t >= RK_MS) {
+    bool smoke = false;
+    for (float a : this->puff_age_)
+      smoke |= a < PUFF_MS;
+    if (!smoke) {
+      this->mark_(this->rk_spot_, false, 0, 0, 1, 1);
+      this->rk_on_ = false;
+      this->next_rk_ = now + rnd_(20000, 45000);
+      return;
+    }
+  }
+  // Путь — плавная дуга от левого края над строкой погоды к верху справа
+  const float u = std::min(t / (float) RK_MS, 1.0f);
+  const float x = -40.0f + 546.0f * u;
+  const float y = 205.0f - 185.0f * u - 45.0f * sinf(PI_F * u);
+  const float dx = 546.0f, dy = -185.0f - 45.0f * PI_F * cosf(PI_F * u);
+  if (t < RK_MS) {
+    this->rk_x_ = x;
+    this->rk_y_ = y;
+    this->rk_a_ = atan2f(dy, dx);
+    this->rk_flame_ = 8.0f + rnd_(0, 9);
+    if (now - this->rk_puff_ms_ > 110) {
+      this->rk_puff_ms_ = now;
+      int j = 0;
+      for (int i = 1; i < NPUFF; i++)
+        if (this->puff_age_[i] > this->puff_age_[j])
+          j = i;
+      this->puff_x_[j] = x - 22.0f * cosf(this->rk_a_);
+      this->puff_y_[j] = y - 22.0f * sinf(this->rk_a_);
+      this->puff_age_[j] = 0;
+    }
+  } else {
+    this->rk_x_ = -1000;  // ракета улетела, остаётся тающий дым
+  }
+  float x0 = 1e9f, y0 = 1e9f, x1 = -1e9f, y1 = -1e9f;
+  if (t < RK_MS) {
+    x0 = this->rk_x_ - 36;
+    y0 = this->rk_y_ - 36;
+    x1 = this->rk_x_ + 36;
+    y1 = this->rk_y_ + 36;
+  }
+  for (int j = 0; j < NPUFF; j++) {
+    if (this->puff_age_[j] >= PUFF_MS)
+      continue;
+    x0 = std::min(x0, this->puff_x_[j] - 9);
+    y0 = std::min(y0, this->puff_y_[j] - 9);
+    x1 = std::max(x1, this->puff_x_[j] + 9);
+    y1 = std::max(y1, this->puff_y_[j] + 9);
+  }
+  if (x0 > x1) {
+    this->mark_(this->rk_spot_, false, 0, 0, 1, 1);
+    return;
+  }
+  // Пламя мигает, дым тает — перерисовать, даже если рамка та же
+  if (this->rk_spot_.on)
+    this->invalidate_(this->rk_spot_.a);
+  this->mark_(this->rk_spot_, true, (int) x0, (int) y0, (int) (x1 - x0) + 1, (int) (y1 - y0) + 1);
+}
+
+void WeatherFx::fireflies_(uint32_t now) {
+  // Светлячки кружат у своего места и мерцают — раз в ~66 мс
+  if (!this->ff_on_ || now - this->ff_ms_ < 60)
+    return;
+  this->ff_ms_ = now;
+  const float t = now / 1000.0f;
+  for (int i = 0; i < NFF; i++) {
+    const float *ph = this->ffph_[i];
+    const int x = (int) (this->ffx_[i] + 18.0f * sinf(t * (0.35f + i * 0.03f) + ph[0]));
+    const int y = (int) (this->ffy_[i] + 10.0f * sinf(t * (0.5f + i * 0.02f) + ph[1]));
+    // Вспыхивает на пару секунд и надолго гаснет
+    const float b = sinf(t * (0.9f + i * 0.07f) + ph[2]);
+    const float k = b > 0.3f ? (b - 0.3f) / 0.7f : 0.0f;
+    const bool was = this->ff_spot_[i].on;
+    if (was && k != this->ffk_[i])
+      this->invalidate_(this->ff_spot_[i].a);
+    this->ffk_[i] = k;
+    this->ffpx_[i] = x;
+    this->ffpy_[i] = y;
+    this->mark_(this->ff_spot_[i], k > 0.02f, x - 6, y - 6, 13, 13);
+  }
+}
+
+void WeatherFx::bats_() {
+  if (!this->bats_on_)
+    return;
+  const float k = this->k_;
+  for (int i = 0; i < NBAT; i++) {
+    if (this->bat_v_[i] == 0) {
+      // Первый взлёт: где и как быстро летит, в какую сторону
+      this->bat_x_[i] = rnd_(40, 420);
+      this->bat_y_[i] = 50 + i * 35 + rnd_(0, 20);
+      this->bat_v_[i] = (rnd_(0, 2) ? 1.0f : -1.0f) * rnd_(14, 26) / 10.0f;
+      this->bat_ph_[i] = rnd_(0, 628) / 100.0f;
+    }
+    this->bat_x_[i] = wrap_x(this->bat_x_[i] + k * this->bat_v_[i]);
+    this->bat_ph_[i] += k * 0.09f;
+    const int sz = i % 2;
+    // Летит волной и дёргается от взмахов
+    const float y = this->bat_y_[i] + 14.0f * sinf(this->bat_ph_[i]) + 3.0f * sinf(this->bat_ph_[i] * 7.0f);
+    const int x = (int) this->bat_x_[i] + this->bat_ox_[sz], yy = (int) y + this->bat_oy_[sz];
+    const int w = this->bat_w_[sz], h = this->bat_h_[sz];
+    this->mark_(this->bat_spot_[i], !this->excluded_(x, yy, w, h), x, yy, w, h);
+  }
+}
+
+void WeatherFx::eggs_(uint32_t now) {
+  if (this->hol_ != HOL_EASTER)
+    return;
+  if (!this->egg_on_) {
+    if (this->next_egg_ == 0)
+      this->next_egg_ = now + 1500;
+    if ((int32_t) (now - this->next_egg_) < 0)
+      return;
+    this->egg_on_ = true;
+    this->egg_t0_ = now;
+  }
+  // Три яйца одно за другим катятся слева направо по краю круга
+  const float t = now - this->egg_t0_;
+  bool any = false;
+  for (int i = 0; i < NEGG; i++) {
+    const float x = -30.0f - i * 46.0f + 0.09f * t;
+    this->egg_x_[i] = x;
+    const bool on = x > -20.0f && x < 486.0f;
+    any |= x < 486.0f;
+    const int cx = (int) x, cy = (int) ground(x) - 6;
+    if (on && this->egg_spot_[i].on)
+      this->invalidate_(this->egg_spot_[i].a);  // полоска бежит — перерисовать
+    this->mark_(this->egg_spot_[i], on, cx - 14, cy - 10, 29, 21);
+  }
+  if (!any) {
+    this->egg_on_ = false;
+    this->next_egg_ = now + rnd_(15000, 30000);
+  }
+}
+
+void WeatherFx::matrix_() {
+  if (!this->mx_on_)
+    return;
+  const float k = this->k_;
+  for (int c = 0; c < NMX; c++) {
+    this->mx_y_[c] += k * this->mx_v_[c];
+    const float top = this->mx_y_[c] - (MX_LEN - 1) * MX_STEP;
+    if (top > 480) {
+      this->mx_y_[c] = -rnd_(0, 200);
+      this->mx_v_[c] = rnd_(40, 80) / 10.0f;
+    }
+    // Знаки в столбце то и дело меняются
+    if (rnd_(0, 3) == 0)
+      this->mx_ch_[c][rnd_(0, MX_LEN)] ^= 1;
+    const int x = MX_X0 + c * MX_DX;
+    const int y0 = (int) top + this->mx_oy_, y1 = (int) this->mx_y_[c] + 6;
+    if (this->mx_spot_[c].on)
+      this->invalidate_(this->mx_spot_[c].a);
+    this->mark_(this->mx_spot_[c], y1 > 0 && y0 < 466, x - 10, y0, 21, y1 - y0);
+  }
+}
+
 void WeatherFx::frame(const Params &p) {
   if (!this->bound_)
     return;
@@ -1699,18 +2247,22 @@ void WeatherFx::frame(const Params &p) {
                   ((p.dim ? 1 : 0) << 13) | ((p.stars ? 1 : 0) << 14) | ((p.rain_style ? 1 : 0) << 15) |
                   ((p.sun ? 1 : 0) << 16) | ((p.garland ? 1 : 0) << 17) | ((p.fireworks ? 1 : 0) << 18) |
                   ((std::min(std::max(p.kite, 0), 3)) << 19) | ((p.rainbow ? 1 : 0) << 21) |
-                  ((p.frost ? 1 : 0) << 22);
+                  ((p.frost ? 1 : 0) << 22) | ((std::min(std::max(p.holiday, 0), 31)) << 23) |
+                  ((p.night ? 1 : 0) << 28) | ((p.fireflies ? 1 : 0) << 29) | ((p.matrix ? 1 : 0) << 30);
+  this->fw_pal_ = p.fw_palette;
   if (sig != this->applied_) {
-    // Если поменялись только яркость, солнце или гирлянда — перекрашиваем,
-    // но осадки не перемешиваем
-    const int keep = ~((1 << 13) | (1 << 16) | (1 << 17) | (1 << 18) | (3 << 19) | (1 << 21) | (1 << 22));
+    // Если поменялись только яркость, солнце, гирлянда или праздник —
+    // перекрашиваем, но осадки не перемешиваем
+    const int keep = ~((1 << 13) | (1 << 16) | (1 << 17) | (1 << 18) | (3 << 19) | (1 << 21) | (1 << 22) |
+                       (31 << 23) | (1 << 28) | (1 << 29) | (1 << 30));
     const bool relayout = this->applied_ < 0 || (sig & keep) != (this->applied_ & keep);
     this->applied_ = sig;
     this->apply_(p, relayout);
   }
 
   const bool any = this->nd_ || this->nf_ || this->ncl_ || this->storm_ || this->stars_on_ || this->sun_on_ ||
-                   this->gar_on_ || this->fw_on_ || this->kite_mode_ || this->rainbow_on_ || this->frost_on_;
+                   this->gar_on_ || this->fw_on_ || this->kite_mode_ || this->rainbow_on_ || this->frost_on_ ||
+                   this->holiday_drawn_();
   if (!any || !p.active) {
     this->end_strike_();
     this->last_ms_ = 0;
@@ -1733,8 +2285,14 @@ void WeatherFx::frame(const Params &p) {
   }
   const float wind = this->wind_(p, now);
   this->sky_(p);
-  this->moon_(p.utc);
+  this->moon_(p.utc, p.moon_force);
   this->stars_(now);
+  this->bstar_(now);
+  this->bats_();
+  this->rocket_(now);
+  this->fireflies_(now);
+  this->eggs_(now);
+  this->matrix_();
   this->meteor_(now);
   this->sun_(now);
   this->garland_(now);

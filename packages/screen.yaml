@@ -383,6 +383,12 @@ script:
           if (!api::global_api_server->is_connected())
             return;
           const bool warm = id(sw_warm_night).state && id(is_night);
+          // Хэллоуин — оранжевые цифры, как тыква
+          if (id(holiday) == weather_fx::HOL_HALLOWEEN) {
+            lv_obj_set_style_text_color(id(lbl_time_h), lv_color_hex(0xFF8C1A), 0);
+            lv_obj_set_style_text_color(id(lbl_time_m), lv_color_hex(0xFFB347), 0);
+            return;
+          }
           lv_obj_set_style_text_color(id(lbl_time_h), lv_color_hex(warm ? 0xFFD2A0 : 0xFFFFFF), 0);
           lv_obj_set_style_text_color(id(lbl_time_m), lv_color_hex(warm ? 0xDDA66A : ${time_minutes_color}), 0);
 

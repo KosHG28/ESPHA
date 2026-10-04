@@ -1,6 +1,43 @@
 # ---------------------------------------------------------------------------
 # Праздники.
 #
+# Какой сегодня праздник, решает скрипт holiday_check (раз в минуту): номер
+# праздника — глобальная holiday (номера — weather_fx::HOL_* в
+# components/weather_fx/astro.h), подпись — holiday_caption: она золотом
+# встаёт на часах вместо строки восхода и заката. От праздника зависят
+# погодный фон (packages/weather.yaml), кот и его вещи (packages/critters.yaml)
+# и цвет цифр (packages/screen.yaml).
+#
+#   31 дек и 1 янв  отсчёт последних 10 секунд года, в полночь — салют;
+#                   кот в шапке Деда Мороза (с 15 декабря по 14 января)
+#   7 января        над часами сияет Вифлеемская звезда
+#   23 февраля      кот в пилотке, в 21:00 — красно-золотой салют
+#   1 марта, 8 авг  День кошек: кот в короне, в гости приходят только коты
+#   8 Марта         падают тюльпаны и мимоза
+#   Масленица       солнце — блин с лицом, кот ест блины (неделя перед
+#                   Великим постом, по дате Пасхи)
+#   1 апреля        цифры на миг переворачиваются, время «врёт», кот бегает
+#                   задом наперёд
+#   12 апреля       по небу пролетает ракета, кот в шлеме космонавта
+#   Пасха           по низу катятся крашеные яйца, у кота кулич
+#   9 Мая           кот в пилотке, в 22:00 — салют
+#   1 июня          снизу всплывают воздушные шарики
+#   12 июня         в 22:00 — бело-сине-красный салют
+#   7 июля          Иван Купала: ночью мерцают светлячки
+#   Персеиды, Геминиды  в ночи звездопадов метеоры летят каждые несколько секунд
+#   1 сентября      кот с ранцем, падают кленовые листья
+#   256-й день года День программиста: в 0, 16, 32 и 48 минут каждого часа
+#                   время минуту показывается в двоичном виде, сыплется «матрица»
+#   31 октября      летучие мыши вместо звёзд, оранжевые цифры, тыква
+#   пятница, 13-е   перед котом пробегает чёрный кот
+#   полнолуние      луна крупнее, в суперлуние — ещё крупнее, в лунное
+#                   затмение — краснеет (по настоящему небу)
+#   солнцестояние, равноденствие — подпись «Самый длинный день» и т. п.
+#
+# «Праздники» в Home Assistant: «Все», «Только семейные» (дни рождения и
+# Новый год) или «Выкл». «Показать праздник» — любой праздник прямо сейчас,
+# на 3 минуты, не дожидаясь даты.
+#
 # Новогодняя гирлянда: с 15 декабря по 14 января (до Старого Нового года) по
 # краю страницы часов горит гирлянда — тёмно-зелёный провод и разноцветные
 # лампочки, которые перемигиваются. Выбор «Гирлянда» в Home Assistant:
@@ -9,13 +46,14 @@
 # Дни рождения: в текстовом поле «Дни рождения» — даты через запятую, у каждой
 # можно указать имя: «15.01 Маша, 3.07 Костя, 21.11». В такой день:
 #   - вместо восхода и заката на часах — «С днём рождения, Маша!» золотым;
-#   - горит гирлянда (если «Гирлянда» не «Выкл»);
+#   - горит гирлянда (если «Гирлянда» не «Выкл»), кот в колпаке;
 #   - в 9 утра — поздравление карточкой, как сообщение из HA, и салют. Если в
 #     это время экран погашен (ночь или никого нет дома) — как только кто-то
 #     вернётся.
 #
 # Салют: ровно в полночь на Новый год — минуту, в день рождения — вместе с
-# поздравлением, и по кнопке «Салют» в Home Assistant — 20 секунд.
+# поздравлением, 23 февраля, 9 Мая и 12 июня — вечером, и по кнопке «Салют»
+# в Home Assistant — 20 секунд.
 # ---------------------------------------------------------------------------
 
 globals:
@@ -24,13 +62,12 @@ globals:
     type: bool
     restore_value: false
     initial_value: 'false'
-  # Кого поздравляем сегодня: «Маша и Костя»; пусто — никого. Отдельно — есть
-  # ли вообще день рождения (дата может быть без имени)
+  # Кого поздравляем сегодня: «С днём рождения, Маша и Костя!»; пусто — никого
   - id: birthday_line
     type: std::string
     restore_value: false
     initial_value: '""'
-  # Сегодня праздник: Новый год или чей-то день рождения. Кот — в колпаке
+  # Сегодня праздник: кот приходит чаще
   - id: festive_day
     type: bool
     restore_value: false
@@ -40,6 +77,55 @@ globals:
     type: int
     restore_value: true
     initial_value: '-1'
+  # Какой сегодня праздник (weather_fx::HOL_*), 0 — никакого
+  - id: holiday
+    type: int
+    restore_value: false
+    initial_value: '0'
+  # Подпись на часах вместо восхода и заката; пусто — обычная строка солнца
+  - id: holiday_caption
+    type: std::string
+    restore_value: false
+    initial_value: '""'
+  # Новогодние дни (15 декабря — 14 января): кот в шапке Деда Мороза
+  - id: holiday_new_year
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  # «Показать праздник»: какой и до какого момента millis()
+  - id: hol_preview
+    type: int
+    restore_value: false
+    initial_value: '0'
+  - id: hol_preview_until
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+  # Цвета салюта: 0 разноцветный, 1 бело-сине-красный, 2 красно-золотой
+  - id: fw_palette
+    type: int
+    restore_value: false
+    initial_value: '0'
+  # День программиста: двоичное время и «матрица» до этого момента millis()
+  - id: binary_until
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+  # Новогодний отсчёт для проверки: когда начался (0 — не идёт)
+  - id: countdown_t0
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+  # 1 апреля: когда следующий розыгрыш (0 — не сегодня)
+  - id: april_next
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+  # 1 апреля: какой розыгрыш сейчас — 0 перевёрнутые цифры, 1 «неверное» время
+  - id: april_kind
+    type: int
+    restore_value: false
+    initial_value: '0'
 
 button:
   # Салют прямо сейчас — на 20 секунд
@@ -63,6 +149,66 @@ select:
     restore_value: true
     on_value:
       - script.execute: holiday_check
+
+  # Какие праздники отмечать: все, только семейные (дни рождения и Новый
+  # год) или никакие
+  - platform: template
+    id: holiday_mode_select
+    name: Праздники
+    icon: mdi:party-popper
+    entity_category: config
+    options: ["Все", "Только семейные", "Выкл"]
+    initial_option: "Все"
+    optimistic: true
+    restore_value: true
+    on_value:
+      - script.execute: holiday_check
+
+  # Показать праздник сейчас, на 3 минуты. Порядок пунктов — номера
+  # weather_fx::HOL_*, новые — только в конец
+  - platform: template
+    id: holiday_show_select
+    name: Показать праздник
+    icon: mdi:calendar-star
+    options:
+      - "—"
+      - "Новый год"
+      - "Рождество"
+      - "23 февраля"
+      - "8 Марта"
+      - "Масленица"
+      - "1 апреля"
+      - "День космонавтики"
+      - "Пасха"
+      - "День кошек"
+      - "9 Мая"
+      - "День защиты детей"
+      - "День России"
+      - "Иван Купала"
+      - "Звездопад"
+      - "1 сентября"
+      - "День программиста"
+      - "Хэллоуин"
+      - "Пятница, 13-е"
+      - "Полнолуние"
+      - "Суперлуние"
+      - "Лунное затмение"
+      - "Солнцестояние"
+      - "Равноденствие"
+      - "День рождения"
+    initial_option: "—"
+    optimistic: true
+    on_value:
+      - if:
+          condition:
+            lambda: 'return i > 0;'
+          then:
+            - script.execute:
+                id: holiday_preview
+                idx: !lambda 'return (int) i;'
+            - select.set:
+                id: holiday_show_select
+                option: "—"
 
 text:
   - platform: template
@@ -90,6 +236,32 @@ script:
       - lvgl.page.show:
           id: page_clock
 
+  # «Показать праздник»: праздник на 3 минуты, экран просыпается на часах,
+  # кот сразу показывает праздничную сценку
+  - id: holiday_preview
+    parameters:
+      idx: int
+    mode: restart
+    then:
+      - lambda: |-
+          using namespace weather_fx;
+          id(hol_preview) = idx;
+          id(hol_preview_until) = millis() + 180000u;
+          id(countdown_t0) = idx == HOL_NEW_YEAR ? millis() : 0;
+          id(binary_until) = idx == HOL_PROGRAMMER ? millis() + 60000u : 0;
+      - script.execute: wake_screen
+      - lvgl.page.show:
+          id: page_clock
+      - script.execute: holiday_check
+      - lambda: |-
+          using namespace weather_fx;
+          if (idx == HOL_APRIL1)
+            id(april_next) = millis() + 3000u;
+          id(crit)->set_holiday(id(holiday), idx == HOL_BIRTHDAY, id(holiday_new_year));
+          id(crit)->start_holiday_scene();
+          if (idx == HOL_FEB23 || idx == HOL_VICTORY || idx == HOL_RUSSIA || idx == HOL_BIRTHDAY)
+            id(start_fireworks)->execute(20);
+
   # Раз в минуту (из refresh_clock) и при смене настроек: какой сегодня
   # праздник, гореть ли гирлянде, кого поздравить
   - id: holiday_check
@@ -97,20 +269,24 @@ script:
     max_runs: 2
     then:
       - lambda: |-
+          using namespace weather_fx;
           auto now = id(ha_time).now();
           if (!now.is_valid())
             return;
+          // «Праздники»: 0 все, 1 только семейные, 2 никакие
+          const size_t mode = id(holiday_mode_select).active_index().value_or(0);
+          const bool fam = mode != 2, all = mode == 0;
 
           // Дни рождения: «ДД.ММ Имя» через запятую или точку с запятой
           std::string names;
           bool bday = false;
-          const std::string &all = id(birthdays_text).state;
+          const std::string &list = id(birthdays_text).state;
           size_t pos = 0;
-          while (pos < all.size()) {
-            size_t end = all.find_first_of(",;", pos);
+          while (pos < list.size()) {
+            size_t end = list.find_first_of(",;", pos);
             if (end == std::string::npos)
-              end = all.size();
-            std::string item = all.substr(pos, end - pos);
+              end = list.size();
+            std::string item = list.substr(pos, end - pos);
             pos = end + 1;
             int d = 0, m = 0, used = 0;
             if (sscanf(item.c_str(), " %d.%d%n", &d, &m, &used) < 2)
@@ -125,24 +301,147 @@ script:
             if (!name.empty())
               names += (names.empty() ? "" : " и ") + name;
           }
+          bday = bday && fam;
           std::string line;
           if (bday)
             line = names.empty() ? std::string("С днём рождения!") : "С днём рождения, " + names + "!";
-          if (line != id(birthday_line)) {
-            id(birthday_line) = line;
+          id(birthday_line) = line;
+
+          // Праздник по календарю. Сверху вниз — что важнее, если совпали
+          const int y = now.year, m = now.month, d = now.day_of_month, hr = now.hour;
+          const int today = days_from_civil(y, m, d);
+          int em, ed;
+          orthodox_easter(y, em, ed);
+          const int easter = days_from_civil(y, em, ed);
+          // Ночь с da на da + 1 (с 18 до 7 часов)
+          auto night_of = [&](int mo, int da) {
+            const int n0 = days_from_civil(y, mo, da);
+            return (today == n0 && hr >= 18) || (today == n0 + 1 && hr < 7);
+          };
+          int h = HOL_NONE;
+          if ((m == 12 && d == 31) || (m == 1 && d == 1))
+            h = HOL_NEW_YEAR;
+          else if (m == 1 && d == 7)
+            h = HOL_CHRISTMAS;
+          else if (m == 2 && d == 23)
+            h = HOL_FEB23;
+          else if (m == 3 && d == 8)
+            h = HOL_MAR8;
+          else if (today == easter)
+            h = HOL_EASTER;
+          else if (today >= easter - 55 && today <= easter - 49)
+            h = HOL_MASLENITSA;
+          else if (m == 4 && d == 1)
+            h = HOL_APRIL1;
+          else if (m == 4 && d == 12)
+            h = HOL_COSMOS;
+          else if ((m == 3 && d == 1) || (m == 8 && d == 8))
+            h = HOL_CAT_DAY;
+          else if (m == 5 && d == 9)
+            h = HOL_VICTORY;
+          else if (m == 6 && d == 1)
+            h = HOL_CHILDREN;
+          else if (m == 6 && d == 12)
+            h = HOL_RUSSIA;
+          else if ((m == 7 && d == 7) || (m == 7 && d == 6 && hr >= 18))
+            h = HOL_KUPALA;
+          else if (now.day_of_year == 256)
+            h = HOL_PROGRAMMER;
+          else if (m == 9 && d == 1)
+            h = HOL_SEPT1;
+          else if (m == 10 && d == 31)
+            h = HOL_HALLOWEEN;
+          else if (night_of(8, 11) || night_of(8, 12) || night_of(12, 13) || night_of(12, 14))
+            h = HOL_METEORS;
+          else if (d == 13 && now.day_of_week == 6)
+            h = HOL_FRIDAY13;
+          // Небо: полнолуние и затмение — ночью, солнцестояние и
+          // равноденствие — весь день
+          int season = 0;
+          if (h == HOL_NONE) {
+            const int mev = id(is_night) ? moon_event((uint32_t) now.timestamp) : HOL_NONE;
+            if (mev != HOL_NONE) {
+              h = mev;
+            } else {
+              const uint32_t t0 = (uint32_t) now.timestamp - (hr * 3600 + now.minute * 60 + now.second);
+              season = season_event(t0, t0 + 86400);
+              if (season)
+                h = season % 2 == 0 ? HOL_SOLSTICE : HOL_EQUINOX;
+            }
+          }
+          // «Только семейные» — из всего этого только Новый год
+          if (!all && h != HOL_NEW_YEAR)
+            h = HOL_NONE;
+          if (!fam)
+            h = HOL_NONE;
+
+          // «Показать праздник» — поверх всего, на 3 минуты
+          const bool preview = (int32_t) (id(hol_preview_until) - millis()) > 0 && id(hol_preview) > 0;
+          if (preview) {
+            h = id(hol_preview);
+            if (h == HOL_SOLSTICE)
+              season = (m >= 3 && m <= 8) ? 2 : 4;
+            if (h == HOL_EQUINOX)
+              season = (m >= 9 || m <= 2) ? 3 : 1;
+          } else {
+            id(hol_preview) = 0;
+          }
+
+          // Подпись вместо восхода и заката
+          std::string cap;
+          switch (h) {
+            case HOL_NEW_YEAR: cap = m == 12 && !preview ? "\U000F0405 Скоро Новый год!" : "\U000F0405 С Новым годом!"; break;
+            case HOL_CHRISTMAS: cap = "\U000F04CE С Рождеством!"; break;
+            case HOL_FEB23: cap = "\U000F04CE С Днём защитника Отечества!"; break;
+            case HOL_MAR8: cap = "\U000F09F1 С 8 Марта!"; break;
+            case HOL_MASLENITSA: cap = today == easter - 49 ? "\U000F0599 Прощёное воскресенье" : "\U000F0599 Масленица!"; break;
+            case HOL_APRIL1: cap = "\U000F0C78 С 1 апреля!"; break;
+            case HOL_COSMOS: cap = "\U000F0463 День космонавтики"; break;
+            case HOL_EASTER: cap = "\U000F0AB0 Христос воскресе!"; break;
+            case HOL_CAT_DAY: cap = "\U000F011B День кошек"; break;
+            case HOL_VICTORY: cap = "\U000F0E30 С Днём Победы!"; break;
+            case HOL_CHILDREN: cap = "\U000F0A26 День защиты детей"; break;
+            case HOL_RUSSIA: cap = "\U000F023B С Днём России!"; break;
+            case HOL_KUPALA: cap = "\U000F024A Иван Купала"; break;
+            case HOL_METEORS: cap = m == 12 ? "\U000F0629 Звездопад Геминиды" : "\U000F0629 Звездопад Персеиды"; break;
+            case HOL_SEPT1: cap = "\U000F0474 С Днём знаний!"; break;
+            case HOL_PROGRAMMER: cap = "\U000F0169 День программиста"; break;
+            case HOL_HALLOWEEN: cap = "\U000F0BBF Хэллоуин"; break;
+            case HOL_FRIDAY13: cap = "\U000F011B Пятница, 13-е"; break;
+            case HOL_FULL_MOON: cap = "\U000F0F62 Полнолуние"; break;
+            case HOL_SUPERMOON: cap = "\U000F0F62 Суперлуние"; break;
+            case HOL_ECLIPSE: cap = "\U000F0F62 Лунное затмение"; break;
+            case HOL_SOLSTICE: cap = season == 2 ? "\U000F0599 Самый длинный день" : "\U000F0594 Самая длинная ночь"; break;
+            case HOL_EQUINOX: cap = season == 1 ? "\U000F050E Весеннее равноденствие" : "\U000F050E Осеннее равноденствие"; break;
+            case HOL_BIRTHDAY: cap = "\U000F00EB С днём рождения!"; break;
+            default: break;
+          }
+          // День рождения важнее любого праздника (кроме проверки)
+          if (bday && !preview)
+            cap = "\U000F00EB " + line;
+
+          const bool changed = h != id(holiday);
+          id(holiday) = h;
+          if (cap != id(holiday_caption)) {
+            id(holiday_caption) = cap;
             id(refresh_sun)->execute();
           }
 
           // Гирлянда: «Авто» — в новогодние праздники и в дни рождения
           const size_t sel = id(garland_select).active_index().value_or(0);
-          const bool new_year = (now.month == 12 && now.day_of_month >= 15) || (now.month == 1 && now.day_of_month <= 14);
-          id(fx_garland) = sel == 1 || (sel == 0 && (new_year || bday));
-          // «Гирлянда: Всегда» заодно надевает на кота колпак — чтобы увидеть
-          // праздник, не дожидаясь даты
-          id(festive_day) = new_year || bday || sel == 1;
+          const bool new_year = fam && ((m == 12 && d >= 15) || (m == 1 && d <= 14));
+          const bool pv_ny = preview && (h == HOL_NEW_YEAR || h == HOL_CHRISTMAS);
+          id(fx_garland) = sel == 1 || (sel == 0 && (new_year || bday || pv_ny || (preview && h == HOL_BIRTHDAY)));
+          // «Гирлянда: Всегда» заодно надевает на кота шапку Деда Мороза —
+          // чтобы увидеть праздник, не дожидаясь даты
+          id(holiday_new_year) = sel == 1 || new_year || pv_ny;
+          // Праздник — кот приходит чаще (небесные события не в счёт)
+          id(festive_day) = new_year || bday || sel == 1 || (h >= HOL_NEW_YEAR && h <= HOL_FRIDAY13) ||
+                            h == HOL_BIRTHDAY;
+          id(fw_palette) = h == HOL_RUSSIA ? 1 : (h == HOL_FEB23 ? 2 : 0);
 
-          // Поздравление карточкой — один раз в день, с 9 утра, когда экран
-          // не погашен по ночному расписанию и кто-то дома
+          // Поздравление — один раз в день, с 9 утра, когда экран не погашен
+          // по ночному расписанию и кто-то дома
           if (bday && now.hour >= 9 && id(greeted_day) != now.day_of_year && !id(off_wanted)) {
             id(greeted_day) = now.day_of_year;
             id(show_message)->execute(line, ${message_seconds}, std::string("#FFC107"));
@@ -151,7 +450,182 @@ script:
 
           // Новогодний салют — ровно в полночь, минуту
           static int fired_year = -1;
-          if (now.month == 1 && now.day_of_month == 1 && now.hour == 0 && now.minute == 0 && fired_year != now.year) {
-            fired_year = now.year;
+          if (fam && m == 1 && d == 1 && hr == 0 && now.minute == 0 && fired_year != y) {
+            fired_year = y;
             id(start_fireworks)->execute(60);
+          }
+          // Вечерние салюты: 23 февраля в 21:00, 9 Мая и 12 июня в 22:00
+          static int fired_day = -1;
+          auto salute = [&](int hh, int secs) {
+            if (hr == hh && now.minute == 0 && fired_day != now.day_of_year) {
+              fired_day = now.day_of_year;
+              id(start_fireworks)->execute(secs);
+            }
+          };
+          if (all && !preview) {
+            if (m == 2 && d == 23)
+              salute(21, 60);
+            if (m == 5 && d == 9)
+              salute(22, 120);
+            if (m == 6 && d == 12)
+              salute(22, 60);
+          }
+
+          // День программиста: в 0, 16, 32 и 48 минут — минута двоичного времени
+          if (h == HOL_PROGRAMMER && !preview && now.minute % 16 == 0)
+            id(binary_until) = millis() + 60000u;
+          // 1 апреля: первый розыгрыш — через 1–5 минут
+          if (h == HOL_APRIL1) {
+            if (id(april_next) == 0)
+              id(april_next) = millis() + (60 + random_uint32() % 240) * 1000u;
+          } else {
+            id(april_next) = 0;
+          }
+
+          if (changed) {
+            id(weather_apply)->execute();
+            id(clock_colors)->execute();
+          }
+
+  # 1 апреля: розыгрыш. По очереди — цифры на полторы секунды переворачиваются
+  # вверх ногами, или время на две секунды «врёт», а следом — карточка
+  # «С 1 апреля!»
+  - id: april_joke
+    mode: single
+    then:
+      - lambda: |-
+          static int n = 0;
+          n++;
+          id(april_kind) = n % 2;
+      - if:
+          condition:
+            lambda: 'return id(april_kind) == 0;'
+          then:
+            - lambda: |-
+                lv_obj_t *digits[2] = {id(lbl_time_h), id(lbl_time_m)};
+                for (lv_obj_t *o : digits) {
+                  lv_obj_set_style_transform_pivot_x(o, lv_pct(50), 0);
+                  lv_obj_set_style_transform_pivot_y(o, lv_pct(50), 0);
+                  lv_obj_set_style_transform_rotation(o, 1800, 0);
+                }
+            - delay: 1500ms
+            - lambda: |-
+                lv_obj_set_style_transform_rotation(id(lbl_time_h), 0, 0);
+                lv_obj_set_style_transform_rotation(id(lbl_time_m), 0, 0);
+          else:
+            - lambda: |-
+                auto now = id(ha_time).now();
+                char h[4], m[4];
+                snprintf(h, sizeof(h), "%02d", now.is_valid() ? (now.hour + 7) % 24 : 13);
+                snprintf(m, sizeof(m), "%02d", now.is_valid() ? (now.minute * 7 + 13) % 60 : 37);
+                lv_label_set_text(id(lbl_time_h), h);
+                lv_label_set_text(id(lbl_time_m), m);
+            - delay: 2s
+            - script.execute: refresh_clock
+            - script.execute:
+                id: show_message
+                text: "С 1 апреля!"
+                seconds: 3
+                color: "#FFC107"
+
+interval:
+  # Четыре раза в секунду: новогодний отсчёт, двоичное время, розыгрыши
+  - interval: 250ms
+    then:
+      - lambda: |-
+          using namespace weather_fx;
+          auto now = id(ha_time).now();
+          const uint32_t ms = millis();
+
+          // Новогодний отсчёт: 10…1, потом номер нового года. Настоящий —
+          // 31 декабря с 23:59:50; для проверки — с момента выбора
+          int n = -1, year = now.is_valid() ? now.year : 2027;
+          const bool fam = id(holiday_mode_select).active_index().value_or(0) != 2;
+          if (id(countdown_t0)) {
+            const uint32_t el = ms - id(countdown_t0);
+            year += 1;
+            if (el < 10000) {
+              n = 10 - (int) (el / 1000);
+            } else if (el < 14000) {
+              n = 0;
+            } else {
+              id(countdown_t0) = 0;
+            }
+          } else if (fam && now.is_valid()) {
+            if (now.month == 12 && now.day_of_month == 31 && now.hour == 23 && now.minute == 59 && now.second >= 50)
+              n = 60 - now.second;
+            else if (now.month == 1 && now.day_of_month == 1 && now.hour == 0 && now.minute == 0 && now.second < 5)
+              n = 0;
+          }
+          static int shown = -1;
+          if (n != shown) {
+            lv_obj_t *ov = id(ny_overlay), *lbl = id(ny_count);
+            if (n < 0) {
+              lv_obj_add_flag(ov, LV_OBJ_FLAG_HIDDEN);
+            } else {
+              if (shown < 0) {
+                id(wake_screen)->execute();
+                lv_obj_move_foreground(ov);
+                lv_obj_clear_flag(ov, LV_OBJ_FLAG_HIDDEN);
+              }
+              char buf[8];
+              snprintf(buf, sizeof(buf), "%d", n > 0 ? n : year);
+              lv_label_set_text(lbl, buf);
+              if (n == 0) {
+                lv_obj_clear_flag(id(ny_caption), LV_OBJ_FLAG_HIDDEN);
+                // Для проверки салют запускаем сами; настоящий — из holiday_check в 00:00
+                if (id(countdown_t0))
+                  id(start_fireworks)->execute(30);
+              } else {
+                lv_obj_add_flag(id(ny_caption), LV_OBJ_FLAG_HIDDEN);
+              }
+              // Цифра «падает» из крупной в обычную — каждую секунду
+              lv_obj_set_style_transform_pivot_x(lbl, lv_pct(50), 0);
+              lv_obj_set_style_transform_pivot_y(lbl, lv_pct(50), 0);
+              const int32_t to = n > 0 ? 620 : 360, from = n > 0 ? 820 : 300;
+              lv_anim_t a;
+              lv_anim_init(&a);
+              lv_anim_set_var(&a, lbl);
+              lv_anim_set_values(&a, from, to);
+              lv_anim_set_duration(&a, 350);
+              lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
+              lv_anim_set_exec_cb(&a, [](void *o, int32_t v) {
+                lv_obj_set_style_transform_scale((lv_obj_t *) o, v, 0);
+              });
+              lv_anim_start(&a);
+            }
+            shown = n;
+          }
+
+          // День программиста: часы и минуты двоичными числами
+          const bool bin = (int32_t) (id(binary_until) - ms) > 0 && now.is_valid();
+          static bool bin_shown = false;
+          if (bin) {
+            char buf[16];
+            for (int i = 0; i < 5; i++)
+              buf[i] = (now.hour >> (4 - i)) & 1 ? '1' : '0';
+            buf[5] = '\n';
+            for (int i = 0; i < 6; i++)
+              buf[6 + i] = (now.minute >> (5 - i)) & 1 ? '1' : '0';
+            buf[12] = 0;
+            if (strcmp(lv_label_get_text(id(lbl_binary)), buf) != 0)
+              lv_label_set_text(id(lbl_binary), buf);
+            if (!bin_shown) {
+              bin_shown = true;
+              lv_obj_add_flag(id(lbl_time_h), LV_OBJ_FLAG_HIDDEN);
+              lv_obj_add_flag(id(lbl_time_m), LV_OBJ_FLAG_HIDDEN);
+              lv_obj_clear_flag(id(lbl_binary), LV_OBJ_FLAG_HIDDEN);
+            }
+          } else if (bin_shown) {
+            bin_shown = false;
+            lv_obj_clear_flag(id(lbl_time_h), LV_OBJ_FLAG_HIDDEN);
+            lv_obj_clear_flag(id(lbl_time_m), LV_OBJ_FLAG_HIDDEN);
+            lv_obj_add_flag(id(lbl_binary), LV_OBJ_FLAG_HIDDEN);
+          }
+
+          // 1 апреля: розыгрыш, когда подошло время и часы на экране
+          if (id(holiday) == HOL_APRIL1 && id(april_next) && (int32_t) (ms - id(april_next)) >= 0 &&
+              id(current_page) == 0 && !id(screen_off)) {
+            id(april_next) = ms + (600 + random_uint32() % 900) * 1000u;
+            id(april_joke)->execute();
           }

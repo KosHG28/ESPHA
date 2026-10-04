@@ -31,8 +31,9 @@ font:
     bpp: 4
     glyphs: ["0123456789-.", "°"]
 
-  # Строка восхода и заката на часах. Она же пишет «нет связи с HA» и
-  # поздравляет с днём рождения, поэтому с кириллицей
+  # Строка восхода и заката на часах. Она же пишет «нет связи с HA»,
+  # поздравляет с днём рождения и с праздниками (packages/holidays.yaml) —
+  # поэтому с кириллицей и значками праздников
   - file: "gfonts://Montserrat@400"
     id: font_sun
     size: 22
@@ -47,6 +48,25 @@ font:
           - "\U000F059C"   # weather-sunset-up
           - "\U000F059B"   # weather-sunset-down
           - "\U000F00EB"   # cake-variant — день рождения
+          - "\U000F0405"   # pine-tree — Новый год
+          - "\U000F04CE"   # star — Рождество, 23 февраля
+          - "\U000F09F1"   # flower-tulip — 8 Марта
+          - "\U000F0599"   # weather-sunny — Масленица, самый длинный день
+          - "\U000F0C78"   # emoticon-wink — 1 апреля
+          - "\U000F0463"   # rocket — День космонавтики
+          - "\U000F0AB0"   # egg-easter — Пасха
+          - "\U000F011B"   # cat — День кошек, пятница 13-е
+          - "\U000F0E30"   # firework — 9 Мая
+          - "\U000F0A26"   # balloon — 1 июня
+          - "\U000F023B"   # flag — 12 июня
+          - "\U000F024A"   # flower — Иван Купала
+          - "\U000F0629"   # meteor — звездопад
+          - "\U000F0474"   # school — 1 сентября
+          - "\U000F0169"   # code-braces — День программиста
+          - "\U000F0BBF"   # pumpkin — Хэллоуин
+          - "\U000F0F62"   # moon-full — полнолуние, затмение
+          - "\U000F0594"   # weather-night — самая длинная ночь
+          - "\U000F050E"   # theme-light-dark — равноденствие
 
   # Надпись вспышки во весь экран: «ГОТОВО», «ОШИБКА»
   - file: "gfonts://Montserrat@600"
@@ -104,12 +124,14 @@ font:
     id: font_con
     size: 16
     bpp: 4
-    # Созвездия и планеты (Венера, Юпитер, Марс, Сатурн)
-    glyphs: [" АБВКЛМОПСТЦЮабвгдезийлмнопрстуфцчшыья"]
+    # Созвездия и планеты (Венера, Юпитер, Марс, Сатурн); 0 и 1 — «матрица»
+    # в День программиста
+    glyphs: [" 01АБВКЛМОПСТЦЮабвгдезийлмнопрстуфцчшыья"]
 
   # Снежинки погодного фона: три формы из Noto Sans Symbols 2 и две из
   # Material Design Icons, в двух размерах — дальние и ближние. Там же два
-  # листа для осеннего листопада и два сердечка для 14 февраля
+  # листа для осеннего листопада, два сердечка для 14 февраля и праздничное:
+  # тюльпан и мимоза (8 Марта), шарик (1 июня), летучая мышь (Хэллоуин)
   - file:
       type: gfonts
       family: Noto Sans Symbols 2
@@ -130,6 +152,10 @@ font:
           - "\U000F0C93"   # mdi-leaf-maple
           - "\U000F02D1"   # mdi-heart — 14 февраля
           - "\U000F08D0"   # mdi-cards-heart
+          - "\U000F09F1"   # mdi-flower-tulip — 8 Марта
+          - "\U000F024A"   # mdi-flower — мимоза
+          - "\U000F0A26"   # mdi-balloon — 1 июня
+          - "\U000F0B5F"   # mdi-bat — Хэллоуин
 
   - file:
       type: gfonts
@@ -151,6 +177,10 @@ font:
           - "\U000F0C93"   # mdi-leaf-maple
           - "\U000F02D1"   # mdi-heart — 14 февраля
           - "\U000F08D0"   # mdi-cards-heart
+          - "\U000F09F1"   # mdi-flower-tulip — 8 Марта
+          - "\U000F024A"   # mdi-flower — мимоза
+          - "\U000F0A26"   # mdi-balloon — 1 июня
+          - "\U000F0B5F"   # mdi-bat — Хэллоуин
 
   # Значок «нет воды в поилке» — крупная перечёркнутая капля
   - file:
@@ -348,6 +378,38 @@ lvgl:
           hidden: true
           clickable: false
           scrollable: false
+
+      # Новогодний отсчёт: последние 10 секунд года — крупные цифры поверх
+      # всего, потом номер нового года (packages/holidays.yaml)
+      - obj:
+          id: ny_overlay
+          width: 466
+          height: 466
+          align: CENTER
+          radius: 233
+          bg_color: 0x000000
+          bg_opa: 85%
+          border_width: 0
+          pad_all: 0
+          hidden: true
+          clickable: false
+          scrollable: false
+          widgets:
+            - label:
+                id: ny_count
+                text: ""
+                text_font: font_time_h
+                text_color: 0xFFD54F
+                align: CENTER
+                y: -10
+            - label:
+                id: ny_caption
+                text: "С Новым годом!"
+                text_font: font_l
+                text_color: 0xFFFFFF
+                align: CENTER
+                y: 110
+                hidden: true
 
       # Обновление прошивки: кольцо прогресса и процент (ota_screen.yaml)
       - obj:
@@ -647,6 +709,18 @@ lvgl:
                   align: CENTER
                   x: 94
                   y: -8
+
+              # День программиста: минуту время в двоичном виде — часы
+              # над минутами (packages/holidays.yaml)
+              - label:
+                  id: lbl_binary
+                  text: ""
+                  text_font: font_l
+                  text_color: 0x39FF14
+                  text_align: CENTER
+                  align: CENTER
+                  y: -8
+                  hidden: true
 
               # Погода словом — «Облачно», «Дождь» — цветом иконки погоды
               - label:

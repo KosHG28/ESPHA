@@ -1,24 +1,25 @@
 #!/usr/bin/env python3
 """Рисует пиксельные спрайты «гостей» экрана (кот, птица, улитка, снеговик,
-сова, бабочка, ёжик, тыква,
-праздничный колпак, зонтик, снежинка) и записывает их в components/critters/sprites.h как
-изображения LVGL (RGB565A8). Запуск: python3 tools/make_sprites.py [папка_для_png]
+сова, бабочка, ёжик, тыква, мышка, чёрный кот) и праздничные вещи кота
+(колпак, шапка Деда Мороза, пилотка, корона, шлем космонавта, ранец, зонтик,
+миска, кулич, блины, снежинка) и записывает их в components/critters/sprites.h
+как изображения LVGL (RGB565A8). Запуск: python3 tools/make_sprites.py [папка_для_png]
 
-Колпак — отдельная картинка: в праздники она едет поверх кота. Для каждого
-кадра кота записывается точка на макушке между ушами (HAT_ANCHORS), куда
-ставится середина нижнего края колпака.
+Спрайты хранятся в исходной маленькой сетке — каждая клетка один пиксель.
+Увеличивает их компонент critters при показе, «по пикселям»: кот в 6 раз,
+мышка в 4, остальные гости в 3. Так прошивка не растёт от размера кота.
 
-Спрайты рисуются примитивами без сглаживания в маленькой сетке и
-увеличиваются в SCALE раз «по пикселям» — получается пиксель-арт.
+Для каждого кадра кота записываются три точки (CAT_ANCHORS, в полуклетках):
+макушка между ушами — туда ставится середина нижнего края шапки, середина
+головы — для шлема космонавта, и спина — для ранца.
+
+Спрайты рисуются примитивами без сглаживания — получается пиксель-арт.
 """
 import sys
 from pathlib import Path
 
 from PIL import Image, ImageDraw
 
-# Во сколько раз увеличивать: кот крупный, остальные гости поменьше
-SCALE_CAT = 4
-SCALE_OTHER = 3
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "components" / "critters" / "sprites.h"
 
@@ -283,18 +284,149 @@ def party_hat():
     return im
 
 
-# Макушка кота в каждом кадре (в клетках исходной сетки 26×16): середина между
-# кончиками ушей и верх головы. Для отражённых кадров x = 26 − x
-def hat_anchors():
+def santa_hat():
+    """Шапка Деда Мороза: красный колпак свисает набок, белая опушка и помпон."""
+    im = canvas(12, 10)
+    d = ImageDraw.Draw(im)
+    red = (220, 38, 38, 255)
+    red_d = (170, 20, 30, 255)
+    d.polygon([(1, 8), (10, 8), (8, 3), (5, 1), (3, 3)], fill=red)
+    d.polygon([(5, 1), (8, 0), (10, 2), (8, 3)], fill=red_d)
+    d.ellipse([9, 1, 11, 3], fill=(255, 255, 255, 255))
+    d.rectangle([0, 7, 11, 9], fill=(245, 245, 245, 255))
+    d.line([1, 9, 10, 9], fill=(215, 220, 230, 255))
+    return im
+
+
+def pilotka():
+    """Пилотка защитника: зелёная «лодочка» с красной звёздочкой."""
+    im = canvas(12, 5)
+    d = ImageDraw.Draw(im)
+    khaki = (104, 120, 58, 255)
+    dark = (74, 88, 40, 255)
+    d.polygon([(0, 4), (1, 1), (5, 0), (11, 1), (11, 4)], fill=khaki)
+    d.line([1, 3, 11, 3], fill=dark)
+    d.point((7, 1), fill=(230, 40, 40, 255))
+    d.point((6, 2), fill=(230, 40, 40, 255))
+    d.point((8, 2), fill=(230, 40, 40, 255))
+    d.point((7, 2), fill=(255, 80, 60, 255))
+    return im
+
+
+def crown():
+    """Золотая корона с камнями — в День кошек."""
+    im = canvas(10, 7)
+    d = ImageDraw.Draw(im)
+    gold = (255, 196, 30, 255)
+    gold_d = (205, 145, 10, 255)
+    d.polygon([(0, 6), (0, 1), (2, 3), (5, 0), (7, 3), (9, 1), (9, 6)], fill=gold)
+    d.line([0, 6, 9, 6], fill=gold_d)
+    d.point((5, 0), fill=(255, 240, 160, 255))
+    d.point((2, 4), fill=(230, 40, 60, 255))
+    d.point((5, 4), fill=(40, 120, 255, 255))
+    d.point((7, 4), fill=(230, 40, 60, 255))
+    return im
+
+
+def helmet():
+    """Шлем космонавта: прозрачный стеклянный пузырь со светлым ободком и бликом."""
+    im = canvas(13, 12)
+    d = ImageDraw.Draw(im)
+    d.ellipse([0, 0, 12, 11], fill=(150, 210, 255, 48), outline=(225, 240, 255, 230))
+    d.line([3, 2, 5, 1], fill=(255, 255, 255, 220))
+    d.point((2, 3), fill=(255, 255, 255, 200))
+    # воротник
+    d.rectangle([2, 10, 10, 11], fill=(200, 205, 215, 255))
+    return im
+
+
+def backpack():
+    """Школьный ранец: красный, с синей крышкой и застёжкой."""
+    im = canvas(7, 7)
+    d = ImageDraw.Draw(im)
+    d.rectangle([0, 1, 6, 6], fill=(220, 50, 50, 255))
+    d.rectangle([0, 1, 6, 3], fill=(40, 90, 200, 255))
+    d.point((3, 3), fill=(255, 210, 60, 255))
+    d.line([1, 0, 5, 0], fill=(120, 60, 40, 255))
+    return im
+
+
+def kulich():
+    """Пасхальный кулич: высокий, румяный, белая глазурь стекает, посыпка."""
+    im = canvas(9, 12)
+    d = ImageDraw.Draw(im)
+    crust = (190, 112, 40, 255)
+    crust_d = (150, 82, 25, 255)
+    d.rectangle([1, 4, 7, 11], fill=crust)
+    d.line([1, 11, 7, 11], fill=crust_d)
+    d.line([7, 5, 7, 11], fill=crust_d)
+    d.ellipse([0, 0, 8, 5], fill=(250, 250, 245, 255))
+    d.line([1, 5, 1, 6], fill=(250, 250, 245, 255))
+    d.line([4, 5, 4, 7], fill=(250, 250, 245, 255))
+    d.line([7, 5, 7, 6], fill=(250, 250, 245, 255))
+    for x, y, c in ((2, 2, (255, 64, 129, 255)), (4, 1, (64, 196, 255, 255)), (6, 2, (255, 214, 0, 255)),
+                    (3, 3, (105, 240, 174, 255)), (5, 3, (255, 64, 129, 255))):
+        d.point((x, y), fill=c)
+    return im
+
+
+def pancakes():
+    """Стопка блинов на тарелке, сверху кусочек масла."""
+    im = canvas(12, 6)
+    d = ImageDraw.Draw(im)
+    d.ellipse([0, 3, 11, 5], fill=(235, 240, 245, 255))
+    gold = (242, 184, 75, 255)
+    edge = (208, 138, 46, 255)
+    for k, y in enumerate((3, 2, 1)):
+        d.rectangle([1 + (k % 2), y, 10 - (k % 2), y], fill=gold if k % 2 == 0 else edge)
+    d.rectangle([2, 0, 9, 0], fill=gold)
+    d.rectangle([5, 0, 6, 0], fill=(255, 236, 140, 255))
+    return im
+
+
+# Чёрный кот для пятницы, 13-го: тот же бегущий кот, перекрашенный
+BLACK = {FUR: (46, 46, 56, 255), FUR_D: (24, 24, 30, 255), BELLY: (70, 70, 82, 255),
+         EYE: (255, 214, 0, 255), NOSE: (150, 100, 120, 255)}
+
+
+def recolor(im, table):
+    out = im.copy()
+    px = out.load()
+    for y in range(out.height):
+        for x in range(out.width):
+            c = px[x, y]
+            if c in table:
+                px[x, y] = table[c]
+    return out
+
+
+# Точки на коте в каждом кадре (в клетках сетки 26×16): макушка между ушами
+# (низ шапки), середина головы (шлем) и спина (ранец). Для отражённых кадров
+# x = 26 − x
+def cat_anchors():
     a = {}
+
+    def both(name, hat, head, back, mirror=True):
+        a[name + ("_r" if mirror else "")] = (hat, head, back)
+        if mirror:
+            m = lambda p: (26 - p[0], p[1])
+            a[name + "_l"] = (m(hat), m(head), m(back))
+
     for p in range(4):
         bob = [0, -1, 0, 1][p]
-        a[f"cat_run_r{p}"] = (21.0, 3 + bob)
-        a[f"cat_run_l{p}"] = (26 - 21.0, 3 + bob)
+        hat, head, back = (21.0, 3 + bob), (20.5, 5.5 + bob), (10.0, 5.5 + bob)
+        a[f"cat_run_r{p}"] = (hat, head, back)
+        m = lambda q: (26 - q[0], q[1])
+        a[f"cat_run_l{p}"] = (m(hat), m(head), m(back))
     for name in ("cat_sit", "cat_blink", "cat_look", "cat_paw"):
-        a[f"{name}_r"] = (16.0, 2)
-        a[f"{name}_l"] = (26 - 16.0, 2)
-    a["cat_sleep"] = (20.0, 6)
+        both(name, (16.0, 2), (15.5, 4.5), (8.0, 9.5))
+    for f in (0, 1):
+        hy = 1 if f else 0
+        hat, head, back = (20.0, 6 + hy), (19.5, 10 + hy), (10.0, 8.0)
+        a[f"cat_drink_r{f}"] = (hat, head, back)
+        m = lambda q: (26 - q[0], q[1])
+        a[f"cat_drink_l{f}"] = (m(hat), m(head), m(back))
+    a["cat_sleep"] = ((20.0, 6), (19.0, 8.5), (10.0, 7.0))
     return a
 
 
@@ -396,10 +528,6 @@ def pumpkin(lit):
     return im
 
 
-def scaled(im, k):
-    return im.resize((im.width * k, im.height * k), Image.NEAREST)
-
-
 def mirrored(im):
     return im.transpose(Image.FLIP_LEFT_RIGHT)
 
@@ -421,6 +549,9 @@ def sprites():
     for f in (0, 1):
         out[f"cat_drink_r{f}"] = cat_drink(f == 1)
         out[f"cat_drink_l{f}"] = mirrored(cat_drink(f == 1))
+    for p in range(4):
+        out[f"black_run_r{p}"] = recolor(cat_run(p), BLACK)
+        out[f"black_run_l{p}"] = mirrored(recolor(cat_run(p), BLACK))
     for up in (0, 1):
         out[f"bird_r{up}"] = bird(up)
         out[f"bird_l{up}"] = mirrored(bird(up))
@@ -431,14 +562,22 @@ def sprites():
         out[f"butterfly{f}"] = butterfly(f == 0)
         out[f"hedgehog{f}"] = hedgehog(f)
         out[f"pumpkin{f}"] = pumpkin(f == 1)
+    # Вещи кота — увеличиваются вместе с котом
     out["cat_hat"] = party_hat()
+    out["cat_santa"] = santa_hat()
+    out["cat_pilotka"] = pilotka()
+    out["cat_crown"] = crown()
+    out["cat_helmet"] = helmet()
+    out["cat_backpack"] = backpack()
     out["cat_umbrella"] = umbrella()
-    out["flake"] = snowflake()
     out["cat_bowl"] = bowl()
+    out["cat_kulich"] = kulich()
+    out["cat_pancakes"] = pancakes()
+    out["flake"] = snowflake()
     for f in (0, 1):
         out[f"mouse_r{f}"] = mouse(f)
         out[f"mouse_l{f}"] = mirrored(mouse(f))
-    return {k: scaled(v, SCALE_CAT if k.startswith("cat") else SCALE_OTHER) for k, v in out.items()}
+    return out
 
 
 def c_array(name, im):
@@ -477,18 +616,21 @@ def main():
         for k, v in sp.items():
             v.save(dst / f"{k}.png")
     body = "\n".join(c_array(f"spr_{k}", v) for k, v in sp.items())
-    rows = [f"    {{&spr_{k}, {round(x * SCALE_CAT)}, {round(y * SCALE_CAT)}}},"
-            for k, (x, y) in hat_anchors().items()]
+    h2 = lambda v: round(v * 2)
+    rows = [f"    {{&spr_{k}, {h2(hat[0])}, {h2(hat[1])}, {h2(head[0])}, {h2(head[1])}, {h2(back[0])}, {h2(back[1])}}},"
+            for k, (hat, head, back) in cat_anchors().items()]
     body += (
-        "\n// Куда ставить колпак: середина его нижнего края, в пикселях спрайта\n"
-        "struct HatAnchor {\n  const lv_image_dsc_t *img;\n  int16_t x, y;\n};\n"
-        "static const HatAnchor HAT_ANCHORS[] = {\n" + "\n".join(rows) + "\n};\n"
-        "\n// Кончик поднятой лапы: [0] — кот смотрит вправо, [1] — влево\n"
-        f"static const int16_t PAW_TIP[2][2] = {{{{{round(PAW_TIP[0] * SCALE_CAT)}, {round(PAW_TIP[1] * SCALE_CAT)}}}, "
-        f"{{{round((26 - PAW_TIP[0]) * SCALE_CAT)}, {round(PAW_TIP[1] * SCALE_CAT)}}}}};\n"
-        "\n// Где стоит миска пьющего кота: середина её низа; [0] — вправо, [1] — влево\n"
-        f"static const int16_t BOWL_AT[2][2] = {{{{{round(BOWL_AT[0] * SCALE_CAT)}, {round(BOWL_AT[1] * SCALE_CAT)}}}, "
-        f"{{{round((26 - BOWL_AT[0]) * SCALE_CAT)}, {round(BOWL_AT[1] * SCALE_CAT)}}}}};\n"
+        "\n// Точки на коте, в полуклетках сетки спрайта: макушка (низ шапки),\n"
+        "// середина головы (шлем) и спина (ранец)\n"
+        "struct CatAnchor {\n  const lv_image_dsc_t *img;\n  int16_t hat_x, hat_y, head_x, head_y, back_x, back_y;\n};\n"
+        "static const CatAnchor CAT_ANCHORS[] = {\n" + "\n".join(rows) + "\n};\n"
+        "\n// Кончик поднятой лапы, в полуклетках: [0] — кот смотрит вправо, [1] — влево\n"
+        f"static const int16_t PAW_TIP[2][2] = {{{{{h2(PAW_TIP[0])}, {h2(PAW_TIP[1])}}}, "
+        f"{{{h2(26 - PAW_TIP[0])}, {h2(PAW_TIP[1])}}}}};\n"
+        "\n// Где стоит миска (кулич, блины) у морды кота: середина её низа, в\n"
+        "// полуклетках; [0] — вправо, [1] — влево\n"
+        f"static const int16_t BOWL_AT[2][2] = {{{{{h2(BOWL_AT[0])}, {h2(BOWL_AT[1])}}}, "
+        f"{{{h2(26 - BOWL_AT[0])}, {h2(BOWL_AT[1])}}}}};\n"
     )
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(
