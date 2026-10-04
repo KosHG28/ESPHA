@@ -35,7 +35,9 @@ void Radar::set_url(const std::string &url) {
     this->fails_ = 0;
     this->fail_changed_ = true;
   }
-  // Новый сервер — заново карта и самолёты
+  // Новый сервер — заново карта, самолёты и его настройки вида
+  this->view_known_ = false;
+  this->view_cfg_.map[0] = 0;
   this->map_req_ = this->map_shown_;
   if (this->task_)
     xTaskNotifyGive(this->task_);
@@ -46,7 +48,12 @@ std::string Radar::url_copy_() {
   return this->url_;
 }
 
-std::string Radar::map_url() { return this->url_copy_() + "/map.jpg?r=" + std::to_string(this->radius()); }
+std::string Radar::map_url() {
+  std::string u = this->url_copy_() + "/map.jpg?r=" + std::to_string(this->radius());
+  if (this->view_cfg_.map[0])
+    u += std::string("&s=") + this->view_cfg_.map;
+  return u;
+}
 
 void Radar::setup() {
   // Буфер ответа — в PSRAM: внутренней памяти на плате немного
@@ -60,6 +67,9 @@ void Radar::setup() {
 void Radar::set_active(bool active) {
   const bool was = this->active_.exchange(active);
   if (active && !was) {
+    // Радар открывается с радиуса, заданного на веб-странице
+    if (this->view_known_ && this->view_cfg_.r > 0 && this->view_cfg_.r != this->radius())
+      this->set_radius_(this->view_cfg_.r);
     if (!this->map_shown_) {
       this->map_shown_ = true;
       this->map_req_ = true;
@@ -70,11 +80,21 @@ void Radar::set_active(bool active) {
 }
 
 void Radar::zoom(int dir) {
-  int i = this->zoom_idx_.load() + (dir < 0 ? -1 : 1);
-  i = std::max(0, std::min(3, i));
-  if (i == this->zoom_idx_.load())
+  // Следующий шаг из ZOOMS ближе или дальше текущего радиуса — он может быть
+  // и не из списка, если задан на веб-странице
+  const int r = this->radius();
+  int next = 0;
+  for (int z : ZOOMS)
+    if (dir < 0 ? z < r : (z > r && !next))
+      next = z;
+  if (next)
+    this->set_radius_(next);
+}
+
+void Radar::set_radius_(int r) {
+  if (r == this->radius())
     return;
-  this->zoom_idx_ = i;
+  this->r_ = r;
   this->map_req_ = true;
   this->hide_card_();
   if (this->title_) {
@@ -161,6 +181,20 @@ void Radar::fetch_() {
         }
         fresh.push_back(p);
       }
+      JsonObject v = doc["v"].as<JsonObject>();
+      if (!v.isNull()) {
+        View vw;
+        strncpy(vw.map, v["m"] | "", sizeof(vw.map) - 1);
+        vw.r = v["r"] | 0;
+        vw.labels = (v["l"] | 1) != 0;
+        vw.grid = (v["g"] | 1) != 0;
+        vw.alt_color = (v["c"] | 1) != 0;
+        vw.shapes = (v["s"] | 1) != 0;
+        vw.rim = (v["o"] | 1) != 0;
+        std::lock_guard<std::mutex> lock(this->mtx_);
+        this->pending_view_ = vw;
+        this->has_view_ = true;
+      }
     }
   }
   std::lock_guard<std::mutex> lock(this->mtx_);
@@ -210,7 +244,7 @@ void Radar::bind(lv_obj_t *view, lv_obj_t *status, lv_obj_t *title, lv_obj_t *ca
   lv_timer_create(tick_cb, 250, this);
 }
 
-static lv_color_t alt_color(int32_t alt) {
+static lv_color_t alt_color_of(int32_t alt) {
   if (alt < 1500)
     return lv_color_hex(0x00E5FF);
   if (alt < 4500)
@@ -254,6 +288,36 @@ void Radar::invalidate_plane_(const Plane &p) {
   lv_obj_get_coords(this->view_, &oc);
   lv_area_t a = {p.area.x1 + oc.x1, p.area.y1 + oc.y1, p.area.x2 + oc.x1, p.area.y2 + oc.y1};
   lv_obj_invalidate_area(this->view_, &a);
+}
+
+void Radar::apply_view_(const View &v) {
+  if (this->view_known_ && v == this->view_cfg_)
+    return;
+  const View old = this->view_cfg_;
+  const bool first = !this->view_known_;
+  this->view_cfg_ = v;
+  this->view_known_ = true;
+  ESP_LOGI(TAG, "Вид: карта %s, %d км, подписи %d, сетка %d, цвет %d, силуэты %d, обод %d", v.map, v.r, v.labels,
+           v.grid, v.alt_color, v.shapes, v.rim);
+  // Первый раз карта уже скачана в стиле сервера по умолчанию — он и есть
+  // выбранный, качать заново не нужно
+  if (!first && strcmp(old.map, v.map) != 0)
+    this->map_req_ = this->map_shown_;
+  if (v.r > 0 && (first ? v.r != this->radius() : v.r != old.r))
+    this->set_radius_(v.r);
+  // Подписи и границы самолётов — заново, весь холст — перерисовать
+  this->layout_labels_();
+  for (auto &p : this->planes_)
+    p.area = this->plane_area_(p);
+  if (this->selected_ >= 0)
+    this->show_card_(this->selected_);
+  if (this->view_)
+    lv_obj_invalidate(this->view_);
+}
+
+lv_color_t Radar::plane_color_(int32_t alt) const {
+  // Без цвета по высоте — все янтарные, как на веб-странице
+  return this->view_cfg_.alt_color ? alt_color_of(alt) : lv_color_hex(0xFFC107);
 }
 
 void Radar::apply_(std::vector<Plane> &fresh, int r) {
@@ -302,6 +366,8 @@ void Radar::layout_labels_() {
   std::vector<lv_area_t> used;
   for (auto &p : this->planes_) {
     p.label = false;
+    if (!this->view_cfg_.labels)
+      continue;
     if (p.px * p.px + p.py * p.py > (float) (R_PX - 10) * (R_PX - 10))
       continue;
     const char *t = p.rt[0] ? p.rt : p.cs;
@@ -379,7 +445,7 @@ void Radar::show_card_(int idx) {
            route[0] ? "\n" : "", alt, p.spd, (int) lroundf(p.dist));
   lv_label_set_text(this->card_title_, title);
   lv_label_set_text(this->card_body_, body);
-  lv_obj_set_style_border_color(this->card_, alt_color(p.alt), 0);
+  lv_obj_set_style_border_color(this->card_, this->plane_color_(p.alt), 0);
   lv_obj_clear_flag(this->card_, LV_OBJ_FLAG_HIDDEN);
   lv_obj_move_foreground(this->card_);
   this->card_ms_ = millis();
@@ -446,10 +512,16 @@ void Radar::tick() {
   if (!this->view_)
     return;
   std::vector<Plane> fresh;
-  bool got = false, fail = false;
+  bool got = false, fail = false, got_view = false;
   int r = 0;
+  View view;
   {
     std::lock_guard<std::mutex> lock(this->mtx_);
+    if (this->has_view_) {
+      view = this->pending_view_;
+      this->has_view_ = false;
+      got_view = true;
+    }
     if (this->has_pending_) {
       fresh = std::move(this->pending_);
       this->has_pending_ = false;
@@ -461,6 +533,8 @@ void Radar::tick() {
       fail = true;
     }
   }
+  if (got_view)
+    this->apply_view_(view);
   if (got && r == this->radius())
     this->apply_(fresh, r);
   if (fail)
@@ -511,6 +585,11 @@ static const Tri HEAVY[] = {
     {-2, -3, -12, 4, -2, 2},       {2, -3, 12, 4, 2, 2},           {-1.5f, 5, -6, 10, -1.5f, 8},
     {1.5f, 5, 6, 10, 1.5f, 8},
 };
+// Без силуэтов — одна стрелка
+static const Tri ARROW[] = {
+    {0, -9, 6.5f, 7, 0, 3},
+    {0, -9, 0, 3, -6.5f, 7},
+};
 static const Tri PROP[] = {
     {0, -8, 1.4f, -4, -1.4f, -4}, {-1.4f, -4, 1.4f, -4, 1.4f, 6}, {-1.4f, -4, 1.4f, 6, -1.4f, 6},
     {-8, -3, 8, -3, 8, -0.5f},    {-8, -3, 8, -0.5f, -8, -0.5f},  {-3.5f, 5, 3.5f, 5, 3.5f, 6.5f},
@@ -545,7 +624,8 @@ void Radar::paint(lv_layer_t *layer) {
   const int fx = std::max(std::abs(x1), std::abs(x2)), fy = std::max(std::abs(y1), std::abs(y2));
   const int near2 = nx * nx + ny * ny, far2 = fx * fx + fy * fy;
   const int r_km = this->shown_r_ ? this->shown_r_ : this->radius();
-  for (int i = 1; i <= 4; i++) {
+  const bool grid = this->view_cfg_.grid;
+  for (int i = 1; i <= 4 && grid; i++) {
     const int rr = R_PX * i / 4;
     if (near2 <= (rr + 2) * (rr + 2) && far2 >= (rr - 2) * (rr - 2)) {
       arc.radius = rr;
@@ -564,7 +644,7 @@ void Radar::paint(lv_layer_t *layer) {
   // Стороны света
   static const char *const SIDE[4] = {"С", "В", "Ю", "З"};
   static const int SDX[4] = {0, 1, 0, -1}, SDY[4] = {-1, 0, 1, 0};
-  for (int i = 0; i < 4; i++) {
+  for (int i = 0; i < 4 && grid; i++) {
     const int sx = cx + SDX[i] * (R_PX - 14), sy = cy + SDY[i] * (R_PX - 14);
     lv_area_t ta = {sx - 10, sy - 9, sx + 10, sy + 9};
     if (!hit(ta))
@@ -606,9 +686,11 @@ void Radar::paint(lv_layer_t *layer) {
     lv_area_t pa = {p.area.x1 + oc.x1, p.area.y1 + oc.y1, p.area.x2 + oc.x1, p.area.y2 + oc.y1};
     if (!hit(pa))
       continue;
-    const lv_color_t col = alt_color(p.alt);
+    const lv_color_t col = this->plane_color_(p.alt);
     const float d = sqrtf(p.px * p.px + p.py * p.py);
     if (d > R_PX) {
+      if (!this->view_cfg_.rim)
+        continue;
       // За кругом — красная точка на ободе в его сторону
       const int ex = cx + (int) (p.px / d * (R_PX + 2)), ey = cy + (int) (p.py / d * (R_PX + 2));
       lv_area_t m = {ex - 3, ey - 3, ex + 3, ey + 3};
@@ -639,10 +721,11 @@ void Radar::paint(lv_layer_t *layer) {
       fill.opa = LV_OPA_COVER;
     }
     // Силуэт по курсу
-    const Tri *tris = p.kind == 1 ? HEAVY : (p.kind == 2 ? PROP : JET);
+    const Tri *tris = !this->view_cfg_.shapes ? ARROW : (p.kind == 1 ? HEAVY : (p.kind == 2 ? PROP : JET));
+    const int ntris = this->view_cfg_.shapes ? 7 : 2;
     const float a = p.hdg * (PI_F / 180.0f), ca = cosf(a), sa = sinf(a);
     tr.color = col;
-    for (int k = 0; k < 7; k++) {
+    for (int k = 0; k < ntris; k++) {
       const Tri &t = tris[k];
       const float xs[3] = {t.x0, t.x1, t.x2}, ys[3] = {t.y0, t.y1, t.y2};
       for (int v = 0; v < 3; v++)

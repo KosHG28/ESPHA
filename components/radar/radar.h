@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <cstring>
 #include <cstdint>
 #include <mutex>
 #include <string>
@@ -41,6 +42,21 @@ struct Plane {
   bool drawn{false};
 };
 
+/// Вид радара — настраивается на веб-странице сервера и приходит с /esp
+struct View {
+  char map[12]{};       ///< стиль карты: dark, sat, osm-dark, osm
+  int r{0};             ///< радиус, с которого открывается радар, км
+  bool labels{true};    ///< подписи маршрутов
+  bool grid{true};      ///< кольца и стороны света
+  bool alt_color{true}; ///< цвет по высоте
+  bool shapes{true};    ///< силуэты по типу, иначе стрелка
+  bool rim{true};       ///< отметки самолётов за кругом
+  bool operator==(const View &o) const {
+    return strcmp(map, o.map) == 0 && r == o.r && labels == o.labels && grid == o.grid &&
+           alt_color == o.alt_color && shapes == o.shapes && rim == o.rim;
+  }
+};
+
 class Radar : public Component {
  public:
   void set_url(const std::string &url);
@@ -56,10 +72,10 @@ class Radar : public Component {
 
   /// Страница радара на экране и экран включён — только тогда идут запросы
   void set_active(bool active);
-  /// Масштаб: dir < 0 — ближе (меньше радиус), dir > 0 — дальше
+  /// Масштаб: dir < 0 — ближе (меньше радиус), dir > 0 — дальше; шаги — ZOOMS
   void zoom(int dir);
-  int radius() const { return ZOOMS[this->zoom_idx_.load()]; }
-  /// Адрес картинки карты для текущего радиуса
+  int radius() const { return this->r_.load(); }
+  /// Адрес картинки карты для текущего радиуса и стиля
   std::string map_url();
   /// Радиус сменился или страницу открыли впервые — пора скачать карту
   bool take_map_request() {
@@ -85,19 +101,26 @@ class Radar : public Component {
   void show_card_(int idx);
   void hide_card_();
   void invalidate_plane_(const Plane &p);
+  void set_radius_(int r);
+  lv_color_t plane_color_(int32_t alt) const;
+  void apply_view_(const View &v);
   lv_area_t plane_area_(const Plane &p) const;
 
   std::string url_;
   uint32_t interval_ms_{8000};
   TaskHandle_t task_{nullptr};
   std::atomic<bool> active_{false};
-  std::atomic<int> zoom_idx_{2};
+  std::atomic<int> r_{100};
   bool map_req_{false}, map_shown_{false};
+  View view_cfg_;
+  bool view_known_{false};
 
   // Из задачи загрузки — в поток LVGL
   std::mutex mtx_;
   std::vector<Plane> pending_;
   bool has_pending_{false};
+  View pending_view_;
+  bool has_view_{false};
   int pending_r_{0};
   int fails_{0};
   bool fail_changed_{false};

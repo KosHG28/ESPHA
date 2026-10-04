@@ -57,15 +57,62 @@ ESP_TRAIL = 6
 
 fr_api = FlightRadar24API()
 
+# Вид радара — общий для веб-страницы и платы. Меняется на веб-странице,
+# хранится в CACHE_DIR/config.json, плата получает его с каждым /esp
+THEME_STYLE = {"night": "dark", "sat": "sat", "osm-dark": "osm-dark", "day": "osm"}
 CONFIG = {
-    "radius": 200,
-    "theme": "night",
-    "showLabels": True,
-    "showCompass": True,
-    "colorByAlt": True,
-    "silhouettes": True,
-    "showWeather": True,
+    "radius": 100,  # с какого радиуса открывается радар, км
+    "theme": {v: k for k, v in THEME_STYLE.items()}.get(MAP_STYLE, "night"),
+    "showLabels": True,  # подписи маршрутов у самолётов
+    "showCompass": True,  # кольца дальности и стороны света
+    "colorByAlt": True,  # цвет по высоте, иначе все одним цветом
+    "silhouettes": True,  # силуэт по типу самолёта, иначе стрелка
+    "showRim": True,  # красные отметки самолётов за кругом
+    "maxPlanes": 40,  # сколько ближних самолётов показывать
 }
+CONFIG_FILE = os.path.join(CACHE_DIR, "config.json")
+
+
+def load_config():
+    try:
+        with open(CONFIG_FILE, encoding="utf-8") as f:
+            update_config(json.load(f), save=False)
+    except FileNotFoundError:
+        pass
+    except Exception as e:  # noqa: BLE001
+        print(f"Настройки {CONFIG_FILE}: {e}")
+
+
+def update_config(new, save=True):
+    """Только известные ключи и только разумные значения"""
+    for key, val in new.items():
+        if key == "radius":
+            try:
+                CONFIG["radius"] = max(10, min(400, int(val)))
+            except (TypeError, ValueError):
+                pass
+        elif key == "maxPlanes":
+            try:
+                CONFIG["maxPlanes"] = max(1, min(MAX_ESP_PLANES, int(val)))
+            except (TypeError, ValueError):
+                pass
+        elif key == "theme":
+            if val in THEME_STYLE:
+                CONFIG["theme"] = val
+        elif key in CONFIG:
+            CONFIG[key] = bool(val)
+    if save:
+        try:
+            os.makedirs(CACHE_DIR, exist_ok=True)
+            with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+                json.dump(CONFIG, f, ensure_ascii=False, indent=1)
+        except OSError as e:
+            print(f"Не удалось сохранить настройки: {e}")
+
+
+def board_style():
+    """Стиль карты платы: свой TILE_URL или выбранный на веб-странице"""
+    return "custom" if TILE_URL else THEME_STYLE.get(CONFIG["theme"], "dark")
 
 # Авиакомпании по коду ИКАО — названия для карточки самолёта на плате
 AIRLINES = {
@@ -215,7 +262,12 @@ def esp_payload(r_km):
             "tr": [[int(round(a)), int(round(b))] for a, b in trail],
         })
     planes.sort(key=lambda p: p["d"])
-    return {"r": r_km, "k": round(k, 4), "t": int(time.time()), "p": planes[:MAX_ESP_PLANES]}
+    view = {
+        "m": board_style(), "r": CONFIG["radius"], "l": int(CONFIG["showLabels"]),
+        "g": int(CONFIG["showCompass"]), "c": int(CONFIG["colorByAlt"]), "s": int(CONFIG["silhouettes"]),
+        "o": int(CONFIG["showRim"]),
+    }
+    return {"r": r_km, "k": round(k, 4), "t": int(time.time()), "v": view, "p": planes[:CONFIG["maxPlanes"]]}
 
 
 # ---------------------------------------------------------------------------
@@ -349,7 +401,7 @@ def label_cities(img, r_km):
 
 
 def get_map(r_km, style=None):
-    style = style if style in TILE_SOURCES and not style.endswith("-ref") else MAP_STYLE
+    style = style if style in TILE_SOURCES and not style.endswith("-ref") else board_style()
     key = (style, r_km)
     with _map_lock:
         if key in _maps:
@@ -368,40 +420,6 @@ def get_map(r_km, style=None):
             with open(path, "wb") as f:
                 f.write(data)
         return data
-
-
-# ---------------------------------------------------------------------------
-# Осадки для веб-страницы (как было)
-
-WEATHER_CACHE = {"data": [], "last_update": 0}
-WEATHER_CITIES = [c for c in CITIES if c.get("weather")] or [{"lat": CENTER_LAT, "lon": CENTER_LON}]
-
-
-def get_real_weather():
-    now = time.time()
-    if now - WEATHER_CACHE["last_update"] < 300 and WEATHER_CACHE["data"]:
-        return WEATHER_CACHE["data"]
-    try:
-        lats = ",".join(str(c["lat"]) for c in WEATHER_CITIES)
-        lons = ",".join(str(c["lon"]) for c in WEATHER_CITIES)
-        url = f"https://api.open-meteo.com/v1/forecast?latitude={lats}&longitude={lons}&current=precipitation,cloudcover"
-        req = urllib.request.Request(url, headers={"User-Agent": "RadarTerminal/1.0"})
-        with urllib.request.urlopen(req, timeout=15) as response:
-            data = json.loads(response.read().decode())
-            results = data if isinstance(data, list) else [data]
-            points = []
-            for i, loc in enumerate(results[: len(WEATHER_CITIES)]):
-                points.append({
-                    "lat": WEATHER_CITIES[i]["lat"], "lon": WEATHER_CITIES[i]["lon"],
-                    "rain": loc.get("current", {}).get("precipitation", 0),
-                    "clouds": loc.get("current", {}).get("cloudcover", 0),
-                })
-            WEATHER_CACHE["data"] = points
-            WEATHER_CACHE["last_update"] = now
-            return points
-    except Exception as e:  # noqa: BLE001
-        print(f"Ошибка метеослужбы: {e}")
-        return WEATHER_CACHE["data"]
 
 
 HTML_PAGE = """
@@ -461,8 +479,8 @@ HTML_PAGE = """
         <h2>ATC Terminal</h2>
         
         <div class="group">
-            <label>Масштаб: <span id="radVal" class="val">200 км</span></label>
-            <input id="radius" type="range" min="50" max="300" step="10" value="200" oninput="updateVal('radVal', this.value + ' км'); sendConfig()">
+            <label>Масштаб: <span id="radVal" class="val">100 км</span></label>
+            <input id="radius" type="range" min="20" max="300" step="5" value="100" oninput="updateVal('radVal', this.value + ' км'); sendConfig()">
         </div>
 
         <div class="group">
@@ -479,7 +497,17 @@ HTML_PAGE = """
         <div class="switch"><label>Сетка и Компас</label><input type="checkbox" id="showCompass" checked onchange="sendConfig()"></div>
         <div class="switch"><label style="color:var(--accent)">Цвет по высоте</label><input type="checkbox" id="colorByAlt" checked onchange="sendConfig()"></div>
         <div class="switch"><label style="color:var(--accent)">Форма силуэтов</label><input type="checkbox" id="silhouettes" checked onchange="sendConfig()"></div>
-        <div class="switch"><label style="color:var(--accent)">Осадки (Метео)</label><input type="checkbox" id="showWeather" checked onchange="sendConfig()"></div>
+        <div class="switch"><label>Отметки за кругом</label><input type="checkbox" id="showRim" checked onchange="sendConfig()"></div>
+        <div class="group" style="margin-top: 12px;">
+            <label>Сколько самолётов показывать:</label>
+            <select id="maxPlanes" onchange="sendConfig()">
+                <option value="5">5 ближних</option>
+                <option value="10">10 ближних</option>
+                <option value="20">20 ближних</option>
+                <option value="40">40 ближних</option>
+            </select>
+        </div>
+        <p style="font-size: 12px; color: var(--text-muted); margin: 12px 0 0;">Всё это — и на часах: они подхватят за 8 секунд.</p>
         
         <div class="stats-box">
             <b>Tactical Air Data:</b><br>
@@ -499,7 +527,8 @@ HTML_PAGE = """
         const canvas = document.getElementById('radar');
         const ctx = canvas.getContext('2d');
         
-        let localConfig = { radius: 200, theme: 'night', showLabels: true, showCompass: true, colorByAlt: true, silhouettes: true, showWeather: true };
+        // Настройки — с сервера: они же у платы
+        let localConfig = __CONFIG__;
         let planesState = {}; 
         let lastFrameTime = performance.now(); 
         let uniqueFlights = new Set();
@@ -562,7 +591,8 @@ HTML_PAGE = """
                 showCompass: document.getElementById('showCompass').checked,
                 colorByAlt: document.getElementById('colorByAlt').checked,
                 silhouettes: document.getElementById('silhouettes').checked,
-                showWeather: document.getElementById('showWeather').checked
+                showRim: document.getElementById('showRim').checked,
+                maxPlanes: parseInt(document.getElementById('maxPlanes').value)
             };
             
             document.getElementById('body').className = localConfig.theme === 'day' ? 'day-mode' : '';
@@ -571,9 +601,24 @@ HTML_PAGE = """
             applyTiles(localConfig.theme);
             
             updateMapBounds();
-            fetch('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(localConfig) });
+            fetch('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(localConfig) })
+                .then(fetchRadarData);
         }
         window.sendConfig = sendConfig; 
+
+        // Элементы страницы — по сохранённым настройкам
+        (function initControls() {
+            document.getElementById('radius').value = localConfig.radius;
+            updateVal('radVal', localConfig.radius + ' км');
+            document.getElementById('theme').value = localConfig.theme;
+            ['showLabels', 'showCompass', 'colorByAlt', 'silhouettes', 'showRim'].forEach(
+                k => document.getElementById(k).checked = !!localConfig[k]);
+            const mp = document.getElementById('maxPlanes');
+            if (![...mp.options].some(o => +o.value === localConfig.maxPlanes)) mp.add(new Option(localConfig.maxPlanes + ' ближних', localConfig.maxPlanes));
+            mp.value = localConfig.maxPlanes;
+            document.getElementById('body').className = localConfig.theme === 'day' ? 'day-mode' : '';
+            applyTiles(localConfig.theme);
+        })();
 
         function getAltColor(alt, isEnabled) {
             if (!isEnabled || !alt) return (localConfig.theme === 'day' ? '#003366' : '#FFC107');
@@ -623,7 +668,6 @@ HTML_PAGE = """
                 for (let id in planesState) { if (!currentIds.has(id)) delete planesState[id]; }
                 document.getElementById('statCount').innerText = uniqueFlights.size;
                 document.getElementById('statSpeed').innerText = Math.round(maxSpeedLog) + " km/h";
-                window.weatherCache = data.weather; 
             });
         }
 
@@ -640,32 +684,7 @@ HTML_PAGE = """
 
             ctx.clearRect(0, 0, 400, 400);
 
-            // 1. ПОГОДНЫЕ СЕКТОРЫ
-            if (localConfig.showWeather && window.weatherCache) {
-                window.weatherCache.forEach(w => {
-                    if (w.rain > 0 || w.clouds > 40) {
-                        const pt = map.latLngToContainerPoint([w.lat, w.lon]);
-                        ctx.beginPath();
-                        
-                        let color = 'rgba(100, 110, 130, 0.12)'; 
-                        let radius = 35;
-                        
-                        if (w.rain > 2.0) {
-                            color = 'rgba(230, 50, 50, 0.2)';     
-                            radius = 55;
-                        } else if (w.rain > 0) {
-                            color = 'rgba(230, 130, 0, 0.15)';   
-                            radius = 45;
-                        }
-                        
-                        ctx.fillStyle = color;
-                        ctx.arc(pt.x, pt.y, radius, 0, Math.PI * 2);
-                        ctx.fill();
-                    }
-                });
-            }
-
-            // 2. СЕТКА И КОМПАС
+            // 1. СЕТКА И КОМПАС
             if(localConfig.showCompass) {
                 ctx.strokeStyle = gridHex; 
                 ctx.lineWidth = 1; 
@@ -768,7 +787,7 @@ HTML_PAGE = """
                             drawnBoxes.push({x: textX, y: textY});
                         }
                     }
-                } else {
+                } else if (localConfig.showRim) {
                     // Edge Tracking (Красные точки целей на периметре кольца)
                     const edgeX = cx + ((px - cx) / dist) * (maxR - 2); 
                     const edgeY = cy + ((py - cy) / dist) * (maxR - 2);
@@ -810,7 +829,8 @@ class RadarHandler(BaseHTTPRequestHandler):
         except ValueError:
             r = 100
         if url.path in ("/", "/settings"):
-            page = HTML_PAGE.replace("__CENTER_LAT__", str(CENTER_LAT)).replace("__CENTER_LON__", str(CENTER_LON))
+            page = (HTML_PAGE.replace("__CENTER_LAT__", str(CENTER_LAT)).replace("__CENTER_LON__", str(CENTER_LON))
+                    .replace("__CONFIG__", json.dumps(CONFIG)))
             self.reply(200, "text/html; charset=utf-8", page.encode("utf-8"))
         elif url.path == "/esp":
             self.reply(200, "application/json", json.dumps(esp_payload(r), ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
@@ -821,12 +841,15 @@ class RadarHandler(BaseHTTPRequestHandler):
                 print(f"Ошибка карты: {e}")
                 self.reply(500, "text/plain", b"map error")
         elif url.path == "/data":
+            # Как на плате: ближние maxPlanes в радиусе ×1,6
+            flights = [(dist_km(f["lat"], f["lon"]), f) for f in get_flights()]
+            flights = sorted((x for x in flights if x[0] <= CONFIG["radius"] * 1.6), key=lambda x: x[0])
             planes = []
-            for f in get_flights():
+            for _, f in flights[:CONFIG["maxPlanes"]]:
                 p = dict(f)
                 p["trail"] = [list(t) for t in f["trail"]]
                 planes.append(p)
-            body = {"config": CONFIG, "planes": planes, "weather": get_real_weather()}
+            body = {"config": CONFIG, "planes": planes}
             self.reply(200, "application/json", json.dumps(body).encode("utf-8"))
         elif url.path.startswith("/tile/"):
             # /tile/<стиль>/z/x/y — тайлы для веб-страницы через кэш сервера
@@ -850,7 +873,11 @@ class RadarHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         if self.path == "/api/config":
-            CONFIG.update(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
+            try:
+                update_config(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
+            except (ValueError, TypeError, AttributeError):
+                self.reply(400, "text/plain", b"bad config")
+                return
             self.reply(200, "application/json", b'{"status":"ok"}')
         else:
             self.reply(404, "text/plain", b"not found")
@@ -860,5 +887,6 @@ class RadarHandler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    print(f"Радар: центр {CENTER_LAT}, {CENTER_LON}, порт {PORT}, городов {len(CITIES)}")
+    load_config()
+    print(f"Радар: центр {CENTER_LAT}, {CENTER_LON}, порт {PORT}, городов {len(CITIES)}, карта {board_style()}")
     ThreadingHTTPServer(("0.0.0.0", PORT), RadarHandler).serve_forever()
