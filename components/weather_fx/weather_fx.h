@@ -44,6 +44,9 @@ struct Params {
   bool heat{false};       ///< жара: марево над нижним краем
   int plane{0};           ///< самолёт ночью: 0 нет, 1 изредка, 2 часто (проверка)
   bool candles{false};    ///< «Романтика»: свечи по нижнему краю
+  /// Часы убраны с экрана (режим ожидания): небо на весь круг — крупное
+  /// созвездие по центру, звёзды повсюду, осадки идут и через середину
+  bool full{false};
   // Для созвездия: где и когда смотрим на небо. utc 0 — время неизвестно
   float lat{NAN}, lon{NAN};  ///< градусы, восточная долгота — плюс
   uint32_t utc{0};           ///< секунды Unix
@@ -112,7 +115,7 @@ class WeatherFx : public Component {
   static const int NF = 16;   // снежинки
   static const int NS = 8;    // брызги
   static const int NC = 3;    // облака
-  static const int NST = 12;  // звёзды
+  static const int NST = 24;  // звёзды: 12 при часах, 24 на весь экран
   static const int NCS = 10;     // звёзд в созвездии, не больше
   static const int NDASH = 128;  // чёрточек пунктира
   static const int NG = 24;      // лампочек гирлянды
@@ -356,6 +359,8 @@ class WeatherFx : public Component {
   // Созвездие: какое, где звёзды (экранные координаты центра) и их размер,
   // чёрточки пунктира, общий прямоугольник вместе с подписью
   bool con_on_{false}, con_force_{true};
+  bool full_{false};
+  int nst_{12};
   int con_idx_{-1};
   int64_t con_min_{-1000};  // минута последнего расчёта
   int64_t con_slot_{-1};    // десятиминутка, в которую выбрано созвездие

@@ -460,32 +460,32 @@ script:
             });
             lv_anim_start(&a);
           }
-          // Погода на улице — наверху, а без цифр — в центре (каскад
-          // пробуждения мог прервать её переезд)
-          if (force)
-            lv_obj_set_y(lv_obj_get_parent(id(lbl_slot1)), id(sw_clock).state ? -100 : -12);
+          // Погода на улице — наверху; без цифр днём — в центре. В ожидании
+          // всегда наверху: середина — небу (weather_fx, Params::full)
+          lv_obj_t *row = lv_obj_get_parent(id(lbl_slot1));
+          const int32_t y1 = (!id(sw_clock).state && show) ? -12 : -100;
+          const int32_t y0 = lv_obj_get_y_aligned(row);
+          lv_anim_delete(row, (lv_anim_exec_xcb_t) lv_obj_set_y);
+          if (force || instant) {
+            lv_obj_set_y(row, y1);
+          } else if (y0 != y1) {
+            lv_anim_t a;
+            lv_anim_init(&a);
+            lv_anim_set_var(&a, row);
+            lv_anim_set_values(&a, y0, y1);
+            lv_anim_set_duration(&a, 600);
+            lv_anim_set_delay(&a, y1 == -12 ? 250 : 0);  // в центр — когда цифры ушли
+            lv_anim_set_path_cb(&a, lv_anim_path_ease_in_out);
+            lv_anim_set_exec_cb(&a, (lv_anim_exec_xcb_t) lv_obj_set_y);
+            lv_anim_start(&a);
+          }
 
   # «Часы на экране» переключили: цифры уходят или возвращаются, погода на
   # улице переезжает в центр или обратно наверх
   - id: clock_layout
     mode: restart
     then:
-      - lambda: |-
-          id(clock_anim)->execute(!id(clock_hidden), false);
-          lv_obj_t *row = lv_obj_get_parent(id(lbl_slot1));
-          const int32_t y0 = lv_obj_get_y_aligned(row), y1 = id(sw_clock).state ? -100 : -12;
-          if (y0 == y1)
-            return;
-          lv_anim_delete(row, (lv_anim_exec_xcb_t) lv_obj_set_y);
-          lv_anim_t a;
-          lv_anim_init(&a);
-          lv_anim_set_var(&a, row);
-          lv_anim_set_values(&a, y0, y1);
-          lv_anim_set_duration(&a, 600);
-          lv_anim_set_delay(&a, id(sw_clock).state ? 0 : 250);
-          lv_anim_set_path_cb(&a, lv_anim_path_ease_in_out);
-          lv_anim_set_exec_cb(&a, (lv_anim_exec_xcb_t) lv_obj_set_y);
-          lv_anim_start(&a);
+      - lambda: 'id(clock_anim)->execute(!id(clock_hidden), false);'
 
   # Цвет цифр времени: ночью с «Тёплыми часами» — янтарный, иначе обычный.
   # Без связи с HA цифры серые (их красит behaviour.yaml) — не трогаем

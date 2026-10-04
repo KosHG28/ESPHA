@@ -77,9 +77,16 @@ static uint32_t glyph_cp(int set, int i) {
 // Солнце — справа в «шапке» круга, мимо значка двери посередине
 static const int SUN_X = 300, SUN_Y = 74, SUN_R = 40;
 // Созвездие вписывается в «шапку» над строкой погоды: центр и размеры
-// прямоугольника, подпись — над ним
-static const float BOX_CX = 233.0f, BOX_CY = 82.0f, BOX_W = 280.0f, BOX_H = 60.0f;
-static const int CAP_Y = 24, CAP_W = 220;
+// прямоугольника, подпись — над ним. Когда часы убраны (режим ожидания) —
+// в большой прямоугольник посередине круга, под строкой погоды
+struct SkyBox {
+  float cx, cy, w, h;
+  int cap_y;
+};
+static const SkyBox BOX_TOP = {233.0f, 82.0f, 280.0f, 60.0f, 24};
+static const SkyBox BOX_FULL = {233.0f, 278.0f, 300.0f, 170.0f, 166};
+static SkyBox g_box = BOX_TOP;
+static const int CAP_W = 220;
 // Созвездие видно, если его середина не ниже 25° над горизонтом
 static const float CON_MIN_ALT = 0.4226f;  // sin 25°
 // Сменять созвездие раз в 10 минут, пересчитывать поворот раз в 5
@@ -325,6 +332,9 @@ void WeatherFx::add_exclude(int x1, int y1, int x2, int y2) {
 }
 
 bool WeatherFx::excluded_(int x, int y, int w, int h) const {
+  // Часы убраны — осадкам обходить нечего
+  if (this->full_)
+    return false;
   for (int i = 0; i < this->n_ex_; i++) {
     const int *e = this->ex_[i];
     if (x + w > e[0] && x < e[2] && y + h > e[1] && y < e[3])
@@ -1302,15 +1312,24 @@ void WeatherFx::apply_(const Params &p, bool relayout) {
       this->fph_[i] = rnd_(0, 628) / 100.0f;
     }
     // Звёзды — в верхней половине круга, вокруг и выше времени, но не на
-    // месте созвездия
-    for (int i = 0; i < NST; i++) {
+    // месте созвездия. Без часов — по всему кругу, кроме строки погоды,
+    // середины с созвездием и строки планет
+    this->nst_ = this->full_ ? NST : 12;
+    for (int i = 0; i < this->nst_; i++) {
       int x, y;
+      bool bad;
       do {
-        x = rnd_(50, 416);
-        y = rnd_(30, 220);
-      } while ((x - 233) * (x - 233) + (y - 233) * (y - 233) > 215 * 215 ||
-               (x > 82 && x < 372 && y > 22 && y < 122) ||
-               (std::abs(x - MOON_X) < MOON_R + 12 && std::abs(y - MOON_Y) < MOON_R + 12));
+        x = rnd_(30, 436);
+        y = this->full_ ? rnd_(30, 440) : rnd_(30, 220);
+        bad = (x - 233) * (x - 233) + (y - 233) * (y - 233) > 215 * 215 ||
+              (std::abs(x - MOON_X) < MOON_R + 12 && std::abs(y - MOON_Y) < MOON_R + 12);
+        if (this->full_)
+          bad = bad || (x > 125 && x < 341 && y > 100 && y < 186) ||  // строка погоды и подпись
+                (x > 70 && x < 396 && y > 186 && y < 372) ||            // созвездие
+                (x > 75 && x < 391 && y > 388 && y < 428);              // планеты
+        else
+          bad = bad || x < 50 || x > 416 || (x > 82 && x < 372 && y > 22 && y < 122);
+      } while (bad);
       this->stx_[i] = x;
       this->sty_[i] = y;
       this->stph_[i] = rnd_(0, 628) / 100.0f;
@@ -1324,7 +1343,7 @@ void WeatherFx::apply_(const Params &p, bool relayout) {
   }
   if (this->stars_on_ && !this->bats_on_) {
     for (int i = 0; i < NST; i++)
-      this->mark_(this->sts_[i], true, this->stx_[i], this->sty_[i], 3, 3);
+      this->mark_(this->sts_[i], i < this->nst_, this->stx_[i], this->sty_[i], 3, 3);
   } else {
     for (auto &s : this->sts_)
       this->mark_(s, false, 0, 0, 1, 1);
@@ -1732,12 +1751,12 @@ static float fit(const float (*src)[2], const int *sz, int n, float ang, int *ox
   }
   const float bw = std::max(x1 - x0, 1e-4f), bh = std::max(y1 - y0, 1e-4f);
   const float mx = (x0 + x1) / 2, my = (y0 + y1) / 2;
-  float k = std::min(BOX_W / bw, BOX_H / bh);
+  float k = std::min(g_box.w / bw, g_box.h / bh);
   // Край круга: звезда со смещением d от середины фигуры встаёт в точку
   // c + k·d (c — центр прямоугольника относительно центра экрана) и должна
   // остаться ближе R к центру. Наибольшее k — положительный корень
   // |d|²k² + 2(c·d)k + |c|² − R² = 0. Считается сразу, без подбора
-  const float cx = BOX_CX - 233.0f, cy = BOX_CY - 233.0f;
+  const float cx = g_box.cx - 233.0f, cy = g_box.cy - 233.0f;
   for (int i = 0; i < n; i++) {
     const float dx = pts[i][0] - mx, dy = -(pts[i][1] - my);
     const float dd = dx * dx + dy * dy;
@@ -1750,8 +1769,8 @@ static float fit(const float (*src)[2], const int *sz, int n, float ang, int *ox
       k = std::min(k, (-cd + sqrtf(disc)) / dd);
   }
   for (int i = 0; i < n; i++) {
-    ox[i] = (int) lroundf(BOX_CX + (pts[i][0] - mx) * k);
-    oy[i] = (int) lroundf(BOX_CY - (pts[i][1] - my) * k);
+    ox[i] = (int) lroundf(g_box.cx + (pts[i][0] - mx) * k);
+    oy[i] = (int) lroundf(g_box.cy - (pts[i][1] - my) * k);
   }
   return std::max(bw, bh) * k;
 }
@@ -1839,7 +1858,8 @@ void WeatherFx::layout_con_(int idx, const float (*pts)[2], int n) {
     }
   }
   this->con_area_ = a;
-  this->cap_area_ = {233 - CAP_W / 2, CAP_Y, 233 + CAP_W / 2, CAP_Y + lv_font_get_line_height(this->font_cap_)};
+  this->cap_area_ = {233 - CAP_W / 2, g_box.cap_y, 233 + CAP_W / 2,
+                     g_box.cap_y + lv_font_get_line_height(this->font_cap_)};
   this->con_on_ = true;
   this->invalidate_(this->con_area_);
   this->invalidate_(this->cap_area_);
@@ -2640,6 +2660,17 @@ void WeatherFx::frame(const Params &p) {
                   ((p.frost ? 1 : 0) << 22) | ((std::min(std::max(p.holiday, 0), 31)) << 23) |
                   ((p.night ? 1 : 0) << 28) | ((p.fireflies ? 1 : 0) << 29) | ((p.matrix ? 1 : 0) << 30);
   this->fw_pal_ = p.fw_palette;
+  if (p.full != this->full_) {
+    // Часы ушли или вернулись: небо — заново под весь круг или под «шапку»
+    this->full_ = p.full;
+    g_box = p.full ? BOX_FULL : BOX_TOP;
+    if (this->con_on_) {
+      this->invalidate_(this->con_area_);
+      this->invalidate_(this->cap_area_);
+    }
+    this->con_force_ = true;
+    this->applied_ = -1;
+  }
   if (sig != this->applied_) {
     // Если поменялись только яркость, солнце, гирлянда или праздник —
     // перекрашиваем, но осадки не перемешиваем

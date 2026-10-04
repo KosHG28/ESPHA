@@ -492,6 +492,8 @@ interval:
             p.night = true;
           // «Романтика» (packages/adult.yaml) — свечи по нижнему краю
           p.candles = id(romance_on);
+          // Часы убраны (ожидание) — небо на весь круг
+          p.full = id(clock_hidden);
           id(wfx)->set_params(p);
           // Кот смотрит в небо — пусть пролетит метеор
           if (id(crit)->take_meteor())
