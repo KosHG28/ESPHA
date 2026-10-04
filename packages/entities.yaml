@@ -65,12 +65,14 @@ script:
           const bool changed_h = last_h >= 0 && now.hour != last_h;
           last_h = now.hour;
           last_m = now.minute;
-          if (id(screen_off) || id(current_page) != 0)
+          // Часы убраны в режиме ожидания — не показывать новую цифру
+          if (id(screen_off) || id(current_page) != 0 || id(clock_hidden))
             return;
           auto fade_in = [](lv_obj_t *o) {
             lv_anim_delete(o, nullptr);
             lv_obj_set_style_opa(o, LV_OPA_TRANSP, 0);
-            lv_obj_set_style_translate_y(o, 0, 0);  // если прервали каскад пробуждения
+            lv_obj_set_style_translate_x(o, 0, 0);  // если прервали каскад пробуждения
+            lv_obj_set_style_translate_y(o, 0, 0);
             lv_anim_t a;
             lv_anim_init(&a);
             lv_anim_set_var(&a, o);

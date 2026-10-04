@@ -98,6 +98,20 @@ switch:
     on_turn_off:
       - script.execute: apply_dim
 
+  # В режиме ожидания часы уходят с экрана совсем: остаются погода, кот и
+  # прочее. Касание или движение — часы возвращаются
+  - platform: template
+    id: sw_hide_clock_idle
+    name: Прятать часы в ожидании
+    icon: mdi:clock-remove-outline
+    entity_category: config
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    on_turn_on:
+      - script.execute: apply_dim
+    on_turn_off:
+      - script.execute: apply_dim
+
   # Ночью (солнце за горизонтом) цифры времени тёплого янтарного цвета —
   # меньше режут глаза в темноте
   - platform: template
@@ -189,6 +203,11 @@ globals:
     type: int
     restore_value: false
     initial_value: '180'
+  # Часы убраны с экрана (режим ожидания, «Прятать часы в ожидании»)
+  - id: clock_hidden
+    type: bool
+    restore_value: false
+    initial_value: 'false'
   # За сколько миллисекунд разгораться при пробуждении
   - id: wake_fade_ms
     type: int
@@ -210,6 +229,11 @@ script:
             - script.stop: wake_screen
       # Разбудили посреди плавного гашения — не доводить его до конца
       - script.stop: screen_sleep
+      # Проснулись из ожидания — часы возвращаются (из полной темноты их
+      # покажет wake_reveal)
+      - lambda: |-
+          if (id(clock_hidden) && !id(screen_off))
+            id(clock_anim)->execute(true, false);
       # Из полной темноты экран разгорается дольше — вместе с раскрытием
       # «зрачка», из ожидания — быстро
       - lambda: 'id(wake_fade_ms) = id(screen_off) ? 550 : 220;'
@@ -275,6 +299,8 @@ script:
       - lambda: |-
           if (!id(screen_dimmed) || id(screen_off))
             return;
+          // Часы уходят с экрана — или возвращаются, если это выключили
+          id(clock_anim)->execute(!id(sw_hide_clock_idle).state, false);
           float full = id(screen_brightness).state;
           float dim = std::min(id(screen_dim).state, full);
           // Затухает плавно, за секунду
@@ -340,38 +366,76 @@ script:
           });
           lv_anim_start(&a);
 
-          // Каскад надписей — только если открыты часы
-          if (id(current_page) != 0)
+          // Каскад надписей часов (если открыта другая страница — часы
+          // просто возвращаются на место без анимации)
+          id(clock_anim)->execute(true, true);
+
+  # Часы уходят с экрана и возвращаются — каскадом.
+  # Уход (show = false): сначала тают нижние строки, затем погода, последними
+  # — цифры: часы уезжают влево, минуты вправо.
+  # Возвращение (show = true): наоборот — цифры съезжаются к центру, следом
+  # опускается погода и поднимаются строки снизу.
+  # force — играть, даже если часы уже в нужном состоянии (пробуждение из
+  # темноты). Не на странице часов — сразу, без анимации
+  - id: clock_anim
+    parameters:
+      show: bool
+      force: bool
+    mode: queued
+    max_runs: 3
+    then:
+      - lambda: |-
+          if (!force && id(clock_hidden) == !show)
             return;
+          id(clock_hidden) = !show;
           struct Step {
             lv_obj_t *obj;
-            uint32_t delay;
+            int dx, dy;
+            uint16_t in_ms, out_ms;  // задержка при появлении и при уходе
           };
           const Step steps[] = {
-              {id(lbl_time_h), 60},
-              {id(lbl_time_m), 110},
-              {lv_obj_get_parent(id(lbl_slot1)), 200},
-              {id(lbl_door), 200},
-              {id(lbl_wstatus), 270},
-              {id(lbl_sun), 330},
-              {id(lbl_slot2), 390},
+              {id(lbl_time_h), -26, 0, 40, 240},
+              {id(lbl_time_m), 26, 0, 40, 240},
+              {id(lbl_binary), 0, 0, 40, 240},
+              {lv_obj_get_parent(id(lbl_slot1)), 0, -16, 150, 150},
+              {id(lbl_door), 0, -16, 150, 150},
+              {id(lbl_hint), 0, 0, 200, 0},
+              {id(lbl_wstatus), 0, 14, 220, 100},
+              {id(lbl_sun), 0, 14, 280, 50},
+              {id(lbl_slot2), 0, 14, 340, 0},
           };
+          const bool instant = id(current_page) != 0;
           for (const auto &st : steps) {
             lv_anim_delete(st.obj, nullptr);
-            lv_anim_t c;
-            lv_anim_init(&c);
-            lv_anim_set_var(&c, st.obj);
-            lv_anim_set_values(&c, 0, 256);
-            lv_anim_set_duration(&c, 420);
-            lv_anim_set_delay(&c, st.delay);
-            lv_anim_set_path_cb(&c, lv_anim_path_ease_out);
-            lv_anim_set_early_apply(&c, true);
-            // Прозрачность 0 → 100 % и подъём на 14 px снизу
-            lv_anim_set_exec_cb(&c, [](void *o, int32_t v) {
-              lv_obj_set_style_opa((lv_obj_t *) o, (lv_opa_t) (v >= 256 ? 255 : v), 0);
-              lv_obj_set_style_translate_y((lv_obj_t *) o, 14 * (256 - v) / 256, 0);
+            if (instant) {
+              lv_obj_set_style_opa(st.obj, show ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
+              lv_obj_set_style_translate_x(st.obj, 0, 0);
+              lv_obj_set_style_translate_y(st.obj, 0, 0);
+              continue;
+            }
+            lv_anim_t a;
+            lv_anim_init(&a);
+            lv_anim_set_var(&a, st.obj);
+            // Сдвиг и направление — в user_data: dx, dy (по байту) и флаг
+            const uintptr_t ud = ((uintptr_t) (uint8_t) (int8_t) st.dx) | ((uintptr_t) (uint8_t) (int8_t) st.dy << 8) |
+                                 (show ? 0x10000 : 0);
+            lv_anim_set_user_data(&a, (void *) ud);
+            lv_anim_set_values(&a, 0, 256);
+            lv_anim_set_duration(&a, show ? 480 : 560);
+            lv_anim_set_delay(&a, show ? st.in_ms : st.out_ms);
+            lv_anim_set_path_cb(&a, show ? lv_anim_path_ease_out : lv_anim_path_ease_in);
+            lv_anim_set_early_apply(&a, show);
+            lv_anim_set_custom_exec_cb(&a, [](lv_anim_t *an, int32_t v) {
+              const uintptr_t u = (uintptr_t) lv_anim_get_user_data(an);
+              const int dx = (int8_t) (u & 0xFF), dy = (int8_t) ((u >> 8) & 0xFF);
+              // p — насколько надпись на месте: 256 — видна, 0 — ушла
+              const int p = (u & 0x10000) ? v : 256 - v;
+              auto *o = (lv_obj_t *) an->var;
+              lv_obj_set_style_opa(o, (lv_opa_t) (p >= 256 ? 255 : p), 0);
+              lv_obj_set_style_translate_x(o, dx * (256 - p) / 256, 0);
+              lv_obj_set_style_translate_y(o, dy * (256 - p) / 256, 0);
             });
-            lv_anim_start(&c);
+            lv_anim_start(&a);
           }
 
   # Цвет цифр времени: ночью с «Тёплыми часами» — янтарный, иначе обычный.
