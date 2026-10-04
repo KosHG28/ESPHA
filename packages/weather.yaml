@@ -138,6 +138,14 @@ sensor:
     attribute: longitude
     internal: true
 
+  # Высота Солнца над горизонтом, градусы: около нуля — зарево на восходе и
+  # закате
+  - platform: homeassistant
+    id: ha_sun_elev
+    entity_id: sun.sun
+    attribute: elevation
+    internal: true
+
 select:
   # Как рисовать дождь. «Капли на стекле» — капли появляются и медленно
   # сползают: нет быстрого движения, значит нет мерцания и нагрузки.
@@ -160,7 +168,7 @@ select:
     name: Фон погоды
     icon: mdi:weather-snowy-rainy
     entity_category: config
-    options: ["Авто", "Выкл", "Дождь", "Снег", "Гроза", "Облачно", "Ясная ночь", "Ясный день", "Листопад", "Сердечки", "Воздушный змей", "Радуга", "Иней"]
+    options: ["Авто", "Выкл", "Дождь", "Снег", "Гроза", "Облачно", "Ясная ночь", "Ясный день", "Листопад", "Сердечки", "Воздушный змей", "Радуга", "Иней", "Жара", "Закат", "Самолёт"]
     initial_option: "Авто"
     optimistic: true
     restore_value: true
@@ -276,12 +284,15 @@ script:
             case 10: s = "clear"; break;
             case 11: s = "partly_cloudy"; break;
             case 12: s = "clear"; break;
+            case 13: s = "clear"; break;
+            case 14: s = "partly_cloudy"; break;
+            case 15: s = "clear"; break;
             default: s = ""; break;
           }
           // Звёзды — ясной или малооблачной ночью, солнце — таким же днём.
           // «Ясная ночь» и «Ясный день» показывают своё в любое время
           const bool fair = s == "clear" || s == "partly_cloudy";
-          const bool night = sel == 6 ? true : (sel == 7 || sel >= 10 ? false : id(is_night));
+          const bool night = sel == 6 || sel == 15 ? true : (sel == 7 || sel >= 10 ? false : id(is_night));
           id(weather_stars) = fair && night;
           id(weather_sun) = fair && !night;
           int mode = 0, cnt = 0, clouds = 0;
@@ -453,6 +464,32 @@ interval:
           p.matrix = fx_sel != 1 && (int32_t) (id(binary_until) - millis()) > 0;
           p.fw_palette = id(fw_palette);
           p.moon_force = preview && (hol == HOL_FULL_MOON || hol == HOL_SUPERMOON || hol == HOL_ECLIPSE) ? hol : 0;
+          // Зарево у горизонта: Солнце в пределах ~6° от горизонта, сильнее
+          // всего — у самого горизонта. Утром розовое, вечером оранжевое. В
+          // дождь, снег и грозу зарева не видно
+          const float elev = id(ha_sun_elev).state;
+          const int wm = id(weather_mode);
+          const bool sky_open = !id(weather_storm) && (wm == 0 || wm >= 5);
+          if (fx_sel == 14) {
+            p.glow = 1.0f;
+          } else if (fx_sel != 1 && sky_open && !std::isnan(elev)) {
+            p.glow = std::max(0.0f, 1.0f - std::fabs(elev - 0.5f) / 6.0f);
+          }
+          {
+            auto t = id(ha_time).now();
+            p.dawn = t.is_valid() && t.hour < 12;
+          }
+          // Жара от 30° (гаснет ниже 29°) — марево днём; кот лежит пластом.
+          // Сильный мороз (иней) — сосульки и кот в шарфе
+          static bool hot = false;
+          if (!std::isnan(t_out))
+            hot = t_out >= 30.0f || (hot && t_out >= 29.0f);
+          p.heat = fx_sel == 13 || (fx_sel != 1 && hot && !id(is_night));
+          id(crit)->set_climate(p.heat || (hot && fx_sel != 1) ? 1 : (p.frost ? 2 : 0));
+          // Самолёт ночью — изредка; «Фон погоды: Самолёт» — часто
+          p.plane = fx_sel == 15 ? 2 : (fx_sel != 1 && id(is_night) ? 1 : 0);
+          if (fx_sel == 15)
+            p.night = true;
           id(wfx)->set_params(p);
           // Кот смотрит в небо — пусть пролетит метеор
           if (id(crit)->take_meteor())

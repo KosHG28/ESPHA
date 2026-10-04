@@ -134,6 +134,57 @@ def cat_drink(lap):
     return im
 
 
+def cat_flat():
+    """Жара: кот лежит пластом, лапы врозь, язык наружу, над головой капля пота."""
+    im = canvas(26, 16)
+    d = ImageDraw.Draw(im)
+    # хвост вытянут по земле
+    d.line([0, 15, 4, 14], fill=FUR_D)
+    # туловище распластано
+    d.ellipse([3, 10, 19, 15], fill=FUR)
+    d.line([7, 11, 7, 12], fill=FUR_D)
+    d.line([11, 11, 11, 12], fill=FUR_D)
+    d.line([15, 11, 15, 12], fill=FUR_D)
+    # лапы в стороны
+    d.line([2, 15, 5, 13], fill=FUR_D)
+    d.line([17, 15, 20, 13], fill=FUR)
+    # голова лежит на земле
+    d.ellipse([17, 8, 25, 14], fill=FUR)
+    d.polygon([(18, 10), (19, 6), (21, 9)], fill=FUR)
+    d.polygon([(22, 9), (24, 6), (25, 10)], fill=FUR)
+    d.line([20, 11, 21, 11], fill=EYE)
+    d.line([23, 11, 24, 11], fill=EYE)
+    d.point((25, 12), fill=NOSE)
+    d.point((24, 14), fill=(255, 120, 150, 255))  # язык
+    d.point((24, 15), fill=(255, 120, 150, 255))
+    # капля пота
+    d.point((16, 6), fill=(130, 200, 255, 255))
+    d.line([15, 7, 17, 7], fill=(130, 200, 255, 255))
+    d.point((16, 8), fill=(90, 170, 240, 255))
+    return im
+
+
+def scarf():
+    """Шарф в мороз: красный в белую полоску, кончик свисает назад."""
+    im = canvas(9, 7)
+    d = ImageDraw.Draw(im)
+    red = (215, 40, 50, 255)
+    white = (245, 245, 245, 255)
+    d.rectangle([1, 1, 8, 3], fill=red)
+    for x in (3, 6):
+        d.line([x, 1, x, 3], fill=white)
+    # кончик свисает назад (влево для кота, смотрящего вправо)
+    d.rectangle([0, 3, 2, 6], fill=red)
+    d.line([0, 5, 2, 5], fill=white)
+    d.point((0, 6), fill=white)
+    d.point((2, 6), fill=white)
+    return im
+
+
+# Середина шарфа на шее — точка в спрайте шарфа (клетки)
+SCARF_AT = (4.5, 2.0)
+
+
 def mouse(step):
     """Серая мышка бежит вправо: хвост, ушко, глаз, лапки."""
     im = canvas(14, 7)
@@ -401,32 +452,31 @@ def recolor(im, table):
 
 
 # Точки на коте в каждом кадре (в клетках сетки 26×16): макушка между ушами
-# (низ шапки), середина головы (шлем) и спина (ранец). Для отражённых кадров
-# x = 26 − x
+# (низ шапки), середина головы (шлем), спина (ранец) и шея (шарф). Для
+# отражённых кадров x = 26 − x
 def cat_anchors():
     a = {}
 
-    def both(name, hat, head, back, mirror=True):
-        a[name + ("_r" if mirror else "")] = (hat, head, back)
-        if mirror:
-            m = lambda p: (26 - p[0], p[1])
-            a[name + "_l"] = (m(hat), m(head), m(back))
+    m = lambda q: (26 - q[0], q[1])
+
+    def both(name, *pts):
+        a[name + "_r"] = pts
+        a[name + "_l"] = tuple(m(p) for p in pts)
 
     for p in range(4):
         bob = [0, -1, 0, 1][p]
-        hat, head, back = (21.0, 3 + bob), (20.5, 5.5 + bob), (10.0, 5.5 + bob)
-        a[f"cat_run_r{p}"] = (hat, head, back)
-        m = lambda q: (26 - q[0], q[1])
-        a[f"cat_run_l{p}"] = (m(hat), m(head), m(back))
+        pts = ((21.0, 3 + bob), (20.5, 5.5 + bob), (10.0, 5.5 + bob), (17.5, 7.5 + bob))
+        a[f"cat_run_r{p}"] = pts
+        a[f"cat_run_l{p}"] = tuple(m(q) for q in pts)
     for name in ("cat_sit", "cat_blink", "cat_look", "cat_paw"):
-        both(name, (16.0, 2), (15.5, 4.5), (8.0, 9.5))
+        both(name, (16.0, 2), (15.5, 4.5), (8.0, 9.5), (15.0, 8.5))
     for f in (0, 1):
         hy = 1 if f else 0
-        hat, head, back = (20.0, 6 + hy), (19.5, 10 + hy), (10.0, 8.0)
-        a[f"cat_drink_r{f}"] = (hat, head, back)
-        m = lambda q: (26 - q[0], q[1])
-        a[f"cat_drink_l{f}"] = (m(hat), m(head), m(back))
-    a["cat_sleep"] = ((20.0, 6), (19.0, 8.5), (10.0, 7.0))
+        pts = ((20.0, 6 + hy), (19.5, 10 + hy), (10.0, 8.0), (17.0, 11.0 + hy))
+        a[f"cat_drink_r{f}"] = pts
+        a[f"cat_drink_l{f}"] = tuple(m(q) for q in pts)
+    both("cat_flat", (21.5, 7), (21.0, 11.0), (11.0, 10.0), (18.5, 12.5))
+    a["cat_sleep"] = ((20.0, 6), (19.0, 8.5), (10.0, 7.0), (16.5, 10.0))
     return a
 
 
@@ -546,6 +596,8 @@ def sprites():
     out["cat_paw_r"] = cat_sit(paw=True)
     out["cat_paw_l"] = mirrored(cat_sit(paw=True))
     out["cat_sleep"] = cat_sleep()
+    out["cat_flat_r"] = cat_flat()
+    out["cat_flat_l"] = mirrored(cat_flat())
     for f in (0, 1):
         out[f"cat_drink_r{f}"] = cat_drink(f == 1)
         out[f"cat_drink_l{f}"] = mirrored(cat_drink(f == 1))
@@ -570,6 +622,8 @@ def sprites():
     out["cat_helmet"] = helmet()
     out["cat_backpack"] = backpack()
     out["cat_umbrella"] = umbrella()
+    out["cat_scarf_r"] = scarf()
+    out["cat_scarf_l"] = mirrored(scarf())
     out["cat_bowl"] = bowl()
     out["cat_kulich"] = kulich()
     out["cat_pancakes"] = pancakes()
@@ -617,12 +671,14 @@ def main():
             v.save(dst / f"{k}.png")
     body = "\n".join(c_array(f"spr_{k}", v) for k, v in sp.items())
     h2 = lambda v: round(v * 2)
-    rows = [f"    {{&spr_{k}, {h2(hat[0])}, {h2(hat[1])}, {h2(head[0])}, {h2(head[1])}, {h2(back[0])}, {h2(back[1])}}},"
-            for k, (hat, head, back) in cat_anchors().items()]
+    rows = [f"    {{&spr_{k}, {h2(hat[0])}, {h2(hat[1])}, {h2(head[0])}, {h2(head[1])}, {h2(back[0])}, {h2(back[1])}, "
+            f"{h2(neck[0])}, {h2(neck[1])}}},"
+            for k, (hat, head, back, neck) in cat_anchors().items()]
     body += (
         "\n// Точки на коте, в полуклетках сетки спрайта: макушка (низ шапки),\n"
-        "// середина головы (шлем) и спина (ранец)\n"
-        "struct CatAnchor {\n  const lv_image_dsc_t *img;\n  int16_t hat_x, hat_y, head_x, head_y, back_x, back_y;\n};\n"
+        "// середина головы (шлем), спина (ранец) и шея (шарф)\n"
+        "struct CatAnchor {\n  const lv_image_dsc_t *img;\n"
+        "  int16_t hat_x, hat_y, head_x, head_y, back_x, back_y, neck_x, neck_y;\n};\n"
         "static const CatAnchor CAT_ANCHORS[] = {\n" + "\n".join(rows) + "\n};\n"
         "\n// Кончик поднятой лапы, в полуклетках: [0] — кот смотрит вправо, [1] — влево\n"
         f"static const int16_t PAW_TIP[2][2] = {{{{{h2(PAW_TIP[0])}, {h2(PAW_TIP[1])}}}, "
@@ -631,6 +687,9 @@ def main():
         "// полуклетках; [0] — вправо, [1] — влево\n"
         f"static const int16_t BOWL_AT[2][2] = {{{{{h2(BOWL_AT[0])}, {h2(BOWL_AT[1])}}}, "
         f"{{{h2(26 - BOWL_AT[0])}, {h2(BOWL_AT[1])}}}}};\n"
+        "\n// Середина шарфа в его спрайте, в полуклетках; [0] — вправо, [1] — влево\n"
+        f"static const int16_t SCARF_AT[2][2] = {{{{{h2(SCARF_AT[0])}, {h2(SCARF_AT[1])}}}, "
+        f"{{{h2(9 - SCARF_AT[0])}, {h2(SCARF_AT[1])}}}}};\n"
     )
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(

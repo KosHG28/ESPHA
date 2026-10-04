@@ -42,8 +42,8 @@ static const int OFF_L = -CAT_W - 10, OFF_R = 476;  // за краем экра�
 static const int CENTER_X = 233 - CAT_W / 2;
 static const uint32_t MEOW_MS = 1600;  // сколько кот сидит и мяукает после касания
 // Сколько кот сидит посередине: просто так, ловя снежинку, глядя в небо, у
-// принтера, у миски, у кулича, над блинами, провожая чёрного кота
-static const uint32_t SIT_MS[8] = {3000, 4200, 4300, 6000, 5200, 5000, 5200, 4600};
+// принтера, у миски, у кулича, над блинами, провожая чёрного кота, в жару
+static const uint32_t SIT_MS[9] = {3000, 4200, 4300, 6000, 5200, 5000, 5200, 4600, 6500};
 
 int Critters::rnd_(int lo, int hi) { return lo + (int) (random_uint32() % (uint32_t) (hi - lo)); }
 
@@ -148,8 +148,8 @@ void Critters::place_cat_(const lv_image_dsc_t *img, int x, int y) {
   if (!this->hat_.obj)
     return;
   // На коте: в дождь — зонтик, в праздник — своя вещь: пилотка, корона,
-  // шлем космонавта, ранец, шапка Деда Мороза или колпак
-  enum At { AT_HAT, AT_HEAD, AT_BACK };
+  // шлем космонавта, ранец, шапка Деда Мороза или колпак; в мороз — шарф
+  enum At { AT_HAT, AT_HEAD, AT_BACK, AT_NECK };
   const lv_image_dsc_t *prop = nullptr;
   At at = AT_HAT;
   if (this->weather_ == 1) {
@@ -179,6 +179,15 @@ void Critters::place_cat_(const lv_image_dsc_t *img, int x, int y) {
           prop = &spr_cat_hat;
         break;
     }
+    if (prop == nullptr && this->climate_ == 2) {
+      // Шарф кончиком назад: какой стороной смотрит кот — по точке шеи
+      bool left = false;
+      for (const auto &c : CAT_ANCHORS)
+        if (c.img == img)
+          left = c.neck_x < 26;
+      prop = left ? &spr_cat_scarf_l : &spr_cat_scarf_r;
+      at = AT_NECK;
+    }
   }
   const CatAnchor *a = nullptr;
   if (prop)
@@ -198,9 +207,13 @@ void Critters::place_cat_(const lv_image_dsc_t *img, int x, int y) {
   } else if (at == AT_HEAD) {
     px = x + a->head_x * K_CAT / 2 - pw / 2;
     py = y + a->head_y * K_CAT / 2 - ph / 2;
-  } else {
+  } else if (at == AT_BACK) {
     px = x + a->back_x * K_CAT / 2 - pw / 2;
     py = y + a->back_y * K_CAT / 2 - ph / 2;
+  } else {
+    const int side = prop == &spr_cat_scarf_l ? 1 : 0;
+    px = x + (a->neck_x - SCARF_AT[side][0]) * K_CAT / 2;
+    py = y + (a->neck_y - SCARF_AT[side][1]) * K_CAT / 2;
   }
   this->hat_.pos(px, py);
   this->hat_.show(true);
@@ -255,6 +268,9 @@ void Critters::start_cat() {
   } else if (this->holiday_ == HOL_MASLENITSA && r < 7) {
     this->start(SHOW_CAT_VISIT);
     this->variant_ = VAR_PANCAKES;
+  } else if (this->climate_ == 1 && r < 6) {
+    this->start(SHOW_CAT_VISIT);
+    this->variant_ = VAR_HOT;
   } else if (this->weather_ == 2 && r < 7) {
     this->start(SHOW_CAT_VISIT);
     this->variant_ = VAR_CATCH;
@@ -455,6 +471,12 @@ void Critters::sit_(uint32_t st) {
           img = blink;
         this->say_(near ? "!" : nullptr);
       }
+      break;
+    }
+    case VAR_HOT: {
+      // Жара: кот ложится пластом, высунув язык, и вздыхает
+      img = r ? &spr_cat_flat_r : &spr_cat_flat_l;
+      this->say_(st > 900 && st < 4200 ? "жарко…" : nullptr);
       break;
     }
     case VAR_CATCH: {

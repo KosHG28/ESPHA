@@ -92,6 +92,10 @@ class Critters : public Component {
     this->new_year_ = new_year;
   }
 
+  /// Погода для кота на улице: 0 — обычно, 1 — жара (лежит пластом),
+  /// 2 — сильный мороз (в шарфе)
+  void set_climate(int climate) { this->climate_ = climate; }
+
   /// Вызвать гостя сейчас. SHOW_NONE — случайный, с учётом ночи и зимы
   void start(Show show);
   /// Для кнопки в HA и секретных касаний: случайное поведение кота
@@ -131,6 +135,7 @@ class Critters : public Component {
     VAR_KULICH,    ///< Пасха: рядом кулич
     VAR_PANCAKES,  ///< Масленица: ест блины
     VAR_BLACK,     ///< пятница, 13-е: провожает взглядом чёрного кота
+    VAR_HOT,       ///< жара: лежит пластом
   };
 
   void stop_();
@@ -149,6 +154,7 @@ class Critters : public Component {
   int weather_{0};
   int month_{0}, day_{0};
   int holiday_{0};
+  int climate_{0};
   bool birthday_{false}, new_year_{false};
   bool can_show_{false}, night_{false}, winter_in_{false};
   Variant variant_{VAR_PLAIN};

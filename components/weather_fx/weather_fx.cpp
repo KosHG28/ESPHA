@@ -1,6 +1,7 @@
 #include "weather_fx.h"
 
 #include <algorithm>
+#include <cstring>
 
 // Список участков к перерисовке (inv_areas) есть только во внутренних
 // заголовках LVGL
@@ -117,6 +118,17 @@ static const int BSTAR_X = 190, BSTAR_Y = 66, BSTAR_R = 36;
 // Ракета летит 4,5 с снизу слева вверх направо, над строкой погоды
 static const uint32_t RK_MS = 4500;
 static const float PUFF_MS = 900.0f;
+// Сосульки: полочка под цифрами часов и минут и сосульки на ней — x,
+// длина и ширина у основания. Не ниже строки «Ясно»
+static const int ICE_Y = 265;
+static const int ICE_SHELF[2][2] = {{74, 218}, {248, 392}};
+static const int16_t ICICLES[][3] = {
+    {82, 9, 5},  {97, 14, 6},  {113, 7, 4},  {128, 12, 6}, {146, 6, 4},  {161, 13, 5}, {179, 9, 5},
+    {196, 11, 6}, {211, 6, 4}, {256, 8, 4},  {271, 13, 6}, {289, 7, 5},  {305, 12, 5}, {323, 6, 4},
+    {339, 14, 6}, {357, 8, 5}, {372, 11, 5}, {386, 6, 4},
+};
+// Самолёт: скорость, px/мс
+static const float AIR_SPEED = 0.022f;
 // «Матрица»: шаг столбцов и высота знака
 static const int MX_X0 = 45, MX_DX = 47, MX_STEP = 18;
 // Гирлянда: радиус, цвета лампочек
@@ -226,8 +238,6 @@ void WeatherFx::bind(lv_obj_t *root, lv_obj_t *clouds, lv_obj_t *bolt, lv_obj_t 
   this->paint_ = canvas(paint_front_cb);
   this->back_ = canvas(paint_back_cb);
   lv_obj_move_to_index(this->back_, 0);
-
-  this->build_frost_();
 
   // Лампочки гирлянды — по кругу у самого края экрана
   for (int i = 0; i < NG; i++) {
@@ -389,6 +399,26 @@ void WeatherFx::paint_back(lv_layer_t *layer) {
     fill.opa = o;
     lv_draw_fill(layer, &fill, &a);
   };
+
+  // Зарево у горизонта на восходе и закате: тёплый градиент снизу вверх
+  if (this->horizon_ > 0.01f) {
+    lv_area_t ga = {oc.x1, oc.y1 + 250, oc.x1 + 465, oc.y1 + 465};
+    if (hit(ga, clip)) {
+      lv_draw_fill_dsc_t g;
+      lv_draw_fill_dsc_init(&g);
+      g.opa = (lv_opa_t) (this->horizon_ * (dim ? 150.0f : 110.0f));
+      g.grad.dir = LV_GRAD_DIR_VER;
+      g.grad.stops_count = 2;
+      const lv_color_t c = lv_color_hex(this->dawn_ ? 0xFF8FA3 : 0xFF5E3A);
+      g.grad.stops[0].color = c;
+      g.grad.stops[0].opa = LV_OPA_TRANSP;
+      g.grad.stops[0].frac = 0;
+      g.grad.stops[1].color = c;
+      g.grad.stops[1].opa = LV_OPA_COVER;
+      g.grad.stops[1].frac = 255;
+      lv_draw_fill(layer, &g, &ga);
+    }
+  }
 
   // Солнце: мягкий ореол, диск и медленно вращающиеся лучи
   if (place(this->sun_spot_)) {
@@ -629,6 +659,19 @@ void WeatherFx::paint_back(lv_layer_t *layer) {
     lv_area_t h = {(int32_t) hx - 2, (int32_t) hy - 2, (int32_t) hx + 2, (int32_t) hy + 2};
     lv_draw_fill(layer, &fill, &h);
   }
+
+  // Самолёт: красный и зелёный огни на крыльях, между ними — белая
+  // проблесковая вспышка (двойная, раз в 1,2 с)
+  if (place(this->air_spot_)) {
+    const int x = (int) this->air_x_ + oc.x1, y = (int) this->air_y_ + oc.y1;
+    const uint32_t t = (millis() - this->air_t0_) % 1200;
+    if (t < 70 || (t > 160 && t < 230)) {
+      disc_at(x, y, 5, 0xFFFFFF, dim ? 90 : 60);
+      disc_at(x, y, 2, 0xFFFFFF, LV_OPA_COVER);
+    }
+    disc_at(x - 7, y + 1, 1, 0xFF3B30, LV_OPA_COVER);
+    disc_at(x + 7, y + 1, 1, 0x30D158, LV_OPA_COVER);
+  }
 }
 
 void WeatherFx::paint_front(lv_layer_t *layer) {
@@ -715,22 +758,92 @@ void WeatherFx::paint_front(lv_layer_t *layer) {
     lv_draw_letter(layer, &let, &pt);
   }
 
-  // Иней: светлые веточки по краю стекла
-  if (this->frost_on_) {
-    lv_draw_line_dsc_t fl;
-    lv_draw_line_dsc_init(&fl);
-    fl.width = 1;
-    fl.color = lv_color_hex(this->dim_ ? 0xEAF4FF : 0xC8DCF0);
-    for (int i = 0; i < this->nfr_; i++) {
-      const int16_t *s = this->fr_[i];
-      lv_area_t b = {std::min(s[0], s[2]) + oc.x1 - 1, std::min(s[1], s[3]) + oc.y1 - 1,
-                     std::max(s[0], s[2]) + oc.x1 + 1, std::max(s[1], s[3]) + oc.y1 + 1};
-      if (!hit(b, clip))
+  // Иней: морозный узор по краю — готовая маска, ледяным цветом. Внутри
+  // круга его нет, так что участки в середине экрана его не рисуют
+  if (this->frost_on_ && this->frost_buf_) {
+    const int cx = 233 + oc.x1, cy = 233 + oc.y1;
+    const int fx = std::max(std::abs(clip.x1 - cx), std::abs(clip.x2 - cx));
+    const int fy = std::max(std::abs(clip.y1 - cy), std::abs(clip.y2 - cy));
+    if (fx * fx + fy * fy >= 150 * 150) {
+      lv_draw_image_dsc_t im;
+      lv_draw_image_dsc_init(&im);
+      im.src = &this->frost_dsc_;
+      im.recolor = lv_color_hex(this->dim_ ? 0xEAF6FF : 0xC4DCF2);
+      im.opa = LV_OPA_COVER;
+      lv_area_t a = {oc.x1, oc.y1, oc.x1 + 465, oc.y1 + 465};
+      im.image_area = a;
+      lv_draw_image(layer, &im, &a);
+    }
+    // Искорки на кончиках кристаллов
+    fill.radius = LV_RADIUS_CIRCLE;
+    for (int i = 0; i < this->nfsp_; i++) {
+      if (!place(this->fsp_spot_[i]))
         continue;
-      fl.opa = this->fr_opa_[i];
-      fl.p1 = {(lv_value_precise_t) (s[0] + oc.x1), (lv_value_precise_t) (s[1] + oc.y1)};
-      fl.p2 = {(lv_value_precise_t) (s[2] + oc.x1), (lv_value_precise_t) (s[3] + oc.y1)};
-      lv_draw_line(layer, &fl);
+      const int x = this->fsp_x_[i] + oc.x1, y = this->fsp_y_[i] + oc.y1;
+      lv_area_t halo = {x - 3, y - 3, x + 3, y + 3};
+      fill.color = lv_color_hex(0xDDEEFF);
+      fill.opa = (lv_opa_t) (this->fsp_opa_[i] / 3);
+      lv_draw_fill(layer, &fill, &halo);
+      lv_area_t core = {x - 1, y - 1, x + 1, y + 1};
+      fill.color = lv_color_white();
+      fill.opa = this->fsp_opa_[i];
+      lv_draw_fill(layer, &fill, &core);
+    }
+    fill.opa = LV_OPA_COVER;
+
+    // Сосульки: ледяная полочка под цифрами и сосульки с бликом
+    lv_area_t ia = {ICE_SHELF[0][0] + oc.x1, ICE_Y + oc.y1, ICE_SHELF[1][1] + oc.x1, ICE_Y + 18 + oc.y1};
+    if (hit(ia, clip)) {
+      const lv_color_t ice = lv_color_hex(this->dim_ ? 0xDDF0FF : 0xA8CCEA);
+      fill.radius = 1;
+      fill.color = ice;
+      fill.opa = 190;
+      for (const auto &sh : ICE_SHELF) {
+        lv_area_t ledge = {sh[0] + oc.x1, ICE_Y + oc.y1, sh[1] + oc.x1, ICE_Y + 2 + oc.y1};
+        lv_draw_fill(layer, &fill, &ledge);
+      }
+      lv_draw_triangle_dsc_t tr;
+      lv_draw_triangle_dsc_init(&tr);
+      for (const auto &ic : ICICLES) {
+        const float x = ic[0] + oc.x1, y = ICE_Y + 2 + oc.y1, len = ic[1], w = ic[2] / 2.0f;
+        tr.color = ice;
+        tr.opa = 200;
+        tr.p[0] = {(lv_value_precise_t) (x - w), (lv_value_precise_t) y};
+        tr.p[1] = {(lv_value_precise_t) (x + w), (lv_value_precise_t) y};
+        tr.p[2] = {(lv_value_precise_t) x, (lv_value_precise_t) (y + len)};
+        lv_draw_triangle(layer, &tr);
+        tr.color = lv_color_white();
+        tr.opa = 210;
+        tr.p[0] = {(lv_value_precise_t) (x - w + 0.5f), (lv_value_precise_t) y};
+        tr.p[1] = {(lv_value_precise_t) (x - w + 1.8f), (lv_value_precise_t) y};
+        tr.p[2] = {(lv_value_precise_t) (x - 0.3f), (lv_value_precise_t) (y + len * 0.7f)};
+        lv_draw_triangle(layer, &tr);
+      }
+      fill.opa = LV_OPA_COVER;
+    }
+  }
+
+  // Марево в жару: волнистые струйки тёплого воздуха поднимаются и тают
+  if (this->heat_on_) {
+    lv_draw_line_dsc_t hl;
+    lv_draw_line_dsc_init(&hl);
+    hl.width = 2;
+    hl.round_start = 1;
+    hl.round_end = 1;
+    hl.color = lv_color_hex(0xFFC48A);
+    for (int i = 0; i < NHEAT; i++) {
+      if (!place(this->heat_spot_[i]))
+        continue;
+      const float a = this->hage_[i];
+      const float vis = std::min(a * 4.0f, 1.0f) * (1.0f - a);
+      hl.opa = (lv_opa_t) ((this->dim_ ? 130.0f : 90.0f) * vis);
+      const float x0 = this->hx_[i] - 13 + oc.x1, y0 = this->hy_[i] + oc.y1;
+      for (int k = 0; k < 6; k++) {
+        hl.p1 = {(lv_value_precise_t) (x0 + k * 4.4f), (lv_value_precise_t) (y0 + 2.0f * sinf(this->hph_[i] + k * 0.9f))};
+        hl.p2 = {(lv_value_precise_t) (x0 + (k + 1) * 4.4f),
+                 (lv_value_precise_t) (y0 + 2.0f * sinf(this->hph_[i] + (k + 1) * 0.9f))};
+        lv_draw_line(layer, &hl);
+      }
     }
   }
 
@@ -1058,9 +1171,8 @@ void WeatherFx::apply_(const Params &p, bool relayout) {
   this->gar_on_ = p.garland;
   if (!this->storm_)
     this->end_strike_();
-  show_(this->root_, this->nd_ || this->nf_ || this->ncl_ || this->storm_ || this->stars_on_ || this->sun_on_ ||
-                         this->gar_on_ || this->fw_on_ || this->kite_mode_ || this->rainbow_on_ || p.frost ||
-                         this->holiday_drawn_());
+  this->frost_on_ = p.frost;
+  this->update_root_();
   // Луна — вместе со звёздами; фазу задаёт moon_()
   if (!this->stars_on_) {
     this->mark_(this->moon_spot_, false, 0, 0, 1, 1);
@@ -1165,9 +1277,14 @@ void WeatherFx::apply_(const Params &p, bool relayout) {
     this->npl_ = 0;
     this->invalidate_(PL_AREA);
   }
-  if (p.frost != this->frost_on_)
+  // Иней: узор собирается при включении и освобождает память при выключении
+  if (this->frost_on_ && !this->frost_buf_) {
+    this->build_frost_();
     lv_obj_invalidate(this->paint_);
-  this->frost_on_ = p.frost;
+  } else if (!this->frost_on_ && this->frost_buf_) {
+    this->free_frost_();
+    lv_obj_invalidate(this->paint_);
+  }
   if (!this->stars_on_ && this->met_on_) {
     this->mark_(this->met_spot_, false, 0, 0, 1, 1);
     this->met_on_ = false;
@@ -1712,43 +1829,233 @@ void WeatherFx::planets_(double jd, float lst, float sphi, float cphi) {
 }
 
 void WeatherFx::build_frost_() {
-  // Иней по краю круга: 24 «веточки» от края внутрь, у каждой ствол из трёх
-  // отрезков и по боковой веточке с двух сторон на каждом изгибе. Узор
-  // одинаковый при каждом запуске — генератор с постоянным зерном
-  uint32_t seed = 20260927u;
+  // Морозный узор, как на оконном стекле: плотная кайма у края (внизу
+  // толще), перистые кристаллы, ветвящиеся под 60°, — к середине они тают,
+  // — мелкие шестилучевые звёздочки и крупа. Всё рисуется сглаженно в маску
+  // прозрачности; узор одинаковый при каждом включении — постоянное зерно
+  static const int W = 466;
+  if (!this->frost_buf_) {
+    this->frost_buf_ = static_cast<uint8_t *>(lv_malloc(W * W));
+    if (!this->frost_buf_)
+      return;
+  }
+  uint8_t *b = this->frost_buf_;
+  memset(b, 0, W * W);
+  uint32_t seed = 20261004u;
   auto rnd01 = [&seed]() {
     seed = seed * 1664525u + 1013904223u;
     return (seed >> 8) / 16777216.0f;
   };
-  this->nfr_ = 0;
-  auto add = [this](float x0, float y0, float x1, float y1, int opa) {
-    if (this->nfr_ >= NFROST)
+  auto put = [b](int x, int y, float a) {
+    if ((unsigned) x >= (unsigned) W || (unsigned) y >= (unsigned) W || a <= 0)
       return;
-    int16_t *s = this->fr_[this->nfr_];
-    s[0] = (int16_t) lroundf(x0);
-    s[1] = (int16_t) lroundf(y0);
-    s[2] = (int16_t) lroundf(x1);
-    s[3] = (int16_t) lroundf(y1);
-    this->fr_opa_[this->nfr_++] = (uint8_t) opa;
+    uint8_t &px = b[y * W + x];
+    const int v = (int) a;
+    if (v > px)
+      px = (uint8_t) std::min(v, 255);
   };
-  for (int f = 0; f < 24; f++) {
-    const float a = f * 2.0f * PI_F / 24 + (rnd01() - 0.5f) * 0.18f;
-    float x = 233.0f + 232.0f * cosf(a), y = 233.0f + 232.0f * sinf(a);
-    float d = a + PI_F + (rnd01() - 0.5f) * 0.6f;
-    const float len = 18.0f + rnd01() * 30.0f;
-    for (int s = 0; s < 3; s++) {
-      const float l = len / 3.0f;
-      const float nx = x + cosf(d) * l, ny = y + sinf(d) * l;
-      add(x, y, nx, ny, 170 - s * 35);
-      for (int side = -1; side <= 1; side += 2) {
-        const float bl = l * (0.75f - s * 0.15f), bd = d + side * (0.7f + rnd01() * 0.3f);
-        add(nx, ny, nx + cosf(bd) * bl, ny + sinf(bd) * bl, 120 - s * 25);
+  // Сглаженный отрезок толщиной w: яркость — по расстоянию до оси
+  auto seg = [&](float x0, float y0, float x1, float y1, float w, float a) {
+    const int bx0 = (int) floorf(std::min(x0, x1) - w - 1), bx1 = (int) ceilf(std::max(x0, x1) + w + 1);
+    const int by0 = (int) floorf(std::min(y0, y1) - w - 1), by1 = (int) ceilf(std::max(y0, y1) + w + 1);
+    const float dx = x1 - x0, dy = y1 - y0, l2 = dx * dx + dy * dy;
+    for (int y = by0; y <= by1; y++) {
+      for (int x = bx0; x <= bx1; x++) {
+        float t = l2 > 0 ? ((x - x0) * dx + (y - y0) * dy) / l2 : 0.0f;
+        t = std::min(std::max(t, 0.0f), 1.0f);
+        const float ex = x0 + t * dx - x, ey = y0 + t * dy - y;
+        const float cov = w * 0.5f + 0.5f - sqrtf(ex * ex + ey * ey);
+        if (cov > 0)
+          put(x, y, a * std::min(cov, 1.0f));
       }
-      x = nx;
-      y = ny;
-      d += (rnd01() - 0.5f) * 0.35f;
+    }
+  };
+
+  // Кайма у края и изморозь-крупа
+  const float p1 = rnd01() * 6.28f, p2 = rnd01() * 6.28f, p3 = rnd01() * 6.28f;
+  for (int y = 0; y < W; y++) {
+    for (int x = 0; x < W; x++) {
+      const float dx = x - 232.5f, dy = y - 232.5f, r2 = dx * dx + dy * dy;
+      if (r2 < 192.0f * 192.0f || r2 > 233.5f * 233.5f)
+        continue;
+      const float edge = 233.0f - sqrtf(r2);
+      const float ang = atan2f(dy, dx);
+      const float bottom = std::max(0.0f, sinf(ang));
+      const float n = 0.5f * sinf(3 * ang + p1) + 0.3f * sinf(7 * ang + p2) + 0.2f * sinf(13 * ang + p3);
+      const float thick = 9.0f + 9.0f * bottom + 5.0f * n;
+      float a = 0;
+      if (edge < thick) {
+        const float k = 1.0f - edge / thick;
+        a = 100.0f * k * k;
+      }
+      if (edge < thick * 1.5f && rnd01() < 0.05f)
+        a = std::max(a, 45.0f + rnd01() * 110.0f);
+      put(x, y, a);
     }
   }
+
+  // Перистые кристаллы: ствол от края внутрь, по бокам — ветки под 60°,
+  // у длинных веток — свои веточки. Чем ближе к кончику, тем ветки короче
+  struct Br {
+    float x, y, dir, len, w, a;
+    int level;
+  };
+  Br st[160];
+  int sp = 0;
+  this->nfsp_ = 0;
+  static const int SEEDS = 46;
+  for (int i = 0; i < SEEDS; i++) {
+    const float ang = i * 2.0f * PI_F / SEEDS + (rnd01() - 0.5f) * 0.12f;
+    const float bottom = std::max(0.0f, sinf(ang));
+    // Слева и справа — короче, чтобы не залезать на цифры
+    const float side = std::fabs(cosf(ang));
+    float len = (16.0f + rnd01() * 26.0f + 12.0f * bottom) * (1.0f - 0.35f * side);
+    if (rnd01() < 0.25f)
+      len *= 0.55f;  // между крупными — мелкие
+    const float x = 232.5f + 232.0f * cosf(ang), y = 232.5f + 232.0f * sinf(ang);
+    st[sp++] = {x, y, ang + PI_F + (rnd01() - 0.5f) * 0.7f, len, 1.5f, 225.0f, 0};
+    while (sp > 0) {
+      const Br br = st[--sp];
+      float bx = br.x, by = br.y, d = br.dir;
+      const float step = 2.5f;
+      const float gap = br.level == 0 ? 4.5f : 3.5f;
+      float next = gap;
+      for (float tr = 0; tr < br.len; tr += step) {
+        const float nx = bx + cosf(d) * step, ny = by + sinf(d) * step;
+        // Тает к середине круга
+        const float depth = 233.0f - sqrtf((nx - 232.5f) * (nx - 232.5f) + (ny - 232.5f) * (ny - 232.5f));
+        const float fade = std::min(std::max(1.0f - depth / 75.0f, 0.3f), 1.0f);
+        seg(bx, by, nx, ny, br.w * (1.0f - 0.4f * tr / br.len), br.a * fade);
+        bx = nx;
+        by = ny;
+        d += (rnd01() - 0.5f) * 0.12f;
+        if (br.level < 2 && tr + step >= next) {
+          next += gap;
+          const float rest = br.len - tr;
+          const float bl = rest * (br.level == 0 ? 0.55f : 0.5f) * (0.8f + rnd01() * 0.4f);
+          if (bl > 3.0f)
+            for (int sgn = -1; sgn <= 1 && sp < 158; sgn += 2)
+              st[sp++] = {bx, by, d + sgn * (PI_F / 3), bl, br.w * 0.7f, br.a * 0.8f, br.level + 1};
+        }
+      }
+      // Кончик ствола — место для искорки
+      if (br.level == 0 && br.len > 20 && this->nfsp_ < NFSP && rnd01() < 0.45f) {
+        this->fsp_x_[this->nfsp_] = (int) bx;
+        this->fsp_y_[this->nfsp_] = (int) by;
+        this->fsp_ph_[this->nfsp_] = rnd01() * 6.28f;
+        this->nfsp_++;
+      }
+    }
+  }
+
+  // Шестилучевые звёздочки льда у края
+  for (int i = 0; i < 18; i++) {
+    const float ang = rnd01() * 2.0f * PI_F;
+    const float r = 200.0f + rnd01() * 24.0f;
+    const float cx = 232.5f + r * cosf(ang), cy = 232.5f + r * sinf(ang);
+    const float size = 2.5f + rnd01() * 2.5f, rot = rnd01() * PI_F;
+    for (int k = 0; k < 6; k++) {
+      const float a = rot + k * PI_F / 3;
+      seg(cx, cy, cx + cosf(a) * size, cy + sinf(a) * size, 0.9f, 180.0f);
+    }
+  }
+
+  lv_image_dsc_t &d = this->frost_dsc_;
+  d.header.magic = LV_IMAGE_HEADER_MAGIC;
+  d.header.cf = LV_COLOR_FORMAT_A8;
+  d.header.flags = 0;
+  d.header.w = W;
+  d.header.h = W;
+  d.header.stride = W;
+  d.data_size = W * W;
+  d.data = b;
+  lv_image_cache_drop(&d);
+  for (int i = 0; i < this->nfsp_; i++)
+    this->fsp_opa_[i] = 0;
+}
+
+void WeatherFx::free_frost_() {
+  if (this->frost_buf_) {
+    lv_image_cache_drop(&this->frost_dsc_);
+    lv_free(this->frost_buf_);
+    this->frost_buf_ = nullptr;
+  }
+  for (auto &f : this->fsp_spot_)
+    this->mark_(f, false, 0, 0, 1, 1);
+}
+
+void WeatherFx::frost_sparks_(uint32_t now) {
+  // Искорки вспыхивают по очереди: каждая чаще тёмная и изредка блестит
+  if (!this->frost_on_ || !this->frost_buf_ || now - this->fsp_ms_ < 70)
+    return;
+  this->fsp_ms_ = now;
+  this->fsp_grp_ = (this->fsp_grp_ + 1) % 3;
+  for (int i = this->fsp_grp_; i < this->nfsp_; i += 3) {
+    this->fsp_ph_[i] += 0.35f + (i % 4) * 0.06f;
+    const float s = std::max(0.0f, sinf(this->fsp_ph_[i]));
+    const lv_opa_t o = (lv_opa_t) (255.0f * s * s * s * s);
+    if (o == this->fsp_opa_[i] && !(o == 0 && this->fsp_spot_[i].on))
+      continue;
+    if (this->fsp_spot_[i].on)
+      this->invalidate_(this->fsp_spot_[i].a);
+    this->fsp_opa_[i] = o;
+    this->mark_(this->fsp_spot_[i], o > 8, this->fsp_x_[i] - 4, this->fsp_y_[i] - 4, 9, 9);
+  }
+}
+
+void WeatherFx::heat_() {
+  if (!this->heat_on_)
+    return;
+  // Струйки поднимаются на ~60 px за 6 с, колышутся и тают; на смену —
+  // новые у самого края
+  for (int i = 0; i < NHEAT; i++) {
+    this->hage_[i] += this->dt_ms_ / 6000.0f;
+    if (this->hage_[i] >= 1.0f) {
+      this->hage_[i] = 0;
+      this->hx_[i] = rnd_(140, 326);
+      this->hy_[i] = 440;
+    }
+    this->hy_[i] -= this->k_ * 0.5f;
+    this->hph_[i] += this->k_ * 0.35f;
+    const int x = (int) this->hx_[i] - 15, y = (int) this->hy_[i] - 5;
+    if (this->heat_spot_[i].on)
+      this->invalidate_(this->heat_spot_[i].a);
+    this->mark_(this->heat_spot_[i], true, x, y, 31, 11);
+  }
+}
+
+void WeatherFx::plane_(uint32_t now) {
+  if (!this->plane_mode_)
+    return;
+  if (!this->air_on_) {
+    if (this->next_air_ == 0)
+      this->next_air_ = now + (this->plane_mode_ == 2 ? 1500 : rnd_(120000, 480000));
+    if ((int32_t) (now - this->next_air_) < 0)
+      return;
+    this->air_on_ = true;
+    this->air_t0_ = now;
+    this->air_v_ = rnd_(0, 2) ? AIR_SPEED : -AIR_SPEED;
+    this->air_y_ = rnd_(45, 140);
+  }
+  const float t = now - this->air_t0_;
+  this->air_x_ = (this->air_v_ > 0 ? -20.0f : 486.0f) + this->air_v_ * t;
+  const float y = this->air_y_;
+  if (this->air_x_ < -30.0f || this->air_x_ > 496.0f) {
+    this->mark_(this->air_spot_, false, 0, 0, 1, 1);
+    this->air_on_ = false;
+    this->next_air_ = now + (this->plane_mode_ == 2 ? rnd_(3000, 6000) : rnd_(240000, 600000));
+    return;
+  }
+  const int x = (int) this->air_x_, yy = (int) y;
+  if (this->air_spot_.on)
+    this->invalidate_(this->air_spot_.a);  // мигает — перерисовать
+  this->mark_(this->air_spot_, true, x - 10, yy - 6, 21, 13);
+}
+
+void WeatherFx::update_root_() {
+  show_(this->root_, this->nd_ || this->nf_ || this->ncl_ || this->storm_ || this->stars_on_ || this->sun_on_ ||
+                         this->gar_on_ || this->fw_on_ || this->kite_mode_ || this->rainbow_on_ || this->frost_on_ ||
+                         this->extras_drawn_());
 }
 
 void WeatherFx::sky_(const Params &p) {
@@ -2260,9 +2567,41 @@ void WeatherFx::frame(const Params &p) {
     this->apply_(p, relayout);
   }
 
+  // Зарево, марево и самолёт меняются без перестройки погоды
+  const float glow = std::min(std::max(p.glow, 0.0f), 1.0f);
+  if (std::fabs(glow - this->horizon_) > 0.02f || (glow > 0.01f && p.dawn != this->dawn_)) {
+    const bool vis = (glow > 0.01f) != (this->horizon_ > 0.01f);
+    this->horizon_ = glow;
+    this->dawn_ = p.dawn;
+    lv_area_t ga = {0, 250, 465, 465};
+    this->invalidate_(ga);
+    if (vis)
+      this->update_root_();
+  }
+  if (p.heat != this->heat_on_) {
+    this->heat_on_ = p.heat;
+    for (int i = 0; i < NHEAT; i++) {
+      this->hage_[i] = 1.0f - i / (float) NHEAT;  // струйки вразнобой
+      this->hx_[i] = rnd_(140, 326);
+      this->hy_[i] = 440;
+      if (!p.heat)
+        this->mark_(this->heat_spot_[i], false, 0, 0, 1, 1);
+    }
+    this->update_root_();
+  }
+  if (p.plane != this->plane_mode_) {
+    this->plane_mode_ = p.plane;
+    this->next_air_ = 0;
+    if (!p.plane && this->air_on_) {
+      this->mark_(this->air_spot_, false, 0, 0, 1, 1);
+      this->air_on_ = false;
+    }
+    this->update_root_();
+  }
+
   const bool any = this->nd_ || this->nf_ || this->ncl_ || this->storm_ || this->stars_on_ || this->sun_on_ ||
                    this->gar_on_ || this->fw_on_ || this->kite_mode_ || this->rainbow_on_ || this->frost_on_ ||
-                   this->holiday_drawn_();
+                   this->extras_drawn_();
   if (!any || !p.active) {
     this->end_strike_();
     this->last_ms_ = 0;
@@ -2293,6 +2632,9 @@ void WeatherFx::frame(const Params &p) {
   this->fireflies_(now);
   this->eggs_(now);
   this->matrix_();
+  this->frost_sparks_(now);
+  this->heat_();
+  this->plane_(now);
   this->meteor_(now);
   this->sun_(now);
   this->garland_(now);

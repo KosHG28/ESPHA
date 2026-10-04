@@ -39,6 +39,10 @@ struct Params {
   bool matrix{false};     ///< «матрица»: падающие столбцы нулей и единиц
   int fw_palette{0};      ///< салют: 0 разноцветный, 1 бело-сине-красный, 2 красно-золотой
   int moon_force{0};      ///< проверка: HOL_FULL_MOON / HOL_SUPERMOON / HOL_ECLIPSE, 0 — по небу
+  float glow{0};          ///< зарево у горизонта на восходе и закате, 0..1
+  bool dawn{false};       ///< зарево утреннее (розовое), иначе вечернее (оранжевое)
+  bool heat{false};       ///< жара: марево над нижним краем
+  int plane{0};           ///< самолёт ночью: 0 нет, 1 изредка, 2 часто (проверка)
   // Для созвездия: где и когда смотрим на небо. utc 0 — время неизвестно
   float lat{NAN}, lon{NAN};  ///< градусы, восточная долгота — плюс
   uint32_t utc{0};           ///< секунды Unix
@@ -148,16 +152,22 @@ class WeatherFx : public Component {
   void moon_(uint32_t utc, int force);
   void planets_(double jd, float lst, float sphi, float cphi);
   void build_frost_();
+  void free_frost_();
+  void frost_sparks_(uint32_t now);
+  void heat_();
+  void plane_(uint32_t now);
+  /// Показать слой погоды, если на нём хоть что-то есть
+  void update_root_();
   void bstar_(uint32_t now);
   void rocket_(uint32_t now);
   void fireflies_(uint32_t now);
   void bats_();
   void eggs_(uint32_t now);
   void matrix_();
-  /// Есть ли что рисовать для праздника (тогда слой погоды нужен, даже без погоды)
-  bool holiday_drawn_() const {
+  /// Есть ли что рисовать сверх погоды: праздник, зарево, марево, самолёт
+  bool extras_drawn_() const {
     return this->bstar_on_ || this->hol_ == HOL_COSMOS || this->hol_ == HOL_EASTER || this->ff_on_ ||
-           this->bats_on_ || this->mx_on_;
+           this->bats_on_ || this->mx_on_ || this->horizon_ > 0.01f || this->heat_on_ || this->plane_mode_;
   }
 
   /// Перенести частицу: отметить к перерисовке старое и новое место
@@ -185,12 +195,34 @@ class WeatherFx : public Component {
   int npl_{0};
   int pl_idx_[4]{};
   Spot pl_spot_{};
-  // Иней: отрезки веточек по краю круга
-  static const int NFROST = 220;
+  // Иней: узор собирается один раз в маску прозрачности во весь экран (A8,
+  // 466×466, в PSRAM) и рисуется ледяным цветом одной картинкой. Искорки на
+  // кончиках кристаллов поблёскивают. В сильный мороз под цифрами — сосульки
+  static const int NFSP = 12;
   bool frost_on_{false};
-  int nfr_{0};
-  int16_t fr_[NFROST][4]{};
-  uint8_t fr_opa_[NFROST]{};
+  uint8_t *frost_buf_{nullptr};
+  lv_image_dsc_t frost_dsc_{};
+  int nfsp_{0};
+  int fsp_x_[NFSP]{}, fsp_y_[NFSP]{};
+  float fsp_ph_[NFSP]{};
+  lv_opa_t fsp_opa_[NFSP]{};
+  Spot fsp_spot_[NFSP]{};
+  uint32_t fsp_ms_{0};
+  int fsp_grp_{0};
+  // Зарево у горизонта: сила 0..1, утро ли
+  float horizon_{0};
+  bool dawn_{false};
+  // Жара: струйки марева поднимаются над нижним краем и тают
+  static const int NHEAT = 6;
+  bool heat_on_{false};
+  float hx_[NHEAT]{}, hy_[NHEAT]{}, hage_[NHEAT]{}, hph_[NHEAT]{};
+  Spot heat_spot_[NHEAT]{};
+  // Самолёт ночью: огни на крыльях и проблесковый маяк
+  int plane_mode_{0};
+  bool air_on_{false};
+  uint32_t air_t0_{0}, next_air_{0};
+  float air_x_{0}, air_y_{0}, air_v_{0};
+  Spot air_spot_{};
   int shake_{0};
   // Луна: фаза 0..1 (0 — новолуние, 0,5 — полнолуние), нарисована ли
   float moon_phase_{-1};
