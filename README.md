@@ -552,7 +552,8 @@ OpenStreetMap — без ключей API. В браузере
 [`server/radar/README.md`](server/radar/README.md). Коротко:
 1. Запустить сервер: в Dockge — стек из
    [`server/radar/dockge-compose.yml`](server/radar/dockge-compose.yml), или
-   `docker compose up -d --build`; в нём — координаты дома.
+   `docker compose up -d --build`; координаты дома — в `.env` стека
+   (`CENTER_LAT=…`, `CENTER_LON=…`), не в GitHub.
 2. Вписать в HA у платы **«Адрес сервера радара»**, например
    `http://192.168.1.103:8088` — без перепрошивки.
 3. Включить в HA **«Страница радара»**.

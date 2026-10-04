@@ -6,10 +6,12 @@ services:
     ports:
       - "8080:8080"
     environment:
-      # Центр радара — ваш дом (те же координаты, что home_latitude /
-      # home_longitude в espha.yaml)
-      CENTER_LAT: "55.7558"
-      CENTER_LON: "37.6173"
+      # Центр радара — ваш дом. Сами координаты — в файле .env рядом со стеком
+      # (в Dockge — поле «.env» под compose), чтобы их не было в GitHub:
+      #   CENTER_LAT=55.7558
+      #   CENTER_LON=37.6173
+      CENTER_LAT: ${CENTER_LAT:-}
+      CENTER_LON: ${CENTER_LON:-}
       # Карта платы: dark — тёмная Esri, sat — спутник, osm-dark — тёмная
       # OpenStreetMap, osm — светлая OpenStreetMap. Все без ключей API
       MAP_STYLE: "dark"

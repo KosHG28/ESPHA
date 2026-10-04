@@ -94,9 +94,8 @@ substitutions:
 
   # ---- 3D-принтер Bambu Lab ----------------------------------------------
   # Сущности создаёт интеграция Bambu Lab (HACS, greghesp/ha-bambulab),
-  # она же работает в LAN-режиме. Ниже — Bambu Lab X1C, серийный номер
-  # 00M09A391500084. Для другого принтера посмотрите точные entity_id
-  # в Инструменты разработчика → Состояния.
+  # она же работает в LAN-режиме. Для своего принтера посмотрите точные
+  # entity_id в Инструменты разработчика → Состояния.
   printer_progress_entity: sensor.x1c_00m09a391500084_print_progress
   printer_status_entity: sensor.x1c_00m09a391500084_print_status
   printer_nozzle_entity: sensor.x1c_00m09a391500084_nozzle_temperature

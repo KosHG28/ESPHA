@@ -25,6 +25,7 @@ import time
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import BytesIO
+import urllib.parse
 from urllib.parse import parse_qs, urlparse
 
 try:  # FlightRadarAPI 1.4+ — модуль FlightRadarAPI
@@ -34,12 +35,24 @@ except ImportError:  # старые версии — модуль FlightRadar24
 
 from PIL import Image, ImageDraw, ImageEnhance, ImageFont, ImageOps
 
-CENTER_LAT = float(os.environ.get("CENTER_LAT", "55.7558"))
-CENTER_LON = float(os.environ.get("CENTER_LON", "37.6173"))
+def _coord(name, default):
+    """Координаты дома — только из окружения (в Dockge — из .env стека), в
+    репозитории их нет. Не заданы — центр Москвы и предупреждение в журнале"""
+    try:
+        return float(os.environ.get(name, "").replace(",", "."))
+    except ValueError:
+        print(f"{name} не задана — радар в центре Москвы. Впишите координаты дома в .env стека")
+        return default
+
+
+CENTER_LAT = _coord("CENTER_LAT", 55.7558)
+CENTER_LON = _coord("CENTER_LON", 37.6173)
 PORT = int(os.environ.get("PORT", "8080"))
 CACHE_DIR = os.environ.get("CACHE_DIR", "/data")
 MAP_BRIGHTNESS = float(os.environ.get("MAP_BRIGHTNESS", "1.15"))
-CITIES_FILE = os.environ.get("CITIES_FILE", os.path.join(os.path.dirname(os.path.abspath(__file__)), "cities.json"))
+CITIES_FILE = os.environ.get("CITIES_FILE", "")  # свой список городов; иначе — из OpenStreetMap
+BUNDLED_CITIES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cities.json")
+OVERPASS_URL = os.environ.get("OVERPASS_URL", "https://overpass-api.de/api/interpreter")
 MAP_STYLE = os.environ.get("MAP_STYLE", "dark")
 TILE_URL = os.environ.get("TILE_URL", "")  # свой источник тайлов {z}/{x}/{y} вместо MAP_STYLE
 FONT_FILE = os.environ.get("FONT_FILE", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf")
@@ -132,16 +145,81 @@ HEAVY = ("B74", "A38", "B77", "B78", "A33", "A34", "A35", "IL9", "IL7", "A12", "
 PROP = ("C1", "C2", "AT4", "AT7", "DH8", "DHC", "AN2", "AN3", "L41", "SF3", "PC1", "BE", "IL18", "I114")
 
 
+# ---------------------------------------------------------------------------
+# Города для подписей на карте. Порядок в списке — кого подписывать первым.
+# Откуда берутся, по порядку:
+#   1. CITIES_FILE или data/cities.json — свой список;
+#   2. города и посёлки вокруг дома из OpenStreetMap (Overpass API, без ключа):
+#      качаются один раз в фоне и лежат в data/;
+#   3. пока их нет — крупные города России из cities.json в образе.
+
+CITIES = []
+CITIES_SIG = ""
+
+
+def _set_cities(cities, source):
+    global CITIES, CITIES_SIG
+    CITIES = cities
+    CITIES_SIG = f"{source}{len(cities)}"
+    print(f"Города: {len(cities)} ({source})")
+
+
+def _read_json(path):
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _osm_cities():
+    path = os.path.join(CACHE_DIR, f"cities_osm_{CENTER_LAT:.2f}_{CENTER_LON:.2f}.json")
+    if os.path.exists(path):
+        return _read_json(path)
+    query = (f'[out:json][timeout:120];node["place"~"^(city|town)$"]'
+             f'(around:450000,{CENTER_LAT},{CENTER_LON});out body qt;')
+    req = urllib.request.Request(OVERPASS_URL, data=urllib.parse.urlencode({"data": query}).encode(),
+                                 headers={"User-Agent": USER_AGENT})
+    with urllib.request.urlopen(req, timeout=150) as resp:
+        elements = json.loads(resp.read().decode("utf-8")).get("elements", [])
+    cities = []
+    for e in elements:
+        tags = e.get("tags", {})
+        name = tags.get("name:ru") or tags.get("name")
+        if not name or "lat" not in e:
+            continue
+        digits = "".join(ch for ch in tags.get("population", "") if ch.isdigit())
+        pop = int(digits) if digits else (50000 if tags.get("place") == "city" else 5000)
+        cities.append({"name": name, "lat": round(e["lat"], 4), "lon": round(e["lon"], 4), "pop": pop})
+    # Крупные — первыми: им подпись достаётся раньше мелких
+    cities.sort(key=lambda c: -c["pop"])
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(cities, f, ensure_ascii=False)
+    return cities
+
+
 def load_cities():
+    own = CITIES_FILE or os.path.join(CACHE_DIR, "cities.json")
+    if os.path.exists(own):
+        try:
+            _set_cities(_read_json(own), "свои ")
+            return
+        except Exception as e:  # noqa: BLE001
+            print(f"Список городов {own}: {e}")
     try:
-        with open(CITIES_FILE, encoding="utf-8") as f:
-            return json.load(f)
+        _set_cities(_read_json(BUNDLED_CITIES), "крупные ")
     except Exception as e:  # noqa: BLE001
-        print(f"Нет списка городов {CITIES_FILE}: {e}")
-        return []
+        print(f"Нет списка городов {BUNDLED_CITIES}: {e}")
 
+    def fetch():
+        for attempt in range(5):
+            try:
+                _set_cities(_osm_cities(), "OSM ")
+                return
+            except Exception as e:  # noqa: BLE001
+                print(f"Города из OpenStreetMap: {e}")
+                time.sleep(60 * (attempt + 1))
 
-CITIES = load_cities()
+    threading.Thread(target=fetch, daemon=True).start()
+
 
 # ---------------------------------------------------------------------------
 # Проекция: веб-Меркатор, как у тайлов карты. Масштаб подбирается так, чтобы
@@ -382,7 +460,7 @@ def label_cities(img, r_km):
     except OSError:
         font = ImageFont.load_default()
     used = []
-    for c in sorted(CITIES, key=lambda c: dist_km(c["lat"], c["lon"])):
+    for c in CITIES:
         x, y = project(c["lat"], c["lon"], r_km)
         if x * x + y * y > (R_PX + 6) ** 2 or x * x + y * y < 14 ** 2:
             continue  # за кругом или это сам дом
@@ -402,11 +480,11 @@ def label_cities(img, r_km):
 
 def get_map(r_km, style=None):
     style = style if style in TILE_SOURCES and not style.endswith("-ref") else board_style()
-    key = (style, r_km)
+    key = (style, r_km, CITIES_SIG)
     with _map_lock:
         if key in _maps:
             return _maps[key]
-        path = os.path.join(CACHE_DIR, "maps", f"{style}_{CENTER_LAT:.4f}_{CENTER_LON:.4f}_{r_km}.jpg")
+        path = os.path.join(CACHE_DIR, "maps", f"{style}_{CENTER_LAT:.4f}_{CENTER_LON:.4f}_{CITIES_SIG}_{r_km}.jpg")
         if os.path.exists(path):
             with open(path, "rb") as f:
                 _maps[key] = f.read()
@@ -888,5 +966,6 @@ class RadarHandler(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     load_config()
+    load_cities()
     print(f"Радар: центр {CENTER_LAT}, {CENTER_LON}, порт {PORT}, городов {len(CITIES)}, карта {board_style()}")
     ThreadingHTTPServer(("0.0.0.0", PORT), RadarHandler).serve_forever()
