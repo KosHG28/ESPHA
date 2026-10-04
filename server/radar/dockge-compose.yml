@@ -3,7 +3,7 @@
 # с GitHub при сборке — копировать ничего не нужно.
 #
 # Порт на хосте — 8088: 8080 на этом сервере обычно занят (qBittorrent).
-# В espha.yaml тогда: radar_url: "http://IP_ХОСТА:8088"
+# В Home Assistant у платы: «Адрес сервера радара» = http://IP_ХОСТА:8088
 services:
   radar:
     build:
@@ -20,6 +20,8 @@ services:
         ENV PYTHONUNBUFFERED=1 CACHE_DIR=/data
         CMD ["python", "radar_server.py"]
     image: espha-radar:latest
+    # Образ только свой — не искать его в Docker Hub
+    pull_policy: build
     container_name: espha-radar
     restart: unless-stopped
     ports:
