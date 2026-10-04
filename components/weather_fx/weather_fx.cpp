@@ -9,6 +9,7 @@
 
 #include "esphome/core/hal.h"
 #include "esphome/core/helpers.h"
+#include "planets.h"
 #include "sky.h"
 
 namespace esphome {
@@ -76,6 +77,10 @@ static uint32_t glyph_cp(int set, int i) {
 }
 // Солнце — справа в «шапке» круга, мимо значка двери посередине
 static const int SUN_X = 300, SUN_Y = 74, SUN_R = 40;
+// Без часов (небо на весь экран) — солнце крупнее, справа вверху, и от него
+// по всему небу расходятся длинные полупрозрачные лучи
+static const int SUN_FX = 318, SUN_FY = 130;
+static const float SUN_FK = 1.3f;
 // Созвездие вписывается в «шапку» над строкой погоды: центр и размеры
 // прямоугольника, подпись — над ним. Когда часы убраны (режим ожидания) —
 // в большой прямоугольник справа: слева по центру там погода на улице, над
@@ -85,7 +90,7 @@ struct SkyBox {
   int cap_x, cap_y;
 };
 static const SkyBox BOX_TOP = {233.0f, 82.0f, 280.0f, 60.0f, 233, 24};
-static const SkyBox BOX_FULL = {300.0f, 236.0f, 210.0f, 250.0f, 300, 78};
+static const SkyBox BOX_FULL = {300.0f, 225.0f, 210.0f, 230.0f, 300, 78};
 static SkyBox g_box = BOX_TOP;
 static const int CAP_W = 220;
 // Созвездие видно, если его середина не ниже 25° над горизонтом
@@ -96,6 +101,12 @@ static const int CON_SLOT_S = 600, CON_RECALC_MIN = 5;
 // по центру. Ширина строки в этом месте круга — около 300 px
 static const int PL_Y = 408, PL_W = 74;
 static const lv_area_t PL_AREA = {233 - 2 * PL_W - 4, PL_Y - 16, 233 + 2 * PL_W + 4, PL_Y + 16};
+// Без часов планеты — крупными картинками по дуге слева внизу, под погодой
+// на улице: до трёх самых ярких, название справа
+static const int PL_FULL_N = 3;
+static const int PL_SLOT[PL_FULL_N][2] = {{196, 398}, {122, 352}, {80, 300}};
+static const lv_area_t PL_AREA_FULL = {40, 280, 330, 440};
+static const lv_image_dsc_t *const PL_IMG[5] = {nullptr, &pl_venus, &pl_jupiter, &pl_mars, &pl_saturn};
 struct PlanetEl {
   const char *name;
   uint32_t color;
@@ -438,8 +449,32 @@ void WeatherFx::paint_back(lv_layer_t *layer) {
 
   // Солнце: мягкий ореол, диск и медленно вращающиеся лучи
   if (place(this->sun_spot_)) {
-    const int cx = SUN_X + oc.x1, cy = SUN_Y + oc.y1;
-    auto disc = [&](int r, uint32_t c, lv_opa_t o) {
+    const bool big = this->full_;
+    const float sk = big ? SUN_FK : 1.0f;
+    const int cx = (big ? SUN_FX : SUN_X) + oc.x1, cy = (big ? SUN_FY : SUN_Y) + oc.y1;
+    if (big) {
+      // Длинные лучи: каждый — три клина разной длины друг на друге, так
+      // что у солнца они ярче и тают к краю неба. Поворачиваются вдвое
+      // медленнее коротких
+      lv_draw_triangle_dsc_t bt;
+      lv_draw_triangle_dsc_init(&bt);
+      // Тёплый оранжевый: у тусклого жёлтого на RGB565 проступает зелень
+      bt.color = lv_color_hex(0xFF8A2A);
+      bt.opa = dim ? 26 : 20;
+      static const float RL[3] = {300.0f, 190.0f, 115.0f};
+      const float base = this->sun_ang_ * 0.5f + PI_F / 12;
+      for (int k = 0; k < 12; k++) {
+        const float a = base + k * (2.0f * PI_F / 12), w = (k % 2) ? 0.05f : 0.085f;
+        for (float r : RL) {
+          bt.p[0] = {(lv_value_precise_t) (cx + 42.0f * cosf(a)), (lv_value_precise_t) (cy + 42.0f * sinf(a))};
+          bt.p[1] = {(lv_value_precise_t) (cx + r * cosf(a - w)), (lv_value_precise_t) (cy + r * sinf(a - w))};
+          bt.p[2] = {(lv_value_precise_t) (cx + r * cosf(a + w)), (lv_value_precise_t) (cy + r * sinf(a + w))};
+          lv_draw_triangle(layer, &bt);
+        }
+      }
+    }
+    auto disc = [&](int r0, uint32_t c, lv_opa_t o) {
+      const int r = (int) (r0 * sk);
       lv_area_t a = {cx - r, cy - r, cx + r, cy + r};
       fill.radius = LV_RADIUS_CIRCLE;
       fill.color = lv_color_hex(c);
@@ -454,7 +489,7 @@ void WeatherFx::paint_back(lv_layer_t *layer) {
     ln.color = lv_color_hex(dim ? 0xFFCA28 : 0xFFB300);
     for (int k = 0; k < 12; k++) {
       const float a = this->sun_ang_ + k * (2.0f * PI_F / 12);
-      const float r0 = 24.0f, r1 = (k % 2) ? 31.0f : 36.0f;
+      const float r0 = 24.0f * sk, r1 = ((k % 2) ? 31.0f : 36.0f) * sk;
       const float c = cosf(a), sn = sinf(a);
       ln.p1.x = (lv_value_precise_t) (cx + r0 * c);
       ln.p1.y = (lv_value_precise_t) (cy + r0 * sn);
@@ -627,8 +662,37 @@ void WeatherFx::paint_back(lv_layer_t *layer) {
     }
   }
 
+  // Без часов — планеты картинками по дуге слева внизу, название справа
+  if (this->npl_ && this->full_) {
+    lv_area_t pa = {PL_AREA_FULL.x1 + oc.x1, PL_AREA_FULL.y1 + oc.y1, PL_AREA_FULL.x2 + oc.x1,
+                    PL_AREA_FULL.y2 + oc.y1};
+    if (hit(pa, clip)) {
+      lv_draw_image_dsc_t im;
+      lv_draw_image_dsc_init(&im);
+      lv_draw_label_dsc_t lb;
+      lv_draw_label_dsc_init(&lb);
+      lb.font = this->font_cap_;
+      lb.color = lv_color_hex(dim ? 0x9AA8C4 : 0x5C6A84);
+      lb.opa = LV_OPA_COVER;
+      lb.flag = LV_TEXT_FLAG_EXPAND;
+      for (int i = 0; i < std::min(this->npl_, PL_FULL_N); i++) {
+        const lv_image_dsc_t *img = PL_IMG[this->pl_idx_[i]];
+        const int w = img->header.w, h = img->header.h;
+        const int cx = PL_SLOT[i][0] + oc.x1, cy = PL_SLOT[i][1] + oc.y1;
+        im.src = img;
+        lv_area_t ia = {cx - w / 2, cy - h / 2, cx - w / 2 + w - 1, cy - h / 2 + h - 1};
+        if (hit(ia, clip))
+          lv_draw_image(layer, &im, &ia);
+        lv_area_t ta = {cx + w / 2 + 6, cy - 9, cx + w / 2 + 96, cy + 11};
+        lb.text = PLANETS[this->pl_idx_[i]].name;
+        if (hit(ta, clip))
+          lv_draw_label(layer, &lb, &ta);
+      }
+    }
+  }
+
   // Планеты: цветная точка и название
-  if (this->npl_) {
+  if (this->npl_ && !this->full_) {
     lv_area_t pa = {PL_AREA.x1 + oc.x1, PL_AREA.y1 + oc.y1, PL_AREA.x2 + oc.x1, PL_AREA.y2 + oc.y1};
     if (hit(pa, clip)) {
       lv_draw_label_dsc_t lb;
@@ -1327,7 +1391,7 @@ void WeatherFx::apply_(const Params &p, bool relayout) {
         if (this->full_)
           bad = bad || (x < 182 && y > 192 && y < 274) ||                // погода на улице
                 (x > 182 && x < 424 && y > 70 && y < 370) ||            // созвездие и подпись
-                (x > 75 && x < 391 && y > 388 && y < 428);              // планеты
+                (x < 330 && y > 282);                                   // планеты
         else
           bad = bad || x < 50 || x > 416 || (x > 82 && x < 372 && y > 22 && y < 122);
       } while (bad);
@@ -1363,7 +1427,7 @@ void WeatherFx::apply_(const Params &p, bool relayout) {
   }
   if (!this->stars_on_ && this->npl_) {
     this->npl_ = 0;
-    this->invalidate_(PL_AREA);
+    this->invalidate_(this->full_ ? PL_AREA_FULL : PL_AREA);
   }
   // Иней: узор собирается при включении и освобождает память при выключении
   if (this->frost_on_ && !this->frost_buf_) {
@@ -1377,7 +1441,10 @@ void WeatherFx::apply_(const Params &p, bool relayout) {
     this->mark_(this->met_spot_, false, 0, 0, 1, 1);
     this->met_on_ = false;
   }
-  this->mark_(this->sun_spot_, this->sun_on_, SUN_X - SUN_R, SUN_Y - SUN_R, 2 * SUN_R + 1, 2 * SUN_R + 1);
+  if (this->full_)
+    this->mark_(this->sun_spot_, this->sun_on_, 0, 0, 466, 466);  // лучи — по всему небу
+  else
+    this->mark_(this->sun_spot_, this->sun_on_, SUN_X - SUN_R, SUN_Y - SUN_R, 2 * SUN_R + 1, 2 * SUN_R + 1);
   for (int i = 0; i < NG; i++)
     this->mark_(this->gs_[i], this->gar_on_, this->gx_[i] - 8, this->gy_[i] - 8, 17, 17);
 
@@ -1914,7 +1981,7 @@ void WeatherFx::planets_(double jd, float lst, float sphi, float cphi) {
   this->npl_ = n;
   for (int i = 0; i < n; i++)
     this->pl_idx_[i] = idx[i];
-  this->invalidate_(PL_AREA);
+  this->invalidate_(this->full_ ? PL_AREA_FULL : PL_AREA);
 }
 
 void WeatherFx::build_frost_() {
@@ -2175,7 +2242,7 @@ void WeatherFx::sky_(const Params &p) {
     }
     if (this->bats_on_ && this->npl_) {
       this->npl_ = 0;
-      this->invalidate_(PL_AREA);
+      this->invalidate_(this->full_ ? PL_AREA_FULL : PL_AREA);
     }
     this->con_force_ = true;
     return;
@@ -2665,6 +2732,8 @@ void WeatherFx::frame(const Params &p) {
     // Часы ушли или вернулись: небо — заново под весь круг или под «шапку»
     this->full_ = p.full;
     g_box = p.full ? BOX_FULL : BOX_TOP;
+    this->invalidate_(PL_AREA);
+    this->invalidate_(PL_AREA_FULL);
     if (this->con_on_) {
       this->invalidate_(this->con_area_);
       this->invalidate_(this->cap_area_);

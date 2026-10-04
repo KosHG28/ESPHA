@@ -328,6 +328,7 @@ script:
           const bool dry = mode == 0 && !storm && !s.empty();
           if (sel == 8 || (sel == 0 && dry && autumn && windy)) {
             mode = 5;
+            clouds = 0;  // листья летят по чистому небу, облака не нужны
             const bool strong = (!std::isnan(ws) && ws >= 9.0f) || (!std::isnan(wg) && wg >= 14.0f);
             cnt = sel == 8 || strong ? 14 : 10;
           }
@@ -352,6 +353,8 @@ script:
               (preview || (sel == 0 && mode == 0 && dry))) {
             mode = hol == HOL_MAR8 ? 7 : (hol == HOL_CHILDREN ? 8 : 9);
             cnt = 12;
+            if (mode == 9)
+              clouds = 0;  // кленовые листья — тоже без облаков
             if (preview) {
               clouds = 0;
               storm = false;
