@@ -1,4 +1,5 @@
 #include "radar.h"
+#include "aircraft_icons.h"
 
 #include <algorithm>
 #include <cmath>
@@ -6,6 +7,8 @@
 
 #include <esp_heap_caps.h>
 #include <esp_http_client.h>
+// lv_image_cache_drop — во внутренних заголовках LVGL
+#include <lvgl_private.h>
 
 #include "esphome/components/json/json_util.h"
 #include "esphome/core/hal.h"
@@ -74,6 +77,8 @@ void Radar::set_active(bool active) {
       this->map_shown_ = true;
       this->map_req_ = true;
     }
+    // Открыли страницу — на пару секунд показать радиус
+    this->show_title_();
     if (this->task_)
       xTaskNotifyGive(this->task_);
   }
@@ -97,11 +102,7 @@ void Radar::set_radius_(int r) {
   this->r_ = r;
   this->map_req_ = true;
   this->hide_card_();
-  if (this->title_) {
-    char buf[32];
-    snprintf(buf, sizeof(buf), "Радар · %d км", this->radius());
-    lv_label_set_text(this->title_, buf);
-  }
+  this->show_title_();
   if (this->task_)
     xTaskNotifyGive(this->task_);
 }
@@ -166,6 +167,12 @@ void Radar::fetch_() {
         strncpy(p.rt, o["rt"] | "", sizeof(p.rt) - 1);
         strncpy(p.ty, o["ty"] | "", sizeof(p.ty) - 1);
         strncpy(p.al, o["al"] | "", sizeof(p.al) - 1);
+        strncpy(p.num, o["n"] | "", sizeof(p.num) - 1);
+        strncpy(p.tl, o["tl"] | "", sizeof(p.tl) - 1);
+        strncpy(p.on, o["on"] | "", sizeof(p.on) - 1);
+        strncpy(p.dn, o["dn"] | "", sizeof(p.dn) - 1);
+        const int ic = o["ic"] | 5;  // по умолчанию — узкофюзеляжный
+        p.icon = (uint8_t) (ic >= 0 && ic < AC_ICONS ? ic : 5);
         // Скорость в пикселях в секунду по курсу
         const float v = p.spd / 3600.0f * k;
         const float a = p.hdg * (PI_F / 180.0f);
@@ -191,6 +198,7 @@ void Radar::fetch_() {
         vw.alt_color = (v["c"] | 1) != 0;
         vw.shapes = (v["s"] | 1) != 0;
         vw.rim = (v["o"] | 1) != 0;
+        strncpy(vw.hn, v["hn"] | "", sizeof(vw.hn) - 1);
         std::lock_guard<std::mutex> lock(this->mtx_);
         this->pending_view_ = vw;
         this->has_view_ = true;
@@ -214,57 +222,231 @@ void Radar::fetch_() {
 }
 
 // ---------------------------------------------------------------------------
-// Экран — в потоке LVGL
+// Экран — в потоке LVGL.
+//
+// Вид — по экрану «Local radar» из AirESP32ace (Vadim Malis, MIT): тёмная
+// карта, бледно-зелёные кольца, вращающийся сектор развёртки, самолёты —
+// зелёными силуэтами своего типа по курсу, позывные рядом, в центре — город.
+// Касание по самолёту — карточка во весь экран: авиакомпания, рисунок
+// самолёта сбоку, модель, откуда и куда, номер рейса, высота, скорость, курс
+
+static const uint32_t C_RING = 0x0B4D1C;     // кольца
+static const uint32_t C_SWEEP = 0x003A10;    // сектор развёртки
+static const uint32_t C_PLANE = 0x009428;    // силуэт
+static const uint32_t C_PLANE_SEL = 0x3DFF6A;  // выбранный
+static const uint32_t C_LABEL = 0x24BD38;    // позывной
+static const uint32_t C_TRAIL = 0x0A7625;    // хвост и отметки за кругом
+static const float SWEEP_DEG_S = 122.0f;     // скорость развёртки
+static const float SWEEP_SECTOR = 9.0f;      // ширина сектора
+static const float SWEEP_R = 234.0f;
+static const uint32_t TITLE_MS = 2500;       // сколько виден радиус после смены
 
 static void view_event_cb(lv_event_t *e) { static_cast<Radar *>(lv_event_get_user_data(e))->on_event(e); }
 static void tick_cb(lv_timer_t *t) { static_cast<Radar *>(lv_timer_get_user_data(t))->tick(); }
+static void sweep_cb(lv_timer_t *t) { static_cast<Radar *>(lv_timer_get_user_data(t))->sweep_tick(); }
 
-void Radar::bind(lv_obj_t *view, lv_obj_t *status, lv_obj_t *title, lv_obj_t *card, lv_obj_t *card_title,
-                 lv_obj_t *card_body, const lv_font_t *font) {
+static lv_obj_t *mk_label(lv_obj_t *parent, const lv_font_t *font, uint32_t color, int x, int y) {
+  lv_obj_t *l = lv_label_create(parent);
+  lv_obj_set_style_text_font(l, font, 0);
+  lv_obj_set_style_text_color(l, lv_color_hex(color), 0);
+  lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
+  lv_label_set_text(l, "");
+  lv_obj_align(l, LV_ALIGN_CENTER, x, y);
+  lv_obj_clear_flag(l, LV_OBJ_FLAG_CLICKABLE);
+  return l;
+}
+
+void Radar::bind(lv_obj_t *view, lv_obj_t *status, lv_obj_t *title, lv_obj_t *card, const lv_font_t *font,
+                 const lv_font_t *font_cs, const lv_font_t *font_mid, const lv_font_t *font_big) {
   this->view_ = view;
   this->status_ = status;
   this->title_ = title;
   this->card_ = card;
-  this->card_title_ = card_title;
-  this->card_body_ = card_body;
   this->font_ = font;
+  this->font_cs_ = font_cs ? font_cs : font;
+  this->font_mid_ = font_mid ? font_mid : font;
+  this->font_big_ = font_big ? font_big : font;
   lv_obj_add_event_cb(view, view_event_cb, LV_EVENT_DRAW_MAIN, this);
   lv_obj_add_event_cb(view, view_event_cb, LV_EVENT_PRESSED, this);
   lv_obj_add_event_cb(view, view_event_cb, LV_EVENT_CLICKED, this);
-  if (card)
+  if (card) {
     lv_obj_add_event_cb(card, view_event_cb, LV_EVENT_CLICKED, this);
-  if (title) {
-    char buf[32];
-    snprintf(buf, sizeof(buf), "Радар · %d км", this->radius());
-    lv_label_set_text(title, buf);
+    // Карточка: сверху вниз — авиакомпания, рисунок, модель, откуда и куда,
+    // номер рейса, высота / скорость / курс, позывной
+    this->d_air_ = mk_label(card, this->font_mid_, 0xBFC7CF, 0, -172);
+    this->d_img_ = lv_image_create(card);
+    lv_obj_align(this->d_img_, LV_ALIGN_CENTER, 0, -100);
+    lv_obj_set_style_image_recolor(this->d_img_, lv_color_hex(0x1FB04A), 0);
+    lv_obj_set_style_image_recolor_opa(this->d_img_, LV_OPA_COVER, 0);
+    lv_obj_clear_flag(this->d_img_, LV_OBJ_FLAG_CLICKABLE);
+    this->d_type_ = mk_label(card, this->font_, 0x8A949E, 0, -28);
+    this->d_o_ = mk_label(card, this->font_big_, 0xFFFFFF, -118, 10);
+    this->d_oc_ = mk_label(card, this->font_, 0x8A949E, -118, 42);
+    this->d_d_ = mk_label(card, this->font_big_, 0xFFFFFF, 118, 10);
+    this->d_dc_ = mk_label(card, this->font_, 0x8A949E, 118, 42);
+    // Линия маршрута с точкой посередине
+    lv_obj_t *line = lv_obj_create(card);
+    lv_obj_remove_style_all(line);
+    lv_obj_set_size(line, 110, 2);
+    lv_obj_set_style_bg_color(line, lv_color_hex(0x0A7625), 0);
+    lv_obj_set_style_bg_opa(line, LV_OPA_COVER, 0);
+    lv_obj_align(line, LV_ALIGN_CENTER, 0, 10);
+    lv_obj_t *dot = lv_obj_create(card);
+    lv_obj_remove_style_all(dot);
+    lv_obj_set_size(dot, 10, 10);
+    lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_color(dot, lv_color_hex(C_LABEL), 0);
+    lv_obj_set_style_bg_opa(dot, LV_OPA_COVER, 0);
+    lv_obj_align(dot, LV_ALIGN_CENTER, 0, 10);
+    this->d_num_ = mk_label(card, this->font_big_, 0xFFFFFF, 0, 82);
+    static const char *const CAPS[3] = {"высота", "скорость", "курс"};
+    for (int i = 0; i < 3; i++) {
+      this->d_cap_[i] = mk_label(card, this->font_, 0x6E7881, (i - 1) * 118, 124);
+      lv_label_set_text(this->d_cap_[i], CAPS[i]);
+      this->d_val_[i] = mk_label(card, this->font_mid_, 0xE6EDF5, (i - 1) * 118, 150);
+    }
+    this->d_cs_ = mk_label(card, this->font_, 0x6E7881, 0, 186);
   }
-  if (status)
-    lv_label_set_text(status, this->url_copy_().empty() ? "Сервер радара не задан" : "Загрузка…");
+  if (title)
+    this->show_title_();
+  if (status) {
+    lv_label_set_text(status, this->url_copy_().empty() ? "Сервер радара не задан" : "");
+    if (this->url_copy_().empty())
+      lv_obj_clear_flag(status, LV_OBJ_FLAG_HIDDEN);
+    else
+      lv_obj_add_flag(status, LV_OBJ_FLAG_HIDDEN);
+  }
   // Самолёты ползут медленно: 4 шага в секунду хватает с запасом
   lv_timer_create(tick_cb, 250, this);
+  // Развёртка — плавно, 30 раз в секунду; перерисовывается только сектор
+  lv_timer_create(sweep_cb, 33, this);
 }
 
-static lv_color_t alt_color_of(int32_t alt) {
-  if (alt < 1500)
-    return lv_color_hex(0x00E5FF);
-  if (alt < 4500)
-    return lv_color_hex(0x00FF66);
-  if (alt < 8500)
-    return lv_color_hex(0xFFEB3B);
-  if (alt < 11000)
-    return lv_color_hex(0xFFA500);
-  return lv_color_hex(0xFF4D4D);
+void Radar::show_title_() {
+  if (!this->title_)
+    return;
+  char buf[32];
+  snprintf(buf, sizeof(buf), "%d км", this->radius());
+  lv_label_set_text(this->title_, buf);
+  lv_obj_clear_flag(this->title_, LV_OBJ_FLAG_HIDDEN);
+  this->title_ms_ = millis();
 }
+
+// ---- Развёртка ------------------------------------------------------------
+
+void Radar::invalidate_sweep_(float from_deg, float to_deg) {
+  if (!this->view_)
+    return;
+  lv_area_t oc;
+  lv_obj_get_coords(this->view_, &oc);
+  const float cx = oc.x1 + 233.0f, cy = oc.y1 + 233.0f;
+  // Сектор режется на 6 колец: так рамки участков плотно облегают клин и
+  // перерисовывается немного
+  static const int BANDS = 6;
+  for (int b = 0; b < BANDS; b++) {
+    const float r0 = std::max(0.0f, b * SWEEP_R / BANDS - 2.0f), r1 = (b + 1) * SWEEP_R / BANDS + 2.0f;
+    float x0 = 1e9f, x1 = -1e9f, y0 = 1e9f, y1 = -1e9f;
+    for (int k = 0; k <= 4; k++) {
+      const float a = (from_deg + (to_deg - from_deg) * k / 4.0f) * (PI_F / 180.0f);
+      const float c = cosf(a), sn = sinf(a);
+      for (float r : {r0, r1}) {
+        x0 = std::min(x0, cx + r * c);
+        x1 = std::max(x1, cx + r * c);
+        y0 = std::min(y0, cy + r * sn);
+        y1 = std::max(y1, cy + r * sn);
+      }
+    }
+    lv_area_t a = {(int32_t) x0 - 3, (int32_t) y0 - 3, (int32_t) x1 + 3, (int32_t) y1 + 3};
+    lv_obj_invalidate_area(this->view_, &a);
+  }
+}
+
+void Radar::sweep_tick() {
+  const uint32_t now = millis();
+  if (!this->active_.load() || !this->view_) {
+    this->sweep_ms_ = 0;
+    return;
+  }
+  const uint32_t dt = this->sweep_ms_ ? std::min<uint32_t>(now - this->sweep_ms_, 100) : 33;
+  this->sweep_ms_ = now;
+  const float old = this->sweep_deg_;
+  this->sweep_deg_ += SWEEP_DEG_S * dt / 1000.0f;
+  if (this->sweep_deg_ >= 360.0f)
+    this->sweep_deg_ -= 360.0f;
+  float now_deg = this->sweep_deg_;
+  if (now_deg < old)
+    now_deg += 360.0f;
+  this->invalidate_sweep_(old - SWEEP_SECTOR - 1.0f, now_deg + 1.0f);
+}
+
+// ---- Силуэты ----------------------------------------------------------------
+
+const lv_image_dsc_t *Radar::sprite_(int icon, int hdg) {
+  const int step = ((hdg % 360 + 360) % 360 + 2) / 5 % 72;
+  const int key = icon * 72 + step;
+  this->spr_clock_++;
+  SprEnt *slot = nullptr;
+  for (auto &e : this->spr_)
+    if (e.key == key) {
+      e.used = this->spr_clock_;
+      return &e.dsc;
+    }
+  for (auto &e : this->spr_)
+    if (!slot || e.used < slot->used)
+      slot = &e;
+  if (!slot->buf) {
+    slot->buf = static_cast<uint8_t *>(heap_caps_malloc(AC_MAP * AC_MAP, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    if (!slot->buf)
+      slot->buf = static_cast<uint8_t *>(malloc(AC_MAP * AC_MAP));
+    if (!slot->buf)
+      return nullptr;
+  }
+  // Поворот маски по часовой на курс: для каждой точки результата — точка
+  // исходника, с усреднением четырёх соседей. Исходник — 4 бита на точку
+  const uint8_t *src = AC_ICON[icon].map;
+  auto at = [src](int x, int y) -> int {
+    if (x < 0 || y < 0 || x >= AC_MAP || y >= AC_MAP)
+      return 0;
+    const uint8_t b = src[(y * AC_MAP + x) >> 1];
+    return ((x & 1) ? (b & 0x0F) : (b >> 4)) * 17;
+  };
+  const float a = step * 5.0f * (PI_F / 180.0f), ca = cosf(a), sa = sinf(a), c = (AC_MAP - 1) / 2.0f;
+  for (int y = 0; y < AC_MAP; y++) {
+    for (int x = 0; x < AC_MAP; x++) {
+      const float dx = x - c, dy = y - c;
+      const float sx = c + dx * ca + dy * sa, sy = c - dx * sa + dy * ca;
+      const int ix = (int) floorf(sx), iy = (int) floorf(sy);
+      const float fx = sx - ix, fy = sy - iy;
+      const float v = at(ix, iy) * (1 - fx) * (1 - fy) + at(ix + 1, iy) * fx * (1 - fy) +
+                      at(ix, iy + 1) * (1 - fx) * fy + at(ix + 1, iy + 1) * fx * fy;
+      slot->buf[y * AC_MAP + x] = (uint8_t) std::min(255.0f, v + 0.5f);
+    }
+  }
+  lv_image_dsc_t &d = slot->dsc;
+  d.header.magic = LV_IMAGE_HEADER_MAGIC;
+  d.header.cf = LV_COLOR_FORMAT_A8;
+  d.header.flags = 0;
+  d.header.w = AC_MAP;
+  d.header.h = AC_MAP;
+  d.header.stride = AC_MAP;
+  d.data_size = AC_MAP * AC_MAP;
+  d.data = slot->buf;
+  lv_image_cache_drop(&d);
+  slot->key = key;
+  slot->used = this->spr_clock_;
+  return &d;
+}
+
+// ---- Самолёты ---------------------------------------------------------------
+
+static const char *label_of(const Plane &p) { return p.cs[0] ? p.cs : (p.num[0] ? p.num : p.rt); }
 
 lv_area_t Radar::plane_area_(const Plane &p) const {
-  // Силуэт, подпись справа, хвост и отметка на ободе — всё, что может быть
-  // нарисовано для самолёта
-  int x1 = (int) p.px - 13, y1 = (int) p.py - 13, x2 = (int) p.px + 13, y2 = (int) p.py + 13;
-  if (p.label) {
-    const int w = 9 * (int) std::max(strlen(p.rt), strlen(p.cs)) + 6;
-    x2 = std::max(x2, (int) p.px + 10 + w);
-    y1 = std::min(y1, (int) p.py - 14);
-  }
+  // Силуэт 50×50, позывной справа, хвост и отметка на ободе — всё, что
+  // может быть нарисовано для самолёта
+  int x1 = (int) p.px - 26, y1 = (int) p.py - 26, x2 = (int) p.px + 26, y2 = (int) p.py + 26;
+  if (p.label)
+    x2 = std::max(x2, (int) p.px + 20 + 11 * (int) strlen(label_of(p)) + 6);
   for (int i = 0; i < p.ntr; i++) {
     x1 = std::min(x1, (int) p.tr[i][0] - 2);
     y1 = std::min(y1, (int) p.tr[i][1] - 2);
@@ -315,10 +497,7 @@ void Radar::apply_view_(const View &v) {
     lv_obj_invalidate(this->view_);
 }
 
-lv_color_t Radar::plane_color_(int32_t alt) const {
-  // Без цвета по высоте — все янтарные, как на веб-странице
-  return this->view_cfg_.alt_color ? alt_color_of(alt) : lv_color_hex(0xFFC107);
-}
+lv_color_t Radar::plane_color_(int32_t) const { return lv_color_hex(C_PLANE); }
 
 void Radar::apply_(std::vector<Plane> &fresh, int r) {
   const uint32_t now = millis();
@@ -361,7 +540,7 @@ void Radar::apply_(std::vector<Plane> &fresh, int r) {
 }
 
 void Radar::layout_labels_() {
-  // Подписи — ближним к дому в первую очередь; где наползает на уже
+  // Позывные — ближним к дому в первую очередь; где наползает на уже
   // подписанный, подписи нет. Самолёты в списке уже по удалённости
   std::vector<lv_area_t> used;
   for (auto &p : this->planes_) {
@@ -370,11 +549,11 @@ void Radar::layout_labels_() {
       continue;
     if (p.px * p.px + p.py * p.py > (float) (R_PX - 10) * (R_PX - 10))
       continue;
-    const char *t = p.rt[0] ? p.rt : p.cs;
+    const char *t = label_of(p);
     if (!t[0])
       continue;
-    const int w = 9 * (int) strlen(t) + 4;
-    lv_area_t a = {(int) p.px + 10, (int) p.py - 14, (int) p.px + 10 + w, (int) p.py + 4};
+    const int w = 11 * (int) strlen(t) + 4;
+    lv_area_t a = {(int) p.px + 20, (int) p.py - 11, (int) p.px + 20 + w, (int) p.py + 11};
     bool free = true;
     for (const auto &u : used)
       if (a.x1 <= u.x2 && a.x2 >= u.x1 && a.y1 <= u.y2 && a.y2 >= u.y1)
@@ -389,33 +568,26 @@ void Radar::layout_labels_() {
 void Radar::update_status_() {
   if (!this->status_)
     return;
-  if (this->url_copy_().empty()) {
-    lv_label_set_text(this->status_, "Сервер радара не задан");
-    return;
+  // Строка внизу — только когда что-то не так
+  const char *msg = nullptr;
+  if (this->url_copy_().empty())
+    msg = "Сервер радара не задан";
+  else if (this->fails_ >= 2)
+    msg = "Нет связи с сервером радара";
+  else if (this->loaded_ && this->planes_.empty())
+    msg = "В небе пусто";
+  if (msg) {
+    lv_label_set_text(this->status_, msg);
+    lv_obj_clear_flag(this->status_, LV_OBJ_FLAG_HIDDEN);
+  } else {
+    lv_obj_add_flag(this->status_, LV_OBJ_FLAG_HIDDEN);
   }
-  if (this->fails_ >= 2) {
-    lv_label_set_text(this->status_, "Нет связи с сервером радара");
-    return;
-  }
-  if (!this->loaded_)
-    return;
-  const Plane *near = nullptr;
-  for (const auto &p : this->planes_)
-    if (!near || p.dist < near->dist)
-      near = &p;
-  if (!near) {
-    lv_label_set_text(this->status_, "В небе пусто");
-    return;
-  }
-  char buf[96];
-  const char *name = near->ty[0] ? near->ty : (near->cs[0] ? near->cs : "самолёт");
-  const int alt = near->alt / 100 * 100;
-  if (alt >= 1000)
-    snprintf(buf, sizeof(buf), "Ближайший: %s · %d км · %d %03d м", name, (int) lroundf(near->dist), alt / 1000,
-             alt % 1000);
-  else
-    snprintf(buf, sizeof(buf), "Ближайший: %s · %d км · %d м", name, (int) lroundf(near->dist), alt);
-  lv_label_set_text(this->status_, buf);
+}
+
+static const char *compass16(int hdg) {
+  static const char *const W[16] = {"С", "ССВ", "СВ", "ВСВ", "В", "ВЮВ", "ЮВ", "ЮЮВ",
+                                    "Ю", "ЮЮЗ", "ЮЗ", "ЗЮЗ", "З", "ЗСЗ", "СЗ", "ССЗ"};
+  return W[((hdg % 360 + 360) % 360 * 16 + 180) / 360 % 16];
 }
 
 void Radar::show_card_(int idx) {
@@ -423,29 +595,65 @@ void Radar::show_card_(int idx) {
     return;
   const Plane &p = this->planes_[idx];
   strncpy(this->sel_id_, p.id, sizeof(this->sel_id_) - 1);
-  char title[40], body[160];
-  snprintf(title, sizeof(title), "%s%s%s", p.cs[0] ? p.cs : "—", p.ty[0] ? " · " : "", p.ty);
-  char route[24] = "";
-  if (p.rt[0]) {
-    // «SVO-KUF» → «SVO → KUF»
-    const char *dash = strchr(p.rt, '-');
-    if (dash)
-      snprintf(route, sizeof(route), "%.*s → %s", (int) (dash - p.rt), p.rt, dash + 1);
-    else
-      snprintf(route, sizeof(route), "%s", p.rt);
+  // Рисунок самолёта сбоку — свой или семейства; распаковка 4 → 8 бит
+  int ic = p.icon < AC_ICONS ? p.icon : 5;
+  if (!AC_ICON[ic].detail)
+    ic = AC_ICON[ic].family;
+  if (ic != this->det_icon_ && AC_ICON[ic].detail && this->d_img_) {
+    const int w = AC_ICON[ic].dw, h = AC_ICON[ic].dh;
+    if (!this->det_buf_)
+      this->det_buf_ = static_cast<uint8_t *>(heap_caps_malloc(190 * 190, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    if (this->det_buf_) {
+      const uint8_t *src = AC_ICON[ic].detail;
+      for (int i = 0; i < w * h; i++) {
+        const uint8_t b = src[i >> 1];
+        this->det_buf_[i] = ((i & 1) ? (b & 0x0F) : (b >> 4)) * 17;
+      }
+      lv_image_dsc_t &d = this->det_dsc_;
+      d.header.magic = LV_IMAGE_HEADER_MAGIC;
+      d.header.cf = LV_COLOR_FORMAT_A8;
+      d.header.flags = 0;
+      d.header.w = w;
+      d.header.h = h;
+      d.header.stride = w;
+      d.data_size = w * h;
+      d.data = this->det_buf_;
+      lv_image_cache_drop(&d);
+      lv_image_set_src(this->d_img_, &d);
+      // Рисунок — шириной около 170 px
+      lv_image_set_scale(this->d_img_, (uint32_t) (170 * 256 / w));
+      this->det_icon_ = ic;
+    }
   }
+  lv_label_set_text(this->d_air_, p.al);
+  lv_label_set_text(this->d_type_, p.tl[0] ? p.tl : p.ty);
+  // «SVO-KUF» → SVO и KUF по краям
+  char o[8] = "", d[8] = "";
+  const char *dash = strchr(p.rt, '-');
+  if (dash) {
+    snprintf(o, sizeof(o), "%.*s", (int) std::min<ptrdiff_t>(dash - p.rt, 7), p.rt);
+    snprintf(d, sizeof(d), "%s", dash + 1);
+  }
+  lv_label_set_text(this->d_o_, o[0] ? o : "—");
+  lv_label_set_text(this->d_d_, d[0] ? d : "—");
+  lv_label_set_text(this->d_oc_, p.on);
+  lv_label_set_text(this->d_dc_, p.dn);
+  lv_label_set_text(this->d_num_, p.num[0] ? p.num : (p.cs[0] ? p.cs : "—"));
   // Высота с пробелом между тысячами: «10 600 м»
-  char alt[16];
+  char buf[24];
   const int a = p.alt / 10 * 10;
   if (a >= 1000)
-    snprintf(alt, sizeof(alt), "%d %03d м", a / 1000, a % 1000);
+    snprintf(buf, sizeof(buf), "%d %03d м", a / 1000, a % 1000);
   else
-    snprintf(alt, sizeof(alt), "%d м", a);
-  snprintf(body, sizeof(body), "%s%s%s%s%s · %d км/ч\n%d км от дома", p.al, p.al[0] ? "\n" : "", route,
-           route[0] ? "\n" : "", alt, p.spd, (int) lroundf(p.dist));
-  lv_label_set_text(this->card_title_, title);
-  lv_label_set_text(this->card_body_, body);
-  lv_obj_set_style_border_color(this->card_, this->plane_color_(p.alt), 0);
+    snprintf(buf, sizeof(buf), "%d м", a);
+  lv_label_set_text(this->d_val_[0], buf);
+  snprintf(buf, sizeof(buf), "%d км/ч", p.spd);
+  lv_label_set_text(this->d_val_[1], buf);
+  snprintf(buf, sizeof(buf), "%s %d°", compass16(p.hdg), (p.hdg % 360 + 360) % 360);
+  lv_label_set_text(this->d_val_[2], buf);
+  char foot[64];
+  snprintf(foot, sizeof(foot), "%s · %d км от дома", p.cs[0] ? p.cs : "—", (int) lroundf(p.dist));
+  lv_label_set_text(this->d_cs_, foot);
   lv_obj_clear_flag(this->card_, LV_OBJ_FLAG_HIDDEN);
   lv_obj_move_foreground(this->card_);
   this->card_ms_ = millis();
@@ -542,6 +750,11 @@ void Radar::tick() {
   // Карточка закрывается сама через 15 секунд
   if (this->selected_ >= 0 && millis() - this->card_ms_ > 15000)
     this->hide_card_();
+  // Радиус виден пару секунд после открытия страницы и смены масштаба
+  if (this->title_ && this->title_ms_ && millis() - this->title_ms_ > TITLE_MS) {
+    this->title_ms_ = 0;
+    lv_obj_add_flag(this->title_, LV_OBJ_FLAG_HIDDEN);
+  }
   if (!this->active_.load() || this->planes_.empty())
     return;
 
@@ -571,29 +784,13 @@ void Radar::tick() {
   }
 }
 
-// Силуэты: треугольники в осях самолёта (нос — вверх, −y)
+// Без силуэтов — одна стрелка
 struct Tri {
   float x0, y0, x1, y1, x2, y2;
 };
-static const Tri JET[] = {
-    {0, -9, 1.7f, -4, -1.7f, -4},   {-1.7f, -4, 1.7f, -4, 1.7f, 6}, {-1.7f, -4, 1.7f, 6, -1.7f, 6},
-    {-1.5f, -2, -9, 3, -1.5f, 2},   {1.5f, -2, 9, 3, 1.5f, 2},      {-1.2f, 4, -4.5f, 8, -1.2f, 6.5f},
-    {1.2f, 4, 4.5f, 8, 1.2f, 6.5f},
-};
-static const Tri HEAVY[] = {
-    {0, -11, 2.2f, -5, -2.2f, -5}, {-2.2f, -5, 2.2f, -5, 2.2f, 7}, {-2.2f, -5, 2.2f, 7, -2.2f, 7},
-    {-2, -3, -12, 4, -2, 2},       {2, -3, 12, 4, 2, 2},           {-1.5f, 5, -6, 10, -1.5f, 8},
-    {1.5f, 5, 6, 10, 1.5f, 8},
-};
-// Без силуэтов — одна стрелка
 static const Tri ARROW[] = {
     {0, -9, 6.5f, 7, 0, 3},
     {0, -9, 0, 3, -6.5f, 7},
-};
-static const Tri PROP[] = {
-    {0, -8, 1.4f, -4, -1.4f, -4}, {-1.4f, -4, 1.4f, -4, 1.4f, 6}, {-1.4f, -4, 1.4f, 6, -1.4f, 6},
-    {-8, -3, 8, -3, 8, -0.5f},    {-8, -3, 8, -0.5f, -8, -0.5f},  {-3.5f, 5, 3.5f, 5, 3.5f, 6.5f},
-    {-3.5f, 5, 3.5f, 6.5f, -3.5f, 6.5f},
 };
 
 void Radar::paint(lv_layer_t *layer) {
@@ -605,69 +802,64 @@ void Radar::paint(lv_layer_t *layer) {
     return a.x1 <= clip.x2 && a.x2 >= clip.x1 && a.y1 <= clip.y2 && a.y2 >= clip.y1;
   };
 
-  // Кольца дальности — каждая четверть радиуса — с подписями километров
-  lv_draw_arc_dsc_t arc;
-  lv_draw_arc_dsc_init(&arc);
-  arc.center = {cx, cy};
-  arc.width = 1;
-  arc.start_angle = 0;
-  arc.end_angle = 360;
-  arc.color = lv_color_hex(0x4A5F7A);
-  arc.opa = 170;
-  lv_draw_label_dsc_t lb;
-  lv_draw_label_dsc_init(&lb);
-  lb.font = this->font_;
-  lb.opa = LV_OPA_COVER;
-  lb.flag = LV_TEXT_FLAG_EXPAND;
-  const int x1 = clip.x1 - cx, x2 = clip.x2 - cx, y1 = clip.y1 - cy, y2 = clip.y2 - cy;
-  const int nx = std::max(x1, std::max(0, -x2)), ny = std::max(y1, std::max(0, -y2));
-  const int fx = std::max(std::abs(x1), std::abs(x2)), fy = std::max(std::abs(y1), std::abs(y2));
-  const int near2 = nx * nx + ny * ny, far2 = fx * fx + fy * fy;
-  const int r_km = this->shown_r_ ? this->shown_r_ : this->radius();
-  const bool grid = this->view_cfg_.grid;
-  for (int i = 1; i <= 4 && grid; i++) {
-    const int rr = R_PX * i / 4;
-    if (near2 <= (rr + 2) * (rr + 2) && far2 >= (rr - 2) * (rr - 2)) {
-      arc.radius = rr;
-      lv_draw_arc(layer, &arc);
-    }
-    char t[20];
-    snprintf(t, sizeof(t), "%d км", r_km * i / 4);
-    const int lx = cx + (int) (rr * 0.707f) + 3, ly = cy - (int) (rr * 0.707f) - 16;
-    lv_area_t ta = {lx, ly, lx + 60, ly + 16};
-    if (hit(ta)) {
-      lb.text = t;
-      lb.color = lv_color_hex(0x7F93AD);
-      lv_draw_label(layer, &lb, &ta);
+  // Сектор развёртки
+  if (this->active_.load()) {
+    lv_draw_triangle_dsc_t sw;
+    lv_draw_triangle_dsc_init(&sw);
+    sw.color = lv_color_hex(C_SWEEP);
+    sw.opa = 46;
+    const float a1 = this->sweep_deg_ * (PI_F / 180.0f), a0 = (this->sweep_deg_ - SWEEP_SECTOR) * (PI_F / 180.0f);
+    sw.p[0] = {(lv_value_precise_t) cx, (lv_value_precise_t) cy};
+    sw.p[1] = {(lv_value_precise_t) (cx + SWEEP_R * cosf(a0)), (lv_value_precise_t) (cy + SWEEP_R * sinf(a0))};
+    sw.p[2] = {(lv_value_precise_t) (cx + SWEEP_R * cosf(a1)), (lv_value_precise_t) (cy + SWEEP_R * sinf(a1))};
+    lv_draw_triangle(layer, &sw);
+  }
+
+  // Кольца дальности — треть, две трети и весь радиус
+  if (this->view_cfg_.grid) {
+    lv_draw_arc_dsc_t arc;
+    lv_draw_arc_dsc_init(&arc);
+    arc.center = {cx, cy};
+    arc.width = 1;
+    arc.start_angle = 0;
+    arc.end_angle = 360;
+    arc.color = lv_color_hex(C_RING);
+    arc.opa = 220;
+    const int x1 = clip.x1 - cx, x2 = clip.x2 - cx, y1 = clip.y1 - cy, y2 = clip.y2 - cy;
+    const int nx = std::max(x1, std::max(0, -x2)), ny = std::max(y1, std::max(0, -y2));
+    const int fx = std::max(std::abs(x1), std::abs(x2)), fy = std::max(std::abs(y1), std::abs(y2));
+    const int near2 = nx * nx + ny * ny, far2 = fx * fx + fy * fy;
+    for (int i = 1; i <= 3; i++) {
+      const int rr = R_PX * i / 3;
+      if (near2 <= (rr + 2) * (rr + 2) && far2 >= (rr - 2) * (rr - 2)) {
+        arc.radius = rr;
+        lv_draw_arc(layer, &arc);
+      }
     }
   }
-  // Стороны света
-  static const char *const SIDE[4] = {"С", "В", "Ю", "З"};
-  static const int SDX[4] = {0, 1, 0, -1}, SDY[4] = {-1, 0, 1, 0};
-  for (int i = 0; i < 4 && grid; i++) {
-    const int sx = cx + SDX[i] * (R_PX - 14), sy = cy + SDY[i] * (R_PX - 14);
-    lv_area_t ta = {sx - 10, sy - 9, sx + 10, sy + 9};
-    if (!hit(ta))
-      continue;
-    lb.text = SIDE[i];
-    lb.color = lv_color_hex(i == 0 ? 0xFF8A80 : 0xA9B8CC);
-    lb.align = LV_TEXT_ALIGN_CENTER;
-    lv_draw_label(layer, &lb, &ta);
-    lb.align = LV_TEXT_ALIGN_AUTO;
-  }
-  // Дом
+
+  // Дом: точка и город под ней
   lv_draw_fill_dsc_t fill;
   lv_draw_fill_dsc_init(&fill);
   fill.radius = LV_RADIUS_CIRCLE;
   {
-    lv_area_t h = {cx - 6, cy - 6, cx + 6, cy + 6};
+    lv_area_t h = {cx - 3, cy - 3, cx + 3, cy + 3};
     if (hit(h)) {
-      fill.color = lv_color_hex(0x5AC8FA);
-      fill.opa = 90;
-      lv_draw_fill(layer, &fill, &h);
-      lv_area_t d = {cx - 3, cy - 3, cx + 3, cy + 3};
+      fill.color = lv_color_hex(0xD8DEE4);
       fill.opa = LV_OPA_COVER;
-      lv_draw_fill(layer, &fill, &d);
+      lv_draw_fill(layer, &fill, &h);
+    }
+    if (this->view_cfg_.hn[0]) {
+      lv_area_t ta = {cx - 110, cy + 8, cx + 110, cy + 36};
+      if (hit(ta)) {
+        lv_draw_label_dsc_t lb;
+        lv_draw_label_dsc_init(&lb);
+        lb.font = this->font_mid_;
+        lb.color = lv_color_hex(0xE6E6E6);
+        lb.align = LV_TEXT_ALIGN_CENTER;
+        lb.text = this->view_cfg_.hn;
+        lv_draw_label(layer, &lb, &ta);
+      }
     }
   }
 
@@ -679,6 +871,11 @@ void Radar::paint(lv_layer_t *layer) {
   lv_draw_triangle_dsc_t tr;
   lv_draw_triangle_dsc_init(&tr);
   tr.opa = LV_OPA_COVER;
+  lv_draw_label_dsc_t lb;
+  lv_draw_label_dsc_init(&lb);
+  lb.font = this->font_cs_;
+  lb.color = lv_color_hex(C_LABEL);
+  lb.flag = LV_TEXT_FLAG_EXPAND;
   for (size_t i = 0; i < this->planes_.size(); i++) {
     const Plane &p = this->planes_[i];
     if (!p.drawn)
@@ -686,24 +883,25 @@ void Radar::paint(lv_layer_t *layer) {
     lv_area_t pa = {p.area.x1 + oc.x1, p.area.y1 + oc.y1, p.area.x2 + oc.x1, p.area.y2 + oc.y1};
     if (!hit(pa))
       continue;
-    const lv_color_t col = this->plane_color_(p.alt);
+    const bool sel = (int) i == this->selected_;
+    const lv_color_t col = lv_color_hex(sel ? C_PLANE_SEL : C_PLANE);
     const float d = sqrtf(p.px * p.px + p.py * p.py);
     if (d > R_PX) {
+      // За кругом — точка на ободе в его сторону
       if (!this->view_cfg_.rim)
         continue;
-      // За кругом — красная точка на ободе в его сторону
       const int ex = cx + (int) (p.px / d * (R_PX + 2)), ey = cy + (int) (p.py / d * (R_PX + 2));
       lv_area_t m = {ex - 3, ey - 3, ex + 3, ey + 3};
-      fill.color = lv_color_hex(0xFF4D4D);
+      fill.color = lv_color_hex(C_TRAIL);
       fill.opa = LV_OPA_COVER;
       lv_draw_fill(layer, &fill, &m);
       continue;
     }
     const float px = cx + p.px, py = cy + p.py;
-    // Хвост — откуда прилетел, гаснущим цветом высоты
+    // Хвост — откуда прилетел, тускло-зелёный
     if (p.ntr) {
-      ln.color = col;
-      ln.opa = 110;
+      ln.color = lv_color_hex(C_TRAIL);
+      ln.opa = 120;
       for (int k = 0; k < p.ntr; k++) {
         ln.p1 = {(lv_value_precise_t) (cx + p.tr[k][0]), (lv_value_precise_t) (cy + p.tr[k][1])};
         ln.p2 = k + 1 < p.ntr
@@ -712,31 +910,32 @@ void Radar::paint(lv_layer_t *layer) {
         lv_draw_line(layer, &ln);
       }
     }
-    // Выбранный — в светлом кольце
-    if ((int) i == this->selected_) {
-      lv_area_t s = {(int) px - 12, (int) py - 12, (int) px + 12, (int) py + 12};
-      fill.color = lv_color_white();
-      fill.opa = 60;
-      lv_draw_fill(layer, &fill, &s);
-      fill.opa = LV_OPA_COVER;
+    // Силуэт своего типа по курсу; без силуэтов — стрелка
+    const lv_image_dsc_t *spr = this->view_cfg_.shapes ? this->sprite_(p.icon, p.hdg) : nullptr;
+    if (spr) {
+      lv_draw_image_dsc_t im;
+      lv_draw_image_dsc_init(&im);
+      im.src = spr;
+      im.recolor = col;
+      im.opa = LV_OPA_COVER;
+      lv_area_t ia = {(int32_t) px - AC_MAP / 2, (int32_t) py - AC_MAP / 2, (int32_t) px - AC_MAP / 2 + AC_MAP - 1,
+                      (int32_t) py - AC_MAP / 2 + AC_MAP - 1};
+      im.image_area = ia;
+      lv_draw_image(layer, &im, &ia);
+    } else {
+      const float a = p.hdg * (PI_F / 180.0f), ca = cosf(a), sa = sinf(a);
+      tr.color = col;
+      for (const Tri &t : ARROW) {
+        const float xs[3] = {t.x0, t.x1, t.x2}, ys[3] = {t.y0, t.y1, t.y2};
+        for (int v = 0; v < 3; v++)
+          tr.p[v] = {(lv_value_precise_t) (px + xs[v] * ca - ys[v] * sa), (lv_value_precise_t) (py + xs[v] * sa + ys[v] * ca)};
+        lv_draw_triangle(layer, &tr);
+      }
     }
-    // Силуэт по курсу
-    const Tri *tris = !this->view_cfg_.shapes ? ARROW : (p.kind == 1 ? HEAVY : (p.kind == 2 ? PROP : JET));
-    const int ntris = this->view_cfg_.shapes ? 7 : 2;
-    const float a = p.hdg * (PI_F / 180.0f), ca = cosf(a), sa = sinf(a);
-    tr.color = col;
-    for (int k = 0; k < ntris; k++) {
-      const Tri &t = tris[k];
-      const float xs[3] = {t.x0, t.x1, t.x2}, ys[3] = {t.y0, t.y1, t.y2};
-      for (int v = 0; v < 3; v++)
-        tr.p[v] = {(lv_value_precise_t) (px + xs[v] * ca - ys[v] * sa), (lv_value_precise_t) (py + xs[v] * sa + ys[v] * ca)};
-      lv_draw_triangle(layer, &tr);
-    }
-    // Подпись: маршрут или позывной
+    // Позывной справа
     if (p.label) {
-      lb.text = p.rt[0] ? p.rt : p.cs;
-      lb.color = lv_color_hex(0xE6EDF5);
-      lv_area_t ta = {(int) px + 10, (int) py - 14, (int) px + 10 + 9 * (int) strlen(lb.text) + 4, (int) py + 4};
+      lb.text = label_of(p);
+      lv_area_t ta = {(int) px + 20, (int) py - 11, (int) px + 20 + 11 * (int) strlen(lb.text) + 4, (int) py + 11};
       lv_draw_label(layer, &lb, &ta);
     }
   }

@@ -17,6 +17,7 @@ services:
         WORKDIR /app
         ADD https://raw.githubusercontent.com/KosHG28/ESPHA/main/server/radar/radar_server.py ./
         ADD https://raw.githubusercontent.com/KosHG28/ESPHA/main/server/radar/cities.json ./
+        ADD https://raw.githubusercontent.com/KosHG28/ESPHA/main/server/radar/aircraft_types.json ./
         ENV PYTHONUNBUFFERED=1 CACHE_DIR=/data
         CMD ["python", "radar_server.py"]
     image: espha-radar:latest

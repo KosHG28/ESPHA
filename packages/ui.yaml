@@ -113,6 +113,14 @@ font:
     ignore_missing_glyphs: true
 
   # Текст вперемешку с иконками Material Design Icons
+  # Радар: позывные самолётов — латиница и цифры
+  - file: "gfonts://Montserrat@500"
+    id: font_radar_cs
+    size: 17
+    bpp: 4
+    glyphsets: [GF_Latin_Kernel]
+    ignore_missing_glyphs: true
+
   - file: "gfonts://Montserrat@400"
     id: font_icon
     size: 26
@@ -1332,11 +1340,11 @@ lvgl:
             clickable: true
         - label:
             id: radar_title
-            text: "Радар"
-            text_font: font_radar
-            text_color: 0xA9B8CC
+            text: ""
+            text_font: font_s
+            text_color: 0x24BD38
             align: CENTER
-            y: -175
+            y: -178
         - label:
             id: radar_status
             text: ""
@@ -1351,39 +1359,20 @@ lvgl:
             pad_bottom: 3
             align: CENTER
             y: 172
-        # Карточка самолёта: открывается касанием по нему, касание по
-        # карточке — закрыть. Рамка — цветом высоты
+        # Карточка самолёта во весь экран (как в AirESP32ace): открывается
+        # касанием по нему, касание по карточке — закрыть. Содержимое
+        # создаёт components/radar
         - obj:
             id: radar_card
             align: CENTER
-            width: 310
-            height: SIZE_CONTENT
-            radius: 24
-            bg_color: 0x14181D
-            bg_opa: 92%
-            border_width: 3
-            border_color: 0x5AC8FA
-            pad_all: 16
+            width: 466
+            height: 466
+            radius: 233
+            bg_color: 0x000000
+            bg_opa: 96%
+            border_width: 0
+            pad_all: 0
             hidden: true
             clickable: true
             scrollable: false
-            layout:
-              type: flex
-              flex_flow: COLUMN
-              flex_align_main: CENTER
-              flex_align_cross: CENTER
-              flex_align_track: CENTER
-              pad_row: 6
-            widgets:
-              - label:
-                  id: radar_card_title
-                  text: ""
-                  text_font: font_m
-                  text_color: 0xFFFFFF
-              - label:
-                  id: radar_card_body
-                  text: ""
-                  text_font: font_s
-                  text_color: 0xC8D4E0
-                  text_align: CENTER
 

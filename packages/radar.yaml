@@ -85,8 +85,9 @@ interval:
           static bool bound = false;
           if (!bound) {
             bound = true;
-            id(radar_comp)->bind(id(radar_view), id(radar_status), id(radar_title), id(radar_card), id(radar_card_title),
-                            id(radar_card_body), id(font_radar)->get_lv_font());
+            id(radar_comp)->bind(id(radar_view), id(radar_status), id(radar_title), id(radar_card),
+                                 id(font_radar)->get_lv_font(), id(font_radar_cs)->get_lv_font(),
+                                 id(font_s)->get_lv_font(), id(font_l)->get_lv_font());
           }
           // Запросы к серверу — только пока страница на экране
           id(radar_comp)->set_active(id(current_page) == 4 && !id(screen_off));

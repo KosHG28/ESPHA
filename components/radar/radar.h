@@ -32,6 +32,10 @@ struct Plane {
   char rt[12]{};         ///< маршрут «SVO-KUF»
   char ty[6]{};          ///< тип «A320»
   char al[28]{};         ///< авиакомпания
+  char num[10]{};        ///< номер рейса «SU1520»
+  char tl[24]{};         ///< модель «Airbus A320»
+  char on[20]{}, dn[20]{};  ///< аэропорты вылета и прилёта
+  uint8_t icon{0};       ///< силуэт: номер в AC_ICON (aircraft_icons.h)
   uint8_t ntr{0};
   int16_t tr[8][2]{};    ///< хвост: прежние точки
   // Показ: откуда плавно доезжает до новых данных и что нарисовано
@@ -51,9 +55,10 @@ struct View {
   bool alt_color{true}; ///< цвет по высоте
   bool shapes{true};    ///< силуэты по типу, иначе стрелка
   bool rim{true};       ///< отметки самолётов за кругом
+  char hn[24]{};        ///< город в центре
   bool operator==(const View &o) const {
     return strcmp(map, o.map) == 0 && r == o.r && labels == o.labels && grid == o.grid &&
-           alt_color == o.alt_color && shapes == o.shapes && rim == o.rim;
+           alt_color == o.alt_color && shapes == o.shapes && rim == o.rim && strcmp(hn, o.hn) == 0;
   }
 };
 
@@ -65,10 +70,11 @@ class Radar : public Component {
   void setup() override;
   float get_setup_priority() const override { return setup_priority::LATE; }
 
-  /// Холст поверх карты, строка «ближайший», заголовок с радиусом, карточка
-  /// самолёта (заголовок и текст) и шрифт подписей — packages/radar.yaml
-  void bind(lv_obj_t *view, lv_obj_t *status, lv_obj_t *title, lv_obj_t *card, lv_obj_t *card_title,
-            lv_obj_t *card_body, const lv_font_t *font);
+  /// Холст поверх карты, строка ошибок, заголовок с радиусом, карточка
+  /// самолёта (во весь экран, содержимое создаётся здесь) и шрифты: мелкий,
+  /// позывных, средний и крупный — packages/radar.yaml
+  void bind(lv_obj_t *view, lv_obj_t *status, lv_obj_t *title, lv_obj_t *card, const lv_font_t *font,
+            const lv_font_t *font_cs, const lv_font_t *font_mid, const lv_font_t *font_big);
 
   /// Страница радара на экране и экран включён — только тогда идут запросы
   void set_active(bool active);
@@ -86,6 +92,8 @@ class Radar : public Component {
 
   void paint(lv_layer_t *layer);
   void tick();
+  /// Сектор развёртки: шаг поворота, 30 раз в секунду
+  void sweep_tick();
   void on_event(lv_event_t *e);
 
   static const int R_PX = 220;  ///< радиус круга дальности на экране
@@ -101,6 +109,10 @@ class Radar : public Component {
   void show_card_(int idx);
   void hide_card_();
   void invalidate_plane_(const Plane &p);
+  /// Повёрнутый по курсу силуэт (маска A8 50×50) — из кэша или собранный
+  const lv_image_dsc_t *sprite_(int icon, int hdg);
+  void invalidate_sweep_(float from_deg, float to_deg);
+  void show_title_();
   void set_radius_(int r);
   lv_color_t plane_color_(int32_t alt) const;
   void apply_view_(const View &v);
@@ -136,9 +148,31 @@ class Radar : public Component {
   uint32_t card_ms_{0};
   lv_point_t press_{};
 
-  lv_obj_t *view_{nullptr}, *status_{nullptr}, *title_{nullptr}, *card_{nullptr}, *card_title_{nullptr},
-      *card_body_{nullptr};
-  const lv_font_t *font_{nullptr};
+  lv_obj_t *view_{nullptr}, *status_{nullptr}, *title_{nullptr}, *card_{nullptr};
+  const lv_font_t *font_{nullptr}, *font_cs_{nullptr}, *font_mid_{nullptr}, *font_big_{nullptr};
+  uint32_t title_ms_{0};
+
+  // Развёртка: угол переднего края, градусы от востока по часовой
+  float sweep_deg_{-90.0f};
+  uint32_t sweep_ms_{0};
+
+  // Кэш повёрнутых силуэтов: номер иконки и курс шагом 5°
+  struct SprEnt {
+    int key{-1};
+    uint32_t used{0};
+    uint8_t *buf{nullptr};
+    lv_image_dsc_t dsc{};
+  };
+  static const int NSPR = 40;
+  SprEnt spr_[NSPR];
+  uint32_t spr_clock_{0};
+
+  // Карточка самолёта во весь экран
+  lv_obj_t *d_air_{nullptr}, *d_img_{nullptr}, *d_type_{nullptr}, *d_o_{nullptr}, *d_oc_{nullptr}, *d_d_{nullptr},
+      *d_dc_{nullptr}, *d_num_{nullptr}, *d_val_[3]{}, *d_cap_[3]{}, *d_cs_{nullptr};
+  uint8_t *det_buf_{nullptr};
+  lv_image_dsc_t det_dsc_{};
+  int det_icon_{-1};
 };
 
 }  // namespace radar

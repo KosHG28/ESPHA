@@ -1,0 +1,843 @@
+{
+"source": "AirESP32ace © 2026 Vadim Malis, MIT — https://github.com/vmalis/AirESP32ace",
+"families": {
+"light_piston": [
+0,
+"Лёгкий самолёт"
+],
+"single_prop": [
+1,
+"Одномоторный"
+],
+"turboprop": [
+2,
+"Турбовинтовой"
+],
+"regional_jet": [
+3,
+"Региональный"
+],
+"business_jet": [
+4,
+"Бизнес-джет"
+],
+"narrowbody_twinjet": [
+5,
+"Узкофюзеляжный"
+],
+"widebody_twinjet": [
+6,
+"Широкофюзеляжный"
+],
+"four_engine_widebody": [
+7,
+"Четырёхмоторный"
+],
+"helicopter": [
+8,
+"Вертолёт"
+]
+},
+"codes": {
+"BCS1": [
+9,
+"Airbus A220"
+],
+"BCS3": [
+9,
+"Airbus A220"
+],
+"A30B": [
+10,
+"Airbus A300"
+],
+"A306": [
+10,
+"Airbus A300"
+],
+"A310": [
+11,
+"Airbus A310"
+],
+"A318": [
+12,
+"Airbus A319"
+],
+"A319": [
+12,
+"Airbus A319"
+],
+"A19N": [
+12,
+"Airbus A319"
+],
+"A320": [
+13,
+"Airbus A320"
+],
+"A20N": [
+13,
+"Airbus A320"
+],
+"A321": [
+14,
+"Airbus A321"
+],
+"A21N": [
+14,
+"Airbus A321"
+],
+"A332": [
+15,
+"Airbus A330"
+],
+"A333": [
+15,
+"Airbus A330"
+],
+"A337": [
+15,
+"Airbus A330"
+],
+"A338": [
+15,
+"Airbus A330"
+],
+"A339": [
+15,
+"Airbus A330"
+],
+"A342": [
+16,
+"Airbus A340"
+],
+"A343": [
+16,
+"Airbus A340"
+],
+"A345": [
+16,
+"Airbus A340"
+],
+"A346": [
+16,
+"Airbus A340"
+],
+"A359": [
+17,
+"Airbus A350"
+],
+"A35K": [
+17,
+"Airbus A350"
+],
+"A388": [
+18,
+"Airbus A380"
+],
+"AN24": [
+19,
+"Antonov An-24 family"
+],
+"AN26": [
+19,
+"Antonov An-24 family"
+],
+"AN30": [
+19,
+"Antonov An-24 family"
+],
+"AN32": [
+19,
+"Antonov An-24 family"
+],
+"A124": [
+20,
+"Antonov An-124"
+],
+"A148": [
+21,
+"Antonov An-148 family"
+],
+"A158": [
+21,
+"Antonov An-148 family"
+],
+"A225": [
+22,
+"Antonov An-225"
+],
+"AT43": [
+23,
+"ATR 42"
+],
+"AT44": [
+23,
+"ATR 42"
+],
+"AT45": [
+23,
+"ATR 42"
+],
+"AT46": [
+23,
+"ATR 42"
+],
+"AT72": [
+24,
+"ATR 72"
+],
+"AT73": [
+24,
+"ATR 72"
+],
+"AT75": [
+24,
+"ATR 72"
+],
+"AT76": [
+24,
+"ATR 72"
+],
+"B461": [
+25,
+"BAe 146 / Avro RJ"
+],
+"B462": [
+25,
+"BAe 146 / Avro RJ"
+],
+"B463": [
+25,
+"BAe 146 / Avro RJ"
+],
+"RJ70": [
+25,
+"BAe 146 / Avro RJ"
+],
+"RJ85": [
+25,
+"BAe 146 / Avro RJ"
+],
+"RJ1H": [
+25,
+"BAe 146 / Avro RJ"
+],
+"B190": [
+26,
+"Beechcraft 1900"
+],
+"BE9L": [
+27,
+"Beechcraft King Air"
+],
+"BE10": [
+27,
+"Beechcraft King Air"
+],
+"BE20": [
+27,
+"Beechcraft King Air"
+],
+"BE30": [
+27,
+"Beechcraft King Air"
+],
+"B350": [
+27,
+"Beechcraft King Air"
+],
+"B701": [
+28,
+"Boeing 707"
+],
+"B703": [
+28,
+"Boeing 707"
+],
+"B712": [
+29,
+"Boeing 717"
+],
+"B721": [
+30,
+"Boeing 727"
+],
+"B722": [
+30,
+"Boeing 727"
+],
+"B731": [
+31,
+"Boeing 737"
+],
+"B732": [
+31,
+"Boeing 737"
+],
+"B733": [
+31,
+"Boeing 737"
+],
+"B734": [
+31,
+"Boeing 737"
+],
+"B735": [
+31,
+"Boeing 737"
+],
+"B736": [
+31,
+"Boeing 737"
+],
+"B737": [
+31,
+"Boeing 737"
+],
+"B738": [
+31,
+"Boeing 737"
+],
+"B739": [
+31,
+"Boeing 737"
+],
+"B37M": [
+31,
+"Boeing 737"
+],
+"B38M": [
+31,
+"Boeing 737"
+],
+"B39M": [
+31,
+"Boeing 737"
+],
+"B3XM": [
+31,
+"Boeing 737"
+],
+"B741": [
+32,
+"Boeing 747"
+],
+"B742": [
+32,
+"Boeing 747"
+],
+"B743": [
+32,
+"Boeing 747"
+],
+"B744": [
+32,
+"Boeing 747"
+],
+"B74R": [
+32,
+"Boeing 747"
+],
+"B74S": [
+32,
+"Boeing 747"
+],
+"B748": [
+32,
+"Boeing 747"
+],
+"BLCF": [
+32,
+"Boeing 747"
+],
+"B752": [
+33,
+"Boeing 757"
+],
+"B753": [
+33,
+"Boeing 757"
+],
+"B762": [
+34,
+"Boeing 767"
+],
+"B763": [
+34,
+"Boeing 767"
+],
+"B764": [
+34,
+"Boeing 767"
+],
+"B772": [
+35,
+"Boeing 777"
+],
+"B773": [
+35,
+"Boeing 777"
+],
+"B77L": [
+35,
+"Boeing 777"
+],
+"B77W": [
+35,
+"Boeing 777"
+],
+"B778": [
+35,
+"Boeing 777"
+],
+"B779": [
+35,
+"Boeing 777"
+],
+"B788": [
+36,
+"Boeing 787"
+],
+"B789": [
+36,
+"Boeing 787"
+],
+"B78X": [
+36,
+"Boeing 787"
+],
+"CRJ1": [
+37,
+"Bombardier CRJ"
+],
+"CRJ2": [
+37,
+"Bombardier CRJ"
+],
+"CRJ7": [
+37,
+"Bombardier CRJ"
+],
+"CRJ9": [
+37,
+"Bombardier CRJ"
+],
+"CRJX": [
+37,
+"Bombardier CRJ"
+],
+"C172": [
+38,
+"Cessna 172"
+],
+"C208": [
+39,
+"Cessna 208 Caravan"
+],
+"C408": [
+40,
+"Cessna 408 SkyCourier"
+],
+"C500": [
+41,
+"Cessna Citation"
+],
+"C501": [
+41,
+"Cessna Citation"
+],
+"C510": [
+41,
+"Cessna Citation"
+],
+"C525": [
+41,
+"Cessna Citation"
+],
+"C526": [
+41,
+"Cessna Citation"
+],
+"C550": [
+41,
+"Cessna Citation"
+],
+"C551": [
+41,
+"Cessna Citation"
+],
+"C560": [
+41,
+"Cessna Citation"
+],
+"C56X": [
+41,
+"Cessna Citation"
+],
+"C650": [
+41,
+"Cessna Citation"
+],
+"C680": [
+41,
+"Cessna Citation"
+],
+"C700": [
+41,
+"Cessna Citation"
+],
+"C750": [
+41,
+"Cessna Citation"
+],
+"C25A": [
+41,
+"Cessna Citation"
+],
+"C25B": [
+41,
+"Cessna Citation"
+],
+"C25C": [
+41,
+"Cessna Citation"
+],
+"C68A": [
+42,
+"Cessna Citation Latitude"
+],
+"CL30": [
+43,
+"Bombardier Challenger 300 family"
+],
+"CL35": [
+43,
+"Bombardier Challenger 300 family"
+],
+"SF50": [
+44,
+"Cirrus Vision Jet"
+],
+"AJ27": [
+45,
+"COMAC C909 / ARJ21"
+],
+"C919": [
+46,
+"COMAC C919"
+],
+"CONC": [
+47,
+"Concorde"
+],
+"CVLT": [
+48,
+"Convair 580"
+],
+"DH8A": [
+49,
+"De Havilland Dash 8"
+],
+"DH8B": [
+49,
+"De Havilland Dash 8"
+],
+"DH8C": [
+49,
+"De Havilland Dash 8"
+],
+"DH8D": [
+49,
+"De Havilland Dash 8"
+],
+"DC10": [
+50,
+"McDonnell Douglas DC-10"
+],
+"DC81": [
+51,
+"Douglas DC-8"
+],
+"DC82": [
+51,
+"Douglas DC-8"
+],
+"DC83": [
+51,
+"Douglas DC-8"
+],
+"DC84": [
+51,
+"Douglas DC-8"
+],
+"DC85": [
+51,
+"Douglas DC-8"
+],
+"DC86": [
+51,
+"Douglas DC-8"
+],
+"DC87": [
+51,
+"Douglas DC-8"
+],
+"DHC6": [
+52,
+"De Havilland Twin Otter"
+],
+"D228": [
+53,
+"Dornier 228"
+],
+"D328": [
+54,
+"Dornier 328"
+],
+"J328": [
+54,
+"Dornier 328"
+],
+"E120": [
+55,
+"Embraer EMB 120"
+],
+"E170": [
+56,
+"Embraer E-Jet"
+],
+"E75L": [
+56,
+"Embraer E-Jet"
+],
+"E75S": [
+56,
+"Embraer E-Jet"
+],
+"E190": [
+56,
+"Embraer E-Jet"
+],
+"E195": [
+56,
+"Embraer E-Jet"
+],
+"E290": [
+56,
+"Embraer E-Jet"
+],
+"E295": [
+56,
+"Embraer E-Jet"
+],
+"FA7X": [
+57,
+"Dassault Falcon 7X / 8X"
+],
+"FA8X": [
+57,
+"Dassault Falcon 7X / 8X"
+],
+"F100": [
+58,
+"Fokker 100"
+],
+"GL7T": [
+59,
+"Bombardier Global 7500"
+],
+"GLF5": [
+60,
+"Gulfstream G550"
+],
+"GLF6": [
+61,
+"Gulfstream G650"
+],
+"HDJT": [
+62,
+"HondaJet"
+],
+"IL62": [
+63,
+"Ilyushin Il-62"
+],
+"IL76": [
+64,
+"Ilyushin Il-76"
+],
+"IL96": [
+65,
+"Ilyushin Il-96"
+],
+"MC21": [
+66,
+"Yakovlev MC-21"
+],
+"L410": [
+67,
+"LET L-410"
+],
+"L101": [
+68,
+"Lockheed L-1011 TriStar"
+],
+"MD11": [
+69,
+"McDonnell Douglas MD-11"
+],
+"MD81": [
+70,
+"McDonnell Douglas MD-80 family"
+],
+"MD82": [
+70,
+"McDonnell Douglas MD-80 family"
+],
+"MD83": [
+70,
+"McDonnell Douglas MD-80 family"
+],
+"MD87": [
+70,
+"McDonnell Douglas MD-80 family"
+],
+"MD88": [
+70,
+"McDonnell Douglas MD-80 family"
+],
+"E55P": [
+71,
+"Embraer Phenom 300"
+],
+"PC12": [
+72,
+"Pilatus PC-12"
+],
+"PC24": [
+73,
+"Pilatus PC-24"
+],
+"E545": [
+74,
+"Embraer Praetor family"
+],
+"E550": [
+74,
+"Embraer Praetor family"
+],
+"SF34": [
+75,
+"Saab 340"
+],
+"SU95": [
+76,
+"Sukhoi Superjet 100"
+],
+"SW4": [
+77,
+"Swearingen Metro"
+],
+"T154": [
+78,
+"Tupolev Tu-154"
+],
+"T204": [
+79,
+"Tupolev Tu-204 / Tu-214"
+],
+"T214": [
+79,
+"Tupolev Tu-204 / Tu-214"
+],
+"YK42": [
+80,
+"Yakovlev Yak-42"
+],
+"AS50": [
+81,
+"Airbus H125"
+],
+"EC30": [
+82,
+"Airbus H130"
+],
+"EC35": [
+83,
+"Airbus H135"
+],
+"BK17": [
+84,
+"Airbus H145"
+],
+"H160": [
+85,
+"Airbus H160"
+],
+"B06": [
+86,
+"Bell 206"
+],
+"B407": [
+87,
+"Bell 407"
+],
+"B429": [
+88,
+"Bell 429"
+],
+"KA32": [
+89,
+"Kamov Ka-32"
+],
+"A109": [
+90,
+"Leonardo AW109"
+],
+"A119": [
+91,
+"Leonardo AW119"
+],
+"A139": [
+92,
+"Leonardo AW139"
+],
+"A169": [
+93,
+"Leonardo AW169"
+],
+"H500": [
+94,
+"MD 500"
+],
+"MD90": [
+95,
+"MD 902 Explorer"
+],
+"MI8": [
+96,
+"Mil Mi-8 / Mi-17"
+],
+"MI17": [
+96,
+"Mil Mi-8 / Mi-17"
+],
+"R22": [
+97,
+"Robinson R22"
+],
+"R44": [
+98,
+"Robinson R44"
+],
+"S76": [
+99,
+"Sikorsky S-76"
+],
+"S92": [
+100,
+"Sikorsky S-92"
+]
+}
+}

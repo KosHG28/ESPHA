@@ -308,6 +308,7 @@ def get_flights():
             orig, dest = text(f.origin_airport_iata), text(f.destination_airport_iata)
             out.append({
                 "id": fid, "lat": lat, "lon": lon, "hdg": num(f.heading),
+                "orig": orig, "dest": dest, "number": text(getattr(f, "number", "")),
                 "route": f"{orig}-{dest}" if orig and dest else text(f.callsign),
                 "callsign": text(f.callsign), "icon": text(f.airline_icao),
                 "alt": num(f.altitude), "speed": num(f.ground_speed), "type": text(f.aircraft_code),
@@ -319,6 +320,97 @@ def get_flights():
         FLIGHTS["list"] = out
         FLIGHTS["t"] = time.time()
         return out
+
+
+# ---------------------------------------------------------------------------
+# Иконки самолётов — из проекта AirESP32ace (Vadim Malis, MIT): код типа ИКАО
+# → номер иконки на плате и название модели. Таблицу пишет
+# tools/make_aircraft_icons.py вместе с самими иконками
+
+try:
+    with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "aircraft_types.json"), encoding="utf-8") as _f:
+        AC_TYPES = json.load(_f)
+except Exception as _e:  # noqa: BLE001
+    print(f"Нет aircraft_types.json: {_e}")
+    AC_TYPES = {"codes": {}, "families": {}}
+HELI = ("EC", "AS3", "AS5", "MI", "KA", "R22", "R44", "R66", "B06", "B407", "B429", "A109", "A119", "A139", "A169",
+        "S76", "S92", "H60", "EH10", "AW")
+BIZJET = ("C25", "C5", "C6", "C68", "C7", "GLF", "GLEX", "GL5", "GL7", "CL30", "CL35", "CL60", "FA", "F2TH", "F900",
+          "E35L", "E55P", "E50P", "LJ", "PC24", "H25", "HDJT", "PRM1", "BE40")
+
+
+def aircraft_icon(code):
+    """(номер иконки, название модели) по коду типа"""
+    e = AC_TYPES["codes"].get(code)
+    if e:
+        return e[0], e[1]
+    fam = AC_TYPES["families"]
+    if not fam:
+        return 0, code
+    name = ("helicopter" if code.startswith(HELI) else
+            "business_jet" if code.startswith(BIZJET) else
+            "widebody_twinjet" if code.startswith(HEAVY) else
+            "turboprop" if code.startswith(PROP) else "narrowbody_twinjet")
+    return fam[name][0], code or fam[name][1]
+
+
+# Аэропорты: код ИАТА → короткое название, для карточки самолёта. Список
+# FlightRadar24 качается один раз в фоне и лежит в data/airports.json
+AIRPORTS = {}
+_AP_DROP = ("International", "Intl", "Airport", "Aeropuerto", "Aeroporto", "Flughafen", "Regional", "Municipal")
+
+
+def _short_airport(name):
+    words = [w for w in name.replace("-", " - ").split() if w not in _AP_DROP and w != "-"]
+    return " ".join(words)[:19]
+
+
+def load_airports():
+    path = os.path.join(CACHE_DIR, "airports.json")
+
+    def fetch():
+        global AIRPORTS
+        for attempt in range(5):
+            try:
+                if os.path.exists(path):
+                    with open(path, encoding="utf-8") as f:
+                        AIRPORTS = json.load(f)
+                    return
+                aps = {}
+                for a in fr_api.get_airports():
+                    iata = text(getattr(a, "iata", ""))
+                    if iata:
+                        aps[iata] = _short_airport(text(getattr(a, "name", "")))
+                os.makedirs(CACHE_DIR, exist_ok=True)
+                with open(path, "w", encoding="utf-8") as f:
+                    json.dump(aps, f, ensure_ascii=False)
+                AIRPORTS = aps
+                print(f"Аэропорты: {len(aps)}")
+                return
+            except Exception as e:  # noqa: BLE001
+                print(f"Список аэропортов: {e}")
+                time.sleep(60 * (attempt + 1))
+
+    threading.Thread(target=fetch, daemon=True).start()
+
+
+def airport_name(iata):
+    return AIRPORTS.get(iata, "") if iata else ""
+
+
+_home = {"sig": None, "name": "Дом"}
+
+
+def home_name():
+    """Город в центре радара: ближайший из списка в 25 км, иначе «Дом»"""
+    if _home["sig"] != CITIES_SIG:
+        best, bd = "Дом", 25.0
+        for c in CITIES:
+            d = dist_km(c["lat"], c["lon"])
+            if d < bd:
+                best, bd = c["name"], d
+        _home.update(sig=CITIES_SIG, name=best[:23])
+    return _home["name"]
 
 
 def esp_payload(r_km):
@@ -333,18 +425,22 @@ def esp_payload(r_km):
         kind = 1 if ty.startswith(HEAVY) else (2 if ty.startswith(PROP) else 0)
         trail = [project(lat, lon, r_km) for lat, lon in f["trail"][:-1][-ESP_TRAIL:]]
         rt = f["route"] if f["route"] != f["callsign"] else ""
+        icon, label = aircraft_icon(ty)
         planes.append({
             "id": str(f["id"])[:11], "x": round(x, 1), "y": round(y, 1), "h": int(f["hdg"]),
             "a": int(f["alt"] * 0.3048), "s": int(f["speed"] * 1.852), "d": round(d, 1), "k": kind,
             "c": f["callsign"][:9], "rt": rt[:11], "ty": ty[:5],
             "al": AIRLINES.get(f["icon"], f["icon"])[:27],
+            # Для иконки по типу и карточки самолёта
+            "ic": icon, "tl": label[:23], "n": f.get("number", "")[:9],
+            "on": airport_name(f.get("orig", ""))[:19], "dn": airport_name(f.get("dest", ""))[:19],
             "tr": [[int(round(a)), int(round(b))] for a, b in trail],
         })
     planes.sort(key=lambda p: p["d"])
     view = {
         "m": board_style(), "r": CONFIG["radius"], "l": int(CONFIG["showLabels"]),
         "g": int(CONFIG["showCompass"]), "c": int(CONFIG["colorByAlt"]), "s": int(CONFIG["silhouettes"]),
-        "o": int(CONFIG["showRim"]),
+        "o": int(CONFIG["showRim"]), "hn": home_name(),
     }
     return {"r": r_km, "k": round(k, 4), "t": int(time.time()), "v": view, "p": planes[:CONFIG["maxPlanes"]]}
 
@@ -1029,5 +1125,6 @@ class RadarHandler(BaseHTTPRequestHandler):
 if __name__ == "__main__":
     load_config()
     load_cities()
+    load_airports()
     print(f"Радар: центр {CENTER_LAT}, {CENTER_LON}, порт {PORT}, городов {len(CITIES)}, карта {board_style()}")
     ThreadingHTTPServer(("0.0.0.0", PORT), RadarHandler).serve_forever()

@@ -8,7 +8,7 @@ RUN apt-get update \
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-COPY radar_server.py cities.json ./
+COPY radar_server.py cities.json aircraft_types.json ./
 
 ENV PORT=8080 \
     CACHE_DIR=/data \
