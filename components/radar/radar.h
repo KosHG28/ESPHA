@@ -203,6 +203,8 @@ class Radar : public Component {
   // Карточка самолёта во весь экран
   lv_obj_t *d_air_{nullptr}, *d_img_{nullptr}, *d_type_{nullptr}, *d_o_{nullptr}, *d_oc_{nullptr}, *d_d_{nullptr},
       *d_dc_{nullptr}, *d_num_{nullptr}, *d_val_[3]{}, *d_cap_[3]{}, *d_cs_{nullptr};
+  // Рисунок сбоку в карточке: ширина и наибольшая высота после обрезки
+  static const int DET_W = 210, DET_H = 110;
   uint8_t *det_buf_{nullptr};
   lv_image_dsc_t det_dsc_{};
   int det_icon_{-1};

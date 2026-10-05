@@ -361,9 +361,10 @@ void Radar::bind(lv_obj_t *view, lv_obj_t *status, lv_obj_t *title, lv_obj_t *ca
     lv_obj_add_event_cb(card, view_event_cb, LV_EVENT_CLICKED, this);
     // Карточка: сверху вниз — авиакомпания, рисунок, модель, откуда и куда,
     // номер рейса, высота / скорость / курс, позывной
-    this->d_air_ = mk_label(card, this->font_mid_, 0xBFC7CF, 0, -172);
+    // Рисунок — первым: подписи ложатся поверх его пустых краёв
     this->d_img_ = lv_image_create(card);
-    lv_obj_align(this->d_img_, LV_ALIGN_CENTER, 0, -100);
+    lv_obj_align(this->d_img_, LV_ALIGN_CENTER, 0, -98);
+    this->d_air_ = mk_label(card, this->font_mid_, 0xBFC7CF, 0, -172);
     lv_obj_set_style_image_recolor(this->d_img_, lv_color_hex(0x1FB04A), 0);
     lv_obj_set_style_image_recolor_opa(this->d_img_, LV_OPA_COVER, 0);
     lv_obj_clear_flag(this->d_img_, LV_OBJ_FLAG_CLICKABLE);
@@ -688,14 +689,44 @@ void Radar::show_card_(int idx) {
   if (!AC_ICON[ic].detail)
     ic = AC_ICON[ic].family;
   if (ic != this->det_icon_ && AC_ICON[ic].detail && this->d_img_) {
-    const int w = AC_ICON[ic].dw, h = AC_ICON[ic].dh;
+    // Рисунок в AirESP32ace хранится повёрнутым на 180° — разворачиваем, как
+    // их прошивка, обрезаем пустые строки сверху и снизу (чтобы не наезжал на
+    // подписи) и увеличиваем до DET_W в ширину. Масштаб — здесь, с
+    // усреднением соседних точек: масштаб LVGL для масок A8 на плате даёт мусор
+    const int sw = AC_ICON[ic].dw, sh = AC_ICON[ic].dh;
+    const uint8_t *src = AC_ICON[ic].detail;
+    auto at = [src, sw, sh](int x, int y) -> float {
+      if (x < 0 || y < 0 || x >= sw || y >= sh)
+        return 0.0f;
+      const int i = y * sw + x;
+      const uint8_t b = src[i >> 1];
+      return ((i & 1) ? (b & 0x0F) : (b >> 4)) * 17.0f;
+    };
+    int y0 = sh, y1 = -1;
+    for (int y = 0; y < sh; y++)
+      for (int x = 0; x < sw; x++)
+        if (at(x, y) > 0) {
+          y0 = std::min(y0, y);
+          y1 = std::max(y1, y);
+          break;
+        }
+    if (y1 < y0)
+      y0 = 0, y1 = sh - 1;
+    const float k = (float) DET_W / sw;  // точек экрана на точку исходника
+    const int w = DET_W, h = (int) ((y1 - y0 + 3) * k);
     if (!this->det_buf_)
-      this->det_buf_ = static_cast<uint8_t *>(heap_caps_malloc(190 * 190, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
-    if (this->det_buf_) {
-      const uint8_t *src = AC_ICON[ic].detail;
-      for (int i = 0; i < w * h; i++) {
-        const uint8_t b = src[i >> 1];
-        this->det_buf_[i] = ((i & 1) ? (b & 0x0F) : (b >> 4)) * 17;
+      this->det_buf_ = static_cast<uint8_t *>(heap_caps_malloc(DET_W * DET_H, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    if (this->det_buf_ && h <= DET_H) {
+      for (int y = 0; y < h; y++) {
+        for (int x = 0; x < w; x++) {
+          // Точка исходника, уже развёрнутого: x → sw−1−x, y → y1+1−y
+          const float fx = sw - 1 - ((x + 0.5f) / k - 0.5f), fy = y1 + 1 - ((y + 0.5f) / k - 0.5f);
+          const int ix = (int) floorf(fx), iy = (int) floorf(fy);
+          const float ax = fx - ix, ay = fy - iy;
+          const float v = at(ix, iy) * (1 - ax) * (1 - ay) + at(ix + 1, iy) * ax * (1 - ay) +
+                          at(ix, iy + 1) * (1 - ax) * ay + at(ix + 1, iy + 1) * ax * ay;
+          this->det_buf_[y * w + x] = (uint8_t) std::min(255.0f, v + 0.5f);
+        }
       }
       lv_image_dsc_t &d = this->det_dsc_;
       d.header.magic = LV_IMAGE_HEADER_MAGIC;
@@ -708,8 +739,6 @@ void Radar::show_card_(int idx) {
       d.data = this->det_buf_;
       lv_image_cache_drop(&d);
       lv_image_set_src(this->d_img_, &d);
-      // Рисунок — шириной около 170 px
-      lv_image_set_scale(this->d_img_, (uint32_t) (170 * 256 / w));
       this->det_icon_ = ic;
     }
   }
