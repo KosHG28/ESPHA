@@ -313,25 +313,20 @@ void Radar::fetch_() {
 // Экран — в потоке LVGL.
 //
 // Вид — по экрану «Local radar» из AirESP32ace (Vadim Malis, MIT): тёмная
-// карта, бледно-зелёные кольца, вращающийся сектор развёртки, самолёты —
-// зелёными силуэтами своего типа по курсу, позывные рядом, в центре — город.
+// карта, бледно-зелёные кольца, самолёты — зелёными силуэтами своего типа
+// по курсу, позывные рядом, в центре — город.
 // Касание по самолёту — карточка во весь экран: авиакомпания, рисунок
 // самолёта сбоку, модель, откуда и куда, номер рейса, высота, скорость, курс
 
 static const uint32_t C_RING = 0x0B4D1C;     // кольца
-static const uint32_t C_SWEEP = 0x003A10;    // сектор развёртки
 static const uint32_t C_PLANE = 0x009428;    // силуэт
 static const uint32_t C_PLANE_SEL = 0x3DFF6A;  // выбранный
 static const uint32_t C_LABEL = 0x24BD38;    // позывной
 static const uint32_t C_TRAIL = 0x0A7625;    // хвост и отметки за кругом
-static const float SWEEP_DEG_S = 122.0f;     // скорость развёртки
-static const float SWEEP_SECTOR = 9.0f;      // ширина сектора
-static const float SWEEP_R = 234.0f;
 static const uint32_t TITLE_MS = 2500;       // сколько виден радиус после смены
 
 static void view_event_cb(lv_event_t *e) { static_cast<Radar *>(lv_event_get_user_data(e))->on_event(e); }
 static void tick_cb(lv_timer_t *t) { static_cast<Radar *>(lv_timer_get_user_data(t))->tick(); }
-static void sweep_cb(lv_timer_t *t) { static_cast<Radar *>(lv_timer_get_user_data(t))->sweep_tick(); }
 
 static lv_obj_t *mk_label(lv_obj_t *parent, const lv_font_t *font, uint32_t color, int x, int y) {
   lv_obj_t *l = lv_label_create(parent);
@@ -407,8 +402,6 @@ void Radar::bind(lv_obj_t *view, lv_obj_t *status, lv_obj_t *title, lv_obj_t *ca
   }
   // Самолёты ползут медленно: 4 шага в секунду хватает с запасом
   lv_timer_create(tick_cb, 250, this);
-  // Развёртка — плавно, 30 раз в секунду; перерисовывается только сектор
-  lv_timer_create(sweep_cb, 33, this);
 }
 
 void Radar::show_title_() {
@@ -419,53 +412,6 @@ void Radar::show_title_() {
   lv_label_set_text(this->title_, buf);
   lv_obj_clear_flag(this->title_, LV_OBJ_FLAG_HIDDEN);
   this->title_ms_ = millis();
-}
-
-// ---- Развёртка ------------------------------------------------------------
-
-void Radar::invalidate_sweep_(float from_deg, float to_deg) {
-  if (!this->view_)
-    return;
-  lv_area_t oc;
-  lv_obj_get_coords(this->view_, &oc);
-  const float cx = oc.x1 + 233.0f, cy = oc.y1 + 233.0f;
-  // Сектор режется на 6 колец: так рамки участков плотно облегают клин и
-  // перерисовывается немного
-  static const int BANDS = 6;
-  for (int b = 0; b < BANDS; b++) {
-    const float r0 = std::max(0.0f, b * SWEEP_R / BANDS - 2.0f), r1 = (b + 1) * SWEEP_R / BANDS + 2.0f;
-    float x0 = 1e9f, x1 = -1e9f, y0 = 1e9f, y1 = -1e9f;
-    for (int k = 0; k <= 4; k++) {
-      const float a = (from_deg + (to_deg - from_deg) * k / 4.0f) * (PI_F / 180.0f);
-      const float c = cosf(a), sn = sinf(a);
-      for (float r : {r0, r1}) {
-        x0 = std::min(x0, cx + r * c);
-        x1 = std::max(x1, cx + r * c);
-        y0 = std::min(y0, cy + r * sn);
-        y1 = std::max(y1, cy + r * sn);
-      }
-    }
-    lv_area_t a = {(int32_t) x0 - 3, (int32_t) y0 - 3, (int32_t) x1 + 3, (int32_t) y1 + 3};
-    lv_obj_invalidate_area(this->view_, &a);
-  }
-}
-
-void Radar::sweep_tick() {
-  const uint32_t now = millis();
-  if (!this->active_.load() || !this->view_) {
-    this->sweep_ms_ = 0;
-    return;
-  }
-  const uint32_t dt = this->sweep_ms_ ? std::min<uint32_t>(now - this->sweep_ms_, 100) : 33;
-  this->sweep_ms_ = now;
-  const float old = this->sweep_deg_;
-  this->sweep_deg_ += SWEEP_DEG_S * dt / 1000.0f;
-  if (this->sweep_deg_ >= 360.0f)
-    this->sweep_deg_ -= 360.0f;
-  float now_deg = this->sweep_deg_;
-  if (now_deg < old)
-    now_deg += 360.0f;
-  this->invalidate_sweep_(old - SWEEP_SECTOR - 1.0f, now_deg + 1.0f);
 }
 
 // ---- Силуэты ----------------------------------------------------------------
@@ -491,7 +437,8 @@ const lv_image_dsc_t *Radar::sprite_(int icon, int hdg) {
       return nullptr;
   }
   // Поворот маски по часовой на курс: для каждой точки результата — точка
-  // исходника, с усреднением четырёх соседей. Исходник — 4 бита на точку
+  // исходника, с усреднением четырёх соседей. Исходник — 4 бита на точку,
+  // носом вниз (как в AirESP32ace): поворот на курс + 180°
   const uint8_t *src = AC_ICON[icon].map;
   auto at = [src](int x, int y) -> int {
     if (x < 0 || y < 0 || x >= AC_MAP || y >= AC_MAP)
@@ -499,7 +446,7 @@ const lv_image_dsc_t *Radar::sprite_(int icon, int hdg) {
     const uint8_t b = src[(y * AC_MAP + x) >> 1];
     return ((x & 1) ? (b & 0x0F) : (b >> 4)) * 17;
   };
-  const float a = step * 5.0f * (PI_F / 180.0f), ca = cosf(a), sa = sinf(a), c = (AC_MAP - 1) / 2.0f;
+  const float a = (step * 5.0f + 180.0f) * (PI_F / 180.0f), ca = cosf(a), sa = sinf(a), c = (AC_MAP - 1) / 2.0f;
   for (int y = 0; y < AC_MAP; y++) {
     for (int x = 0; x < AC_MAP; x++) {
       const float dx = x - c, dy = y - c;
@@ -935,19 +882,6 @@ void Radar::paint(lv_layer_t *layer) {
   auto hit = [&clip](const lv_area_t &a) {
     return a.x1 <= clip.x2 && a.x2 >= clip.x1 && a.y1 <= clip.y2 && a.y2 >= clip.y1;
   };
-
-  // Сектор развёртки
-  if (this->active_.load()) {
-    lv_draw_triangle_dsc_t sw;
-    lv_draw_triangle_dsc_init(&sw);
-    sw.color = lv_color_hex(C_SWEEP);
-    sw.opa = 46;
-    const float a1 = this->sweep_deg_ * (PI_F / 180.0f), a0 = (this->sweep_deg_ - SWEEP_SECTOR) * (PI_F / 180.0f);
-    sw.p[0] = {(lv_value_precise_t) cx, (lv_value_precise_t) cy};
-    sw.p[1] = {(lv_value_precise_t) (cx + SWEEP_R * cosf(a0)), (lv_value_precise_t) (cy + SWEEP_R * sinf(a0))};
-    sw.p[2] = {(lv_value_precise_t) (cx + SWEEP_R * cosf(a1)), (lv_value_precise_t) (cy + SWEEP_R * sinf(a1))};
-    lv_draw_triangle(layer, &sw);
-  }
 
   // Кольца дальности — треть, две трети и весь радиус
   if (this->view_cfg_.grid) {

@@ -123,8 +123,6 @@ class Radar : public Component {
   std::string track_map_url();
   void paint_track(lv_layer_t *layer);
   void tick();
-  /// Сектор развёртки: шаг поворота, 30 раз в секунду
-  void sweep_tick();
   void on_event(lv_event_t *e);
 
   static const int R_PX = 220;  ///< радиус круга дальности на экране
@@ -144,7 +142,6 @@ class Radar : public Component {
   void invalidate_plane_(const Plane &p);
   /// Повёрнутый по курсу силуэт (маска A8 50×50) — из кэша или собранный
   const lv_image_dsc_t *sprite_(int icon, int hdg);
-  void invalidate_sweep_(float from_deg, float to_deg);
   void show_title_();
   void set_radius_(int r);
   lv_color_t plane_color_(int32_t alt) const;
@@ -186,8 +183,6 @@ class Radar : public Component {
   uint32_t title_ms_{0};
 
   // Развёртка: угол переднего края, градусы от востока по часовой
-  float sweep_deg_{-90.0f};
-  uint32_t sweep_ms_{0};
 
   // Кэш повёрнутых силуэтов: номер иконки и курс шагом 5°
   struct SprEnt {
