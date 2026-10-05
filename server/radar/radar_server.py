@@ -26,6 +26,8 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import BytesIO
 import urllib.error
+import zlib
+from types import SimpleNamespace
 import urllib.parse
 from urllib.parse import parse_qs, urlparse
 
@@ -635,6 +637,226 @@ def get_map(r_km, style=None):
         return data
 
 
+# ---------------------------------------------------------------------------
+# Трекер рейса — по экрану «Flight tracker» из AirESP32ace (Vadim Malis,
+# MIT). Плата присылает номер рейса (/flight?f=SU1520), сервер находит его в
+# FlightRadar24, строит дугу большого круга от аэропорта вылета до прилёта и
+# поворачивает всё так, чтобы вылет был слева («на 9 часов»), а прилёт —
+# справа («на 3»). Плата рисует дугу и самолёт поверх карты /trackmap.jpg,
+# склеенной из тайлов под тот же поворот
+
+TRACK_TTL = 20
+TRACK_MAP_CACHE = 4
+TRACK_SPAN = 300.0           # пикселей между аэропортами на экране
+TRACK_MID = (233.0, 215.0)   # середина маршрута на экране
+_track_lock = threading.Lock()
+_tracks = {}       # номер → {"t", "data"}
+_track_maps = {}   # версия карты → JPEG
+
+
+def _gc_points(lat1, lon1, lat2, lon2, n=48):
+    """Точки на дуге большого круга, долготы без скачка через 180°"""
+    p1, l1, p2, l2 = map(math.radians, (lat1, lon1, lat2, lon2))
+    a = [math.cos(p1) * math.cos(l1), math.cos(p1) * math.sin(l1), math.sin(p1)]
+    b = [math.cos(p2) * math.cos(l2), math.cos(p2) * math.sin(l2), math.sin(p2)]
+    d = math.acos(max(-1.0, min(1.0, sum(x * y for x, y in zip(a, b)))))
+    pts = []
+    prev = lon1
+    for i in range(n + 1):
+        t = i / n
+        if d < 1e-9:
+            v = a
+        else:
+            k1, k2 = math.sin((1 - t) * d) / math.sin(d), math.sin(t * d) / math.sin(d)
+            v = [k1 * x + k2 * y for x, y in zip(a, b)]
+        lat = math.degrees(math.atan2(v[2], math.hypot(v[0], v[1])))
+        lon = math.degrees(math.atan2(v[1], v[0]))
+        while lon - prev > 180:
+            lon -= 360
+        while lon - prev < -180:
+            lon += 360
+        prev = lon
+        pts.append((lat, lon))
+    return pts
+
+
+class TrackView:
+    """Проекция маршрута на экран: меркатор с зумом z, увеличение s, поворот
+    вокруг середины маршрута так, чтобы вылет оказался слева"""
+
+    def __init__(self, o, d):
+        x0, y0 = merc(o[0], o[1], 0)
+        x1, y1 = merc(d[0], d[1], 0)
+        dist0 = max(math.hypot(x1 - x0, y1 - y0), 1e-6)
+        scale = TRACK_SPAN / dist0
+        self.z = max(1, min(10, int(math.floor(math.log2(scale)))))
+        self.s = scale / 2 ** self.z
+        self.ang = math.atan2(y1 - y0, x1 - x0)
+        ax, ay = merc(o[0], o[1], self.z)
+        bx, by = merc(d[0], d[1], self.z)
+        self.mx, self.my = (ax + bx) / 2, (ay + by) / 2
+
+    def screen(self, lat, lon):
+        x, y = merc(lat, lon, self.z)
+        dx, dy = (x - self.mx) * self.s, (y - self.my) * self.s
+        c, sn = math.cos(-self.ang), math.sin(-self.ang)
+        return TRACK_MID[0] + dx * c - dy * sn, TRACK_MID[1] + dx * sn + dy * c
+
+
+def _render_track_map(view, style):
+    """Карта под поворот маршрута: склеить тайлы вокруг середины, повернуть,
+    вырезать экран"""
+    side = 700  # больше диагонали экрана — после поворота углы не пустые
+    span = side / view.s
+    x0, y0 = view.mx - span / 2, view.my - span / 2
+    n = 2 ** view.z
+    tx0, ty0 = int(x0 // 256), int(y0 // 256)
+    tx1, ty1 = int((x0 + span) // 256), int((y0 + span) // 256)
+    canvas = Image.new("RGB", ((tx1 - tx0 + 1) * 256, (ty1 - ty0 + 1) * 256), (18, 20, 24))
+    for tx in range(tx0, tx1 + 1):
+        for ty in range(ty0, ty1 + 1):
+            if not 0 <= ty < n:
+                continue
+            try:
+                canvas.paste(tile(style, view.z, tx % n, ty), ((tx - tx0) * 256, (ty - ty0) * 256))
+            except Exception as e:  # noqa: BLE001
+                print(f"Тайл рейса {view.z}/{tx % n}/{ty}: {e}")
+    left, top = x0 - tx0 * 256, y0 - ty0 * 256
+    img = canvas.crop((int(left), int(top), int(left + span), int(top + span))).resize((side, side), Image.LANCZOS)
+    # PIL поворачивает против часовой стрелки; маршрут под углом ang (ось y
+    # вниз) должен лечь горизонтально
+    img = img.rotate(math.degrees(view.ang), resample=Image.BICUBIC, fillcolor=(18, 20, 24))
+    c = side / 2
+    img = img.crop((int(c - TRACK_MID[0]), int(c - TRACK_MID[1]), int(c - TRACK_MID[0]) + W, int(c - TRACK_MID[1]) + W))
+    k = MAP_BRIGHTNESS * STYLE_BRIGHTNESS.get(style, 1.0)
+    if k != 1.0:
+        img = ImageEnhance.Brightness(img).enhance(k)
+    out = BytesIO()
+    img.save(out, "JPEG", quality=85)
+    return out.getvalue()
+
+
+def _hhmm(ts, offset):
+    if not ts:
+        return ""
+    return time.strftime("%H:%M", time.gmtime(int(ts) + int(offset or 0)))
+
+
+def _airport(a):
+    a = a or {}
+    pos = a.get("position") or {}
+    city = ((pos.get("region") or {}).get("city")) or a.get("name") or ""
+    return {"c": ((a.get("code") or {}).get("iata")) or "", "n": _short_airport(city),
+            "lat": pos.get("latitude"), "lon": pos.get("longitude"),
+            "tz": ((a.get("timezone") or {}).get("offset")) or 0}
+
+
+def _find_flight_id(number):
+    res = fr_api.search(number, 20)
+    live = res.get("live", []) if isinstance(res, dict) else []
+    for e in live:
+        d = e.get("detail") or {}
+        if number in (str(d.get("flight", "")).upper().replace(" ", ""), str(d.get("callsign", "")).upper()):
+            return e.get("id")
+    return live[0].get("id") if live else None
+
+
+def track_flight(number):
+    number = "".join(ch for ch in (number or "").upper() if ch.isalnum())[:10]
+    if not number:
+        return {"st": "none"}
+    with _track_lock:
+        cached = _tracks.get(number)
+        if cached and time.time() - cached["t"] < TRACK_TTL:
+            return cached["data"]
+    try:
+        fid = _find_flight_id(number)
+        if not fid:
+            data = {"st": "nf", "n": number}
+        else:
+            det = fr_api.get_flight_details(SimpleNamespace(id=fid)) or {}
+            data = _track_payload(number, det)
+    except Exception as e:  # noqa: BLE001
+        print(f"Рейс {number}: {e}")
+        data = {"st": "err", "n": number}
+    with _track_lock:
+        _tracks[number] = {"t": time.time(), "data": data}
+    return data
+
+
+def _track_payload(number, det):
+    ident = det.get("identification") or {}
+    o, d = _airport((det.get("airport") or {}).get("origin")), _airport((det.get("airport") or {}).get("destination"))
+    if o["lat"] is None or d["lat"] is None:
+        return {"st": "nf", "n": number}
+    model = (det.get("aircraft") or {}).get("model") or {}
+    code = model.get("code") or ""
+    icon, label = aircraft_icon(code)
+    trail = det.get("trail") or []
+    cur = trail[0] if trail else None
+    path = _gc_points(o["lat"], o["lon"], d["lat"], d["lon"])
+    # Прилёт — с долготой без скачка через 180° (Сеул → Сан-Франциско)
+    view = TrackView(path[0], path[-1])
+    pts = [view.screen(la, lo) for la, lo in path]
+    data = {
+        "st": "ok", "n": ((ident.get("number") or {}).get("default") or number)[:9],
+        "cs": (ident.get("callsign") or "")[:9], "al": ((det.get("airline") or {}).get("name") or "")[:27],
+        "tl": (model.get("text") or label)[:23], "ic": icon,
+        "o": {"c": o["c"][:4], "n": o["n"][:19]}, "d": {"c": d["c"][:4], "n": d["n"][:19]},
+        "pt": [[int(round(x)), int(round(y))] for x, y in pts],
+    }
+    ox, oy = pts[0]
+    dx, dy = pts[-1]
+    data["o"].update(x=int(round(ox)), y=int(round(oy)))
+    data["d"].update(x=int(round(dx)), y=int(round(dy)))
+    if cur and cur.get("lat") is not None:
+        # Где самолёт и докуда пройдено: ближайшая точка дуги
+        clat, clon = cur["lat"], cur["lng"]
+        while clon - path[0][1] > 180:
+            clon -= 360
+        while clon - path[0][1] < -180:
+            clon += 360
+        px, py = view.screen(clat, clon)
+        best = min(range(len(pts)), key=lambda i: (pts[i][0] - px) ** 2 + (pts[i][1] - py) ** 2)
+        # Курс на экране — по дуге в этом месте
+        j0, j1 = max(0, best - 1), min(len(pts) - 1, best + 1)
+        h = math.degrees(math.atan2(pts[j1][0] - pts[j0][0], -(pts[j1][1] - pts[j0][1]))) % 360
+        data["p"] = {"x": int(round(px)), "y": int(round(py)), "h": int(round(h)), "i": best}
+        data["a"] = int((cur.get("alt") or 0) * 0.3048)
+        data["s"] = int((cur.get("spd") or 0) * 1.852)
+        data["h"] = int(cur.get("hd") or 0)
+    tm = det.get("time") or {}
+    dep = (tm.get("real") or {}).get("departure") or (tm.get("estimated") or {}).get("departure") or \
+        (tm.get("scheduled") or {}).get("departure")
+    eta = (tm.get("estimated") or {}).get("arrival") or (tm.get("other") or {}).get("eta") or \
+        (tm.get("scheduled") or {}).get("arrival")
+    data["ot"] = _hhmm(time.time(), o["tz"])
+    data["dep"] = _hhmm(dep, o["tz"])
+    data["eta"] = _hhmm(eta, d["tz"])
+    # Карта — одна на маршрут и стиль; плата качает её, когда версия меняется
+    style = board_style()
+    key = f"{style}_{view.z}_{round(view.s, 3)}_{round(view.ang, 4)}_{round(view.mx)}_{round(view.my)}"
+    ver = zlib.crc32(key.encode()) & 0x7FFFFFFF
+    with _track_lock:
+        if ver not in _track_maps:
+            # Строится при первом запросе /trackmap.jpg
+            _track_maps[ver] = {"view": view, "style": style, "jpg": None}
+            while len(_track_maps) > TRACK_MAP_CACHE:
+                _track_maps.pop(next(iter(_track_maps)))
+    data["v"] = ver
+    return data
+
+
+def track_map(ver):
+    with _track_lock:
+        e = _track_maps.get(ver)
+    if not e:
+        return None
+    if e["jpg"] is None:
+        e["jpg"] = _render_track_map(e["view"], e["style"])
+    return e["jpg"]
+
+
 HTML_PAGE = """
 <!DOCTYPE html>
 <html>
@@ -1102,6 +1324,19 @@ class RadarHandler(BaseHTTPRequestHandler):
                 self.reply(200, "image/png", data, "max-age=604800")
             else:
                 self.reply(404, "text/plain", b"no logo", "max-age=86400")
+        elif url.path == "/flight":
+            body = track_flight(q.get("f", [""])[0])
+            self.reply(200, "application/json", json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+        elif url.path == "/trackmap.jpg":
+            try:
+                data = track_map(int(q.get("v", ["0"])[0]))
+            except Exception as e:  # noqa: BLE001
+                print(f"Карта рейса: {e}")
+                data = None
+            if data:
+                self.reply(200, "image/jpeg", data, "max-age=86400")
+            else:
+                self.reply(404, "text/plain", b"no map")
         elif url.path == "/health":
             self.reply(200, "text/plain", b"ok")
         else:

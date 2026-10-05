@@ -62,9 +62,29 @@ struct View {
   }
 };
 
+/// Отслеживаемый рейс — /flight с сервера, уже в пикселях экрана: вылет
+/// слева, прилёт справа, дуга между ними
+struct Track {
+  char st[6]{};           ///< ok, nf (не найден), err, none, wait
+  char n[10]{}, cs[10]{}, al[28]{}, tl[24]{};
+  char oc[5]{}, on[20]{}, dc[5]{}, dn[20]{};
+  char ot[6]{}, dep[6]{}, eta[6]{};
+  uint8_t icon{5};
+  static const int NPT = 49;
+  int16_t pt[NPT][2]{};
+  int npt{0};
+  bool plane{false};
+  int16_t px{0}, py{0}, ph{0}, pi{0};
+  int32_t alt{0};
+  int16_t spd{0}, hdg{0};
+  uint32_t ver{0};        ///< версия карты /trackmap.jpg
+};
+
 class Radar : public Component {
  public:
   void set_url(const std::string &url);
+  /// Номер рейса для страницы «Рейс» — из HA, например SU1520
+  void set_flight(const std::string &flight);
   void set_interval(uint32_t ms) { this->interval_ms_ = ms; }
 
   void setup() override;
@@ -91,6 +111,17 @@ class Radar : public Component {
   }
 
   void paint(lv_layer_t *layer);
+
+  /// Страница «Рейс»: холст поверх карты маршрута и шрифты как у карточки
+  void bind_track(lv_obj_t *view);
+  void set_track_active(bool active);
+  bool take_track_map_request() {
+    bool r = this->trk_map_req_;
+    this->trk_map_req_ = false;
+    return r;
+  }
+  std::string track_map_url();
+  void paint_track(lv_layer_t *layer);
   void tick();
   /// Сектор развёртки: шаг поворота, 30 раз в секунду
   void sweep_tick();
@@ -103,6 +134,8 @@ class Radar : public Component {
   static void task_fn(void *arg);
   std::string url_copy_();
   void fetch_();
+  void fetch_track_();
+  void apply_track_(const Track &t);
   void apply_(std::vector<Plane> &fresh, int r);
   void layout_labels_();
   void update_status_();
@@ -173,6 +206,16 @@ class Radar : public Component {
   uint8_t *det_buf_{nullptr};
   lv_image_dsc_t det_dsc_{};
   int det_icon_{-1};
+
+  // Трекер рейса
+  std::string flight_;
+  std::atomic<bool> trk_active_{false};
+  bool has_trk_{false}, trk_map_req_{false}, trk_changed_{false};
+  Track trk_pending_, trk_;
+  uint32_t trk_shown_ver_{0};
+  lv_obj_t *trk_view_{nullptr}, *t_num_{nullptr}, *t_air_{nullptr}, *t_oc_{nullptr}, *t_on_{nullptr},
+      *t_dc_{nullptr}, *t_dn_{nullptr}, *t_val_[3]{}, *t_cap_[3]{}, *t_tcap_[2]{}, *t_tval_[2]{}, *t_msg_{nullptr},
+      *t_type_{nullptr};
 };
 
 }  // namespace radar

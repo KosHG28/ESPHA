@@ -49,7 +49,36 @@ image:
           level: WARN
           format: "Не удалось скачать карту радара"
 
+  # Карта маршрута отслеживаемого рейса — повёрнута так, что вылет слева
+  - platform: online_image
+    id: track_map_img
+    url: "${radar_url}/trackmap.jpg?v=0"
+    format: JPEG
+    type: RGB565
+    update_interval: never
+    on_download_finished:
+      - lvgl.image.update:
+          id: track_map
+          src: track_map_img
+    on_error:
+      - logger.log:
+          level: WARN
+          format: "Не удалось скачать карту рейса"
+
 text:
+  # Рейс для страницы «Рейс»: номер, например SU1520 или AFL1520. Пусто —
+  # страница просит вписать номер
+  - platform: template
+    id: flight_text
+    name: Рейс для отслеживания
+    icon: mdi:airplane-marker
+    mode: text
+    max_length: 10
+    optimistic: true
+    restore_value: true
+    initial_value: ""
+    on_value:
+      - lambda: 'id(radar_comp)->set_flight(x);'
   # Адрес сервера радара — меняется в Home Assistant без перепрошивки,
   # например http://192.168.1.103:8088. По умолчанию — radar_url из espha.yaml
   - platform: template
@@ -66,6 +95,18 @@ text:
       - lambda: 'id(radar_comp)->set_url(x);'
 
 switch:
+  - platform: template
+    id: sw_page_flight
+    name: Страница рейса (Flight tracker)
+    icon: mdi:airplane-clock
+    entity_category: config
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    on_turn_on:
+      - script.execute: layout_dots
+    on_turn_off:
+      - script.execute: layout_dots
+
   - platform: template
     id: sw_page_radar
     name: Страница радара
@@ -88,9 +129,11 @@ interval:
             id(radar_comp)->bind(id(radar_view), id(radar_status), id(radar_title), id(radar_card),
                                  id(font_radar)->get_lv_font(), id(font_radar_cs)->get_lv_font(),
                                  id(font_s)->get_lv_font(), id(font_l)->get_lv_font());
+            id(radar_comp)->bind_track(id(track_view));
           }
           // Запросы к серверу — только пока страница на экране
           id(radar_comp)->set_active(id(current_page) == 4 && !id(screen_off));
+          id(radar_comp)->set_track_active(id(current_page) == 5 && !id(screen_off));
       # Радиус сменился или страницу открыли впервые — новая карта
       - if:
           condition:
@@ -99,3 +142,11 @@ interval:
             - online_image.set_url:
                 id: radar_map_img
                 url: !lambda 'return id(radar_comp)->map_url();'
+      # Новый маршрут рейса — новая карта
+      - if:
+          condition:
+            lambda: 'return id(radar_comp)->take_track_map_request();'
+          then:
+            - online_image.set_url:
+                id: track_map_img
+                url: !lambda 'return id(radar_comp)->track_map_url();'

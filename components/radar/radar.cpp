@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cctype>
 #include <cstring>
 
 #include <esp_heap_caps.h>
@@ -113,23 +114,27 @@ void Radar::set_radius_(int r) {
 void Radar::task_fn(void *arg) {
   auto *self = static_cast<Radar *>(arg);
   for (;;) {
-    if (!self->active_.load() || self->url_copy_().empty() || !self->body_) {
+    const bool radar = self->active_.load(), track = self->trk_active_.load();
+    if ((!radar && !track) || self->url_copy_().empty() || !self->body_) {
       ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(1000));
       continue;
     }
-    self->fetch_();
-    // Масштаб сменили или страницу открыли заново — задача просыпается раньше
-    ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(self->interval_ms_));
+    if (radar)
+      self->fetch_();
+    else
+      self->fetch_track_();
+    // Масштаб сменили, рейс поменяли или страницу открыли заново — задача
+    // просыпается раньше. Рейс обновляется раз в 15 секунд
+    ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(radar ? self->interval_ms_ : 15000));
   }
 }
 
-void Radar::fetch_() {
-  const int r = this->radius();
-  const std::string url = this->url_copy_() + "/esp?r=" + std::to_string(r);
+// GET в буфер body_; длина ответа — в len
+static bool http_get(const std::string &url, uint8_t *body, size_t &len) {
   esp_http_client_config_t cfg{};
   cfg.url = url.c_str();
   cfg.timeout_ms = 7000;
-  size_t len = 0;
+  len = 0;
   bool ok = false;
   esp_http_client_handle_t c = esp_http_client_init(&cfg);
   if (c) {
@@ -137,7 +142,7 @@ void Radar::fetch_() {
       esp_http_client_fetch_headers(c);
       if (esp_http_client_get_status_code(c) == 200) {
         int n;
-        while (len < BODY_MAX && (n = esp_http_client_read(c, (char *) this->body_ + len, BODY_MAX - len)) > 0)
+        while (len < BODY_MAX && (n = esp_http_client_read(c, (char *) body + len, BODY_MAX - len)) > 0)
           len += n;
         ok = len > 0 && len < BODY_MAX;
       }
@@ -145,6 +150,89 @@ void Radar::fetch_() {
     esp_http_client_close(c);
     esp_http_client_cleanup(c);
   }
+  return ok;
+}
+
+void Radar::set_flight(const std::string &flight) {
+  std::string f;
+  for (char ch : flight)
+    if (isalnum((unsigned char) ch) && f.size() < 10)
+      f += (char) toupper((unsigned char) ch);
+  {
+    std::lock_guard<std::mutex> lock(this->mtx_);
+    if (f == this->flight_)
+      return;
+    this->flight_ = f;
+  }
+  // Другой рейс — прежний с экрана долой, пока не придёт новый
+  Track t;
+  strcpy(t.st, f.empty() ? "none" : "wait");
+  this->apply_track_(t);
+  if (this->task_)
+    xTaskNotifyGive(this->task_);
+}
+
+void Radar::fetch_track_() {
+  std::string flight;
+  {
+    std::lock_guard<std::mutex> lock(this->mtx_);
+    flight = this->flight_;
+  }
+  Track t;
+  if (flight.empty()) {
+    strcpy(t.st, "none");
+  } else {
+    size_t len = 0;
+    const std::string url = this->url_copy_() + "/flight?f=" + flight;
+    if (!http_get(url, this->body_, len)) {
+      strcpy(t.st, "err");
+    } else {
+      JsonDocument doc = json::parse_json(this->body_, len);
+      strncpy(t.st, doc["st"] | "err", sizeof(t.st) - 1);
+      strncpy(t.n, doc["n"] | flight.c_str(), sizeof(t.n) - 1);
+      strncpy(t.cs, doc["cs"] | "", sizeof(t.cs) - 1);
+      strncpy(t.al, doc["al"] | "", sizeof(t.al) - 1);
+      strncpy(t.tl, doc["tl"] | "", sizeof(t.tl) - 1);
+      strncpy(t.oc, doc["o"]["c"] | "", sizeof(t.oc) - 1);
+      strncpy(t.on, doc["o"]["n"] | "", sizeof(t.on) - 1);
+      strncpy(t.dc, doc["d"]["c"] | "", sizeof(t.dc) - 1);
+      strncpy(t.dn, doc["d"]["n"] | "", sizeof(t.dn) - 1);
+      strncpy(t.ot, doc["ot"] | "", sizeof(t.ot) - 1);
+      strncpy(t.dep, doc["dep"] | "", sizeof(t.dep) - 1);
+      strncpy(t.eta, doc["eta"] | "", sizeof(t.eta) - 1);
+      const int ic = doc["ic"] | 5;
+      t.icon = (uint8_t) (ic >= 0 && ic < AC_ICONS ? ic : 5);
+      for (JsonArray pt : doc["pt"].as<JsonArray>()) {
+        if (t.npt >= Track::NPT)
+          break;
+        t.pt[t.npt][0] = pt[0] | 0;
+        t.pt[t.npt][1] = pt[1] | 0;
+        t.npt++;
+      }
+      JsonObject pl = doc["p"].as<JsonObject>();
+      if (!pl.isNull()) {
+        t.plane = true;
+        t.px = pl["x"] | 0;
+        t.py = pl["y"] | 0;
+        t.ph = pl["h"] | 0;
+        t.pi = pl["i"] | 0;
+      }
+      t.alt = doc["a"] | 0;
+      t.spd = doc["s"] | 0;
+      t.hdg = doc["h"] | 0;
+      t.ver = doc["v"] | 0u;
+    }
+  }
+  std::lock_guard<std::mutex> lock(this->mtx_);
+  this->trk_pending_ = t;
+  this->has_trk_ = true;
+}
+
+void Radar::fetch_() {
+  const int r = this->radius();
+  const std::string url = this->url_copy_() + "/esp?r=" + std::to_string(r);
+  size_t len = 0;
+  bool ok = http_get(url, this->body_, len);
   std::vector<Plane> fresh;
   if (ok) {
     JsonDocument doc = json::parse_json(this->body_, len);
@@ -671,7 +759,10 @@ void Radar::hide_card_() {
 void Radar::on_event(lv_event_t *e) {
   const lv_event_code_t code = lv_event_get_code(e);
   if (code == LV_EVENT_DRAW_MAIN) {
-    this->paint(lv_event_get_layer(e));
+    if (lv_event_get_current_target(e) == this->trk_view_)
+      this->paint_track(lv_event_get_layer(e));
+    else
+      this->paint(lv_event_get_layer(e));
     return;
   }
   lv_indev_t *indev = lv_indev_active();
@@ -743,6 +834,20 @@ void Radar::tick() {
   }
   if (got_view)
     this->apply_view_(view);
+  {
+    Track t;
+    bool got_trk = false;
+    {
+      std::lock_guard<std::mutex> lock(this->mtx_);
+      if (this->has_trk_) {
+        t = this->trk_pending_;
+        this->has_trk_ = false;
+        got_trk = true;
+      }
+    }
+    if (got_trk)
+      this->apply_track_(t);
+  }
   if (got && r == this->radius())
     this->apply_(fresh, r);
   if (fail)
@@ -937,6 +1042,173 @@ void Radar::paint(lv_layer_t *layer) {
       lb.text = label_of(p);
       lv_area_t ta = {(int) px + 20, (int) py - 11, (int) px + 20 + 11 * (int) strlen(lb.text) + 4, (int) py + 11};
       lv_draw_label(layer, &lb, &ta);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Трекер рейса — по экрану «Flight tracker» из AirESP32ace: вылет слева,
+// прилёт справа, дуга маршрута, пройденная часть сплошная, остаток пунктиром,
+// самолёт на дуге. Сверху номер рейса, снизу коды аэропортов с городами,
+// высота, скорость, курс и время
+
+void Radar::bind_track(lv_obj_t *view) {
+  this->trk_view_ = view;
+  lv_obj_add_event_cb(view, view_event_cb, LV_EVENT_DRAW_MAIN, this);
+  this->t_num_ = mk_label(view, this->font_big_, 0xFFFFFF, 0, -168);
+  this->t_air_ = mk_label(view, this->font_, 0x8A949E, 0, -134);
+  this->t_type_ = mk_label(view, this->font_, 0x6E7881, 0, -116);
+  this->t_oc_ = mk_label(view, this->font_big_, 0xFFFFFF, -120, 58);
+  this->t_on_ = mk_label(view, this->font_, 0x8A949E, -120, 88);
+  this->t_dc_ = mk_label(view, this->font_big_, 0xFFFFFF, 120, 58);
+  this->t_dn_ = mk_label(view, this->font_, 0x8A949E, 120, 88);
+  static const char *const CAPS[3] = {"высота", "скорость", "курс"};
+  for (int i = 0; i < 3; i++) {
+    this->t_cap_[i] = mk_label(view, this->font_, 0x6E7881, (i - 1) * 110, 118);
+    lv_label_set_text(this->t_cap_[i], CAPS[i]);
+    this->t_val_[i] = mk_label(view, this->font_mid_, 0xE6EDF5, (i - 1) * 110, 142);
+  }
+  for (int i = 0; i < 2; i++) {
+    this->t_tcap_[i] = mk_label(view, this->font_, 0x6E7881, i ? 60 : -60, 170);
+    this->t_tval_[i] = mk_label(view, this->font_mid_, 0xE6EDF5, i ? 60 : -60, 192);
+  }
+  this->t_msg_ = mk_label(view, this->font_mid_, 0x8A949E, 0, 0);
+  lv_obj_set_width(this->t_msg_, 330);
+  lv_label_set_long_mode(this->t_msg_, LV_LABEL_LONG_WRAP);
+  Track t;
+  strcpy(t.st, "none");
+  this->apply_track_(t);
+}
+
+void Radar::set_track_active(bool active) {
+  const bool was = this->trk_active_.exchange(active);
+  if (active && !was) {
+    // Открыли страницу — карта маршрута (если уже известна) и свежие данные
+    if (this->trk_.ver)
+      this->trk_map_req_ = true;
+    if (this->task_)
+      xTaskNotifyGive(this->task_);
+  }
+}
+
+std::string Radar::track_map_url() {
+  return this->url_copy_() + "/trackmap.jpg?v=" + std::to_string(this->trk_.ver);
+}
+
+void Radar::apply_track_(const Track &t) {
+  this->trk_ = t;
+  if (!this->trk_view_)
+    return;
+  const bool ok = strcmp(t.st, "ok") == 0;
+  lv_obj_t *const info[] = {this->t_air_, this->t_type_, this->t_oc_, this->t_on_, this->t_dc_, this->t_dn_,
+                            this->t_cap_[0], this->t_cap_[1], this->t_cap_[2], this->t_val_[0], this->t_val_[1],
+                            this->t_val_[2], this->t_tcap_[0], this->t_tcap_[1], this->t_tval_[0], this->t_tval_[1]};
+  for (lv_obj_t *o : info) {
+    if (ok)
+      lv_obj_clear_flag(o, LV_OBJ_FLAG_HIDDEN);
+    else
+      lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
+  }
+  lv_label_set_text(this->t_num_, t.n[0] ? t.n : "Рейс");
+  if (!ok) {
+    const char *msg = strcmp(t.st, "none") == 0  ? "Впишите номер рейса в Home Assistant — «Рейс для отслеживания»"
+                      : strcmp(t.st, "wait") == 0 ? "Ищу рейс…"
+                      : strcmp(t.st, "nf") == 0   ? "Рейс не найден или ещё не в воздухе"
+                                                  : "Нет связи с сервером радара";
+    lv_label_set_text(this->t_msg_, msg);
+    lv_obj_clear_flag(this->t_msg_, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_invalidate(this->trk_view_);
+    return;
+  }
+  lv_obj_add_flag(this->t_msg_, LV_OBJ_FLAG_HIDDEN);
+  lv_label_set_text(this->t_air_, t.al);
+  lv_label_set_text(this->t_type_, t.tl);
+  lv_label_set_text(this->t_oc_, t.oc[0] ? t.oc : "—");
+  lv_label_set_text(this->t_on_, t.on);
+  lv_label_set_text(this->t_dc_, t.dc[0] ? t.dc : "—");
+  lv_label_set_text(this->t_dn_, t.dn);
+  char buf[32];
+  if (t.plane) {
+    const int a = t.alt / 10 * 10;
+    if (a >= 1000)
+      snprintf(buf, sizeof(buf), "%d %03d м", a / 1000, a % 1000);
+    else
+      snprintf(buf, sizeof(buf), "%d м", a);
+    lv_label_set_text(this->t_val_[0], buf);
+    snprintf(buf, sizeof(buf), "%d км/ч", t.spd);
+    lv_label_set_text(this->t_val_[1], buf);
+    snprintf(buf, sizeof(buf), "%s %d°", compass16(t.hdg), (t.hdg % 360 + 360) % 360);
+    lv_label_set_text(this->t_val_[2], buf);
+  } else {
+    for (auto *v : this->t_val_)
+      lv_label_set_text(v, "—");
+  }
+  snprintf(buf, sizeof(buf), "время %s", t.oc);
+  lv_label_set_text(this->t_tcap_[0], buf);
+  lv_label_set_text(this->t_tval_[0], t.ot[0] ? t.ot : "—");
+  snprintf(buf, sizeof(buf), "прилёт %s", t.dc);
+  lv_label_set_text(this->t_tcap_[1], buf);
+  lv_label_set_text(this->t_tval_[1], t.eta[0] ? t.eta : "—");
+  if (t.ver && t.ver != this->trk_shown_ver_) {
+    this->trk_shown_ver_ = t.ver;
+    this->trk_map_req_ = true;
+  }
+  lv_obj_invalidate(this->trk_view_);
+}
+
+void Radar::paint_track(lv_layer_t *layer) {
+  const Track &t = this->trk_;
+  if (strcmp(t.st, "ok") != 0 || t.npt < 2)
+    return;
+  lv_area_t oc;
+  lv_obj_get_coords(this->trk_view_, &oc);
+  auto P = [&oc](int x, int y) {
+    return lv_point_precise_t{(lv_value_precise_t) (oc.x1 + x), (lv_value_precise_t) (oc.y1 + y)};
+  };
+  lv_draw_line_dsc_t ln;
+  lv_draw_line_dsc_init(&ln);
+  ln.color = lv_color_hex(0x1FB04A);
+  ln.round_start = 1;
+  ln.round_end = 1;
+  // Пройдено — сплошной линией до самолёта, дальше — пунктиром
+  const int split = t.plane ? std::max(0, std::min<int>(t.pi, t.npt - 1)) : 0;
+  ln.width = 4;
+  ln.opa = LV_OPA_COVER;
+  for (int i = 0; i < split; i++) {
+    ln.p1 = P(t.pt[i][0], t.pt[i][1]);
+    ln.p2 = P(t.pt[i + 1][0], t.pt[i + 1][1]);
+    lv_draw_line(layer, &ln);
+  }
+  ln.width = 2;
+  ln.opa = 170;
+  for (int i = split; i + 1 < t.npt; i += 2) {
+    ln.p1 = P(t.pt[i][0], t.pt[i][1]);
+    ln.p2 = P(t.pt[i + 1][0], t.pt[i + 1][1]);
+    lv_draw_line(layer, &ln);
+  }
+  // Аэропорты — точками на концах
+  lv_draw_fill_dsc_t fill;
+  lv_draw_fill_dsc_init(&fill);
+  fill.radius = LV_RADIUS_CIRCLE;
+  fill.color = lv_color_hex(0x1FB04A);
+  fill.opa = LV_OPA_COVER;
+  for (int k : {0, t.npt - 1}) {
+    lv_area_t a = {oc.x1 + t.pt[k][0] - 5, oc.y1 + t.pt[k][1] - 5, oc.x1 + t.pt[k][0] + 5, oc.y1 + t.pt[k][1] + 5};
+    lv_draw_fill(layer, &fill, &a);
+  }
+  // Самолёт — силуэт своего типа по дуге
+  if (t.plane) {
+    const lv_image_dsc_t *spr = this->sprite_(t.icon, t.ph);
+    if (spr) {
+      lv_draw_image_dsc_t im;
+      lv_draw_image_dsc_init(&im);
+      im.src = spr;
+      im.recolor = lv_color_hex(0x3DFF6A);
+      im.opa = LV_OPA_COVER;
+      lv_area_t ia = {oc.x1 + t.px - AC_MAP / 2, oc.y1 + t.py - AC_MAP / 2, oc.x1 + t.px - AC_MAP / 2 + AC_MAP - 1,
+                      oc.y1 + t.py - AC_MAP / 2 + AC_MAP - 1};
+      im.image_area = ia;
+      lv_draw_image(layer, &im, &ia);
     }
   }
 }
