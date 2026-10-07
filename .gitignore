@@ -10,3 +10,6 @@ secrets.yaml
 # Python bytecode from the local ESPHome component
 __pycache__/
 *.pyc
+
+# Видео от /brag-slim
+brag-output*/
