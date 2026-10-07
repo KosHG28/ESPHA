@@ -315,7 +315,8 @@ script:
           else if (s == "thunderstorm_with_hail") { mode = 4; cnt = 12; clouds = 3; storm = true; }
           // Листопад: в сентябре и октябре, в ветреный день без осадков —
           // ветер от 5 м/с или порывы от 8. Перестаёт, когда ветер стих
-          // ниже 4 и 7 м/с, чтобы не мигать на границе
+          // ниже 4 и 7 м/с, чтобы не мигать на границе. Ночью — нет: листья
+          // заслоняют звёзды и созвездия («Листопад» в «Фоне погоды» — всегда)
           static bool windy = false;
           const float ws = id(ha_wind_speed).state, wg = id(ha_wind_gust).state;
           const bool calm = (std::isnan(ws) || ws < 4.0f) && (std::isnan(wg) || wg < 7.0f);
@@ -326,7 +327,7 @@ script:
           auto now = id(ha_time).now();
           const bool autumn = now.is_valid() && (now.month == 9 || now.month == 10);
           const bool dry = mode == 0 && !storm && !s.empty();
-          if (sel == 8 || (sel == 0 && dry && autumn && windy)) {
+          if (sel == 8 || (sel == 0 && dry && autumn && windy && !id(is_night))) {
             mode = 5;
             clouds = 0;  // листья летят по чистому небу, облака не нужны
             const bool strong = (!std::isnan(ws) && ws >= 9.0f) || (!std::isnan(wg) && wg >= 14.0f);
