@@ -18,6 +18,7 @@ number:
     optimistic: true
     restore_value: true
     on_value:
+      - lambda: 'id(wake_src) = "настройки экрана";'
       - script.execute: wake_screen
 
   - platform: template
@@ -49,6 +50,7 @@ number:
     optimistic: true
     restore_value: true
     on_value:
+      - lambda: 'id(wake_src) = "настройки экрана";'
       - script.execute: wake_screen
 
   # Ночное выключение: с какого и до какого часа экран гаснет полностью
@@ -216,6 +218,12 @@ globals:
     type: bool
     restore_value: false
     initial_value: 'false'
+  # Что разбудило экран в последний раз — для «Экран: состояние» в HA.
+  # Задаётся перед каждым вызовом wake_screen
+  - id: wake_src
+    type: std::string
+    restore_value: false
+    initial_value: '"запуск"'
   # Пока экран был выключен, у принтера что-то произошло — показать при включении
   - id: printer_pending
     type: bool
@@ -614,6 +622,11 @@ script:
             if (now.is_valid() && a != b)
               night = a < b ? (now.hour >= a && now.hour < b) : (now.hour >= a || now.hour < b);
           }
+          // Страховка: в zone.home 0, а таймер ухода не идёт (событие о смене
+          // потерялось) — запустить его сейчас
+          const float people = id(ha_people_home).state;
+          if (!std::isnan(people) && people < 0.5f && !id(nobody_home) && !id(away_timer)->is_running())
+            id(away_timer)->execute();
           // Без связи с HA неизвестно, есть ли кто дома, — по этому правилу не гасим
           bool away = id(sw_away_off).state && id(nobody_home) && api::global_api_server->is_connected();
           id(off_wanted) = night || away;
@@ -633,6 +646,9 @@ script:
           condition:
             lambda: 'return !id(off_wanted) && id(screen_off);'
           then:
+            - lambda: |-
+                id(wake_src) = api::global_api_server->is_connected() ? "кончилась ночь или кто-то пришёл"
+                                                                      : "нет связи с HA";
             - script.execute: wake_screen
 
 interval:
@@ -648,3 +664,48 @@ interval:
             return;
           last = on;
           id(clock_layout)->execute();
+
+  # «Экран: состояние» в HA — горит ли экран и почему
+  - interval: 5s
+    then:
+      - lambda: |-
+          std::string s;
+          const float people = id(ha_people_home).state;
+          const bool link = api::global_api_server->is_connected();
+          if (id(screen_off)) {
+            s = id(off_wanted) && id(nobody_home) && id(sw_away_off).state ? "Выключен: никого нет дома"
+                                                                           : "Выключен: ночь";
+          } else if (id(nightlight_on)) {
+            s = "Горит: ночник";
+          } else if (id(romance_on)) {
+            s = "Горит: «Романтика»";
+          } else if (id(wake_screen)->is_running()) {
+            s = "Горит: разбудило — " + id(wake_src);
+          } else if (!id(screen_dimmed)) {
+            s = "Горит: «Гасить экран через» — 0, не гаснет";
+          } else {
+            // Приглушён — объяснить, почему не выключен совсем
+            std::string why;
+            if (!link)
+              why = "нет связи с HA";
+            else if (std::isnan(people))
+              why = "zone.home неизвестна";
+            else if (people >= 0.5f)
+              why = "дома " + std::to_string((int) (people + 0.5f)) + " чел.";
+            else if (!id(sw_away_off).state)
+              why = "«Гасить экран, когда никого нет» выключено";
+            else if (!id(nobody_home))
+              why = "дома никого — погаснет через ${away_off_delay} после ухода";
+            else
+              why = "сейчас погаснет";
+            s = "Ожидание: " + why;
+          }
+          if (s != id(screen_state).state)
+            id(screen_state).publish_state(s);
+
+text_sensor:
+  - platform: template
+    id: screen_state
+    name: "Экран: состояние (screen)"
+    icon: mdi:monitor-eye
+    entity_category: diagnostic

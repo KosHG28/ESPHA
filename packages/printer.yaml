@@ -264,6 +264,7 @@ script:
           then:
             - lvgl.page.show:
                 id: page_printer
+      - lambda: 'id(wake_src) = "принтер";'
       - script.execute: wake_screen
       - delay: 2min
       - if:

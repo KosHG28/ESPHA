@@ -113,6 +113,7 @@ script:
             lambda: 'return id(screen_off);'
           then:
             - script.stop: flash_screen
+      - lambda: 'id(wake_src) = "событие: " + text;'
       - script.execute: wake_screen
       - lvgl.label.update:
           id: alert_text

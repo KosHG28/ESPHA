@@ -114,12 +114,15 @@ interval:
           }
           float dx = ax - px, dy = ay - py, dz = az - pz;
           id(imu_delta) = sqrtf(dx * dx + dy * dy + dz * dz);
+      # Когда дома никого, движение не будит: двигать плату некому, а кот на
+      # столе или вибрация зажигали бы экран снова и снова. Касание — будит
       - if:
           condition:
             lambda: |-
-              return id(motion_wake_enabled).state &&
+              return id(motion_wake_enabled).state && !id(nobody_home) &&
                      id(imu_delta) > id(motion_threshold).state;
           then:
+            - lambda: 'id(wake_src) = "движение";'
             # mode: restart у wake_screen — пока плату держат в руках,
             # таймер гашения просто продлевается
             - script.execute: wake_screen

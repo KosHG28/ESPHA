@@ -103,6 +103,7 @@ touchscreen:
       # страницы вслепую не нужно
       - lambda: |-
           id(touch_woke) = id(screen_off);
+          id(wake_src) = "касание";
           id(touch_active) = true;
           id(touch_release_ms) = millis();
           id(touch_start_ms) = millis();
@@ -226,6 +227,7 @@ binary_sensor:
         pullup: true
       inverted: true
     on_click:
+      - lambda: 'id(wake_src) = "кнопка BOOT";'
       # Если экран был выключен, нажатие только будит его
       - if:
           condition:

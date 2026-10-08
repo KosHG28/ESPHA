@@ -111,6 +111,7 @@ select:
           condition:
             lambda: 'return i > 0;'
           then:
+            - lambda: 'id(wake_src) = "гость из HA";'
             - script.execute: wake_screen
             - lambda: |-
                 using namespace critters;
@@ -132,5 +133,6 @@ button:
     name: Позвать кота 🐈
     icon: mdi:cat
     on_press:
+      - lambda: 'id(wake_src) = "кот из HA";'
       - script.execute: wake_screen
       - lambda: 'id(crit)->start_cat();'

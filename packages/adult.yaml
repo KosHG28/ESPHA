@@ -99,6 +99,7 @@ script:
           then:
             - script.execute: nightlight_off
       - lambda: 'id(romance_on) = false;'
+      - lambda: 'id(wake_src) = "«Романтика»";'
       - script.execute: wake_screen
       - lvgl.page.show:
           id: page_clock
@@ -135,6 +136,7 @@ script:
           id(romance_on) = false;
           id(crit)->set_quiet(false);
           lv_obj_add_flag(id(romance_sign), LV_OBJ_FLAG_HIDDEN);
+      - lambda: 'id(wake_src) = "«Романтика» выключена";'
       - script.execute: wake_screen
 
   # Тайный намёк: огонёк вспыхивает, HA получает событие
@@ -166,6 +168,7 @@ script:
   - id: prank
     mode: single
     then:
+      - lambda: 'id(wake_src) = "розыгрыш 18+";'
       - script.execute: wake_screen
       - lambda: |-
           id(prank_stage) = 1;

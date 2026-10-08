@@ -232,6 +232,7 @@ script:
     mode: restart
     then:
       - lambda: 'id(fireworks_until) = millis() + (uint32_t) seconds * 1000u;'
+      - lambda: 'id(wake_src) = "салют";'
       - script.execute: wake_screen
       - lvgl.page.show:
           id: page_clock
@@ -249,6 +250,7 @@ script:
           id(hol_preview_until) = millis() + 180000u;
           id(countdown_t0) = idx == HOL_NEW_YEAR ? millis() : 0;
           id(binary_until) = idx == HOL_PROGRAMMER ? millis() + 60000u : 0;
+      - lambda: 'id(wake_src) = "проверка праздника";'
       - script.execute: wake_screen
       - lvgl.page.show:
           id: page_clock
@@ -564,6 +566,7 @@ interval:
               lv_obj_add_flag(ov, LV_OBJ_FLAG_HIDDEN);
             } else {
               if (shown < 0) {
+                id(wake_src) = "новогодний отсчёт";
                 id(wake_screen)->execute();
                 lv_obj_move_foreground(ov);
                 lv_obj_clear_flag(ov, LV_OBJ_FLAG_HIDDEN);

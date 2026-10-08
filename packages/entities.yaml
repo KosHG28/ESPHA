@@ -217,6 +217,7 @@ script:
           condition:
             lambda: 'return !id(nobody_home);'
           then:
+            - lambda: 'id(wake_src) = "дверь открыта";'
             - script.execute: wake_screen
             - lvgl.page.show:
                 id: page_clock

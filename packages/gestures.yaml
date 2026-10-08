@@ -82,6 +82,7 @@ script:
           id(nightlight_on) = false;
           lv_anim_delete(id(nightlight_card), nullptr);
           lv_obj_add_flag(id(nightlight_card), LV_OBJ_FLAG_HIDDEN);
+      - lambda: 'id(wake_src) = "ночник погас";'
       - script.execute: wake_screen
 
   # Стук: всплеск ускорения между соседними замерами после затишья.
@@ -112,8 +113,11 @@ script:
           if (d > id(knock_threshold).state && quiet >= 3) {
             if (first && now - first >= 120 && now - first <= 700) {
               first = 0;
-              if (id(screen_off) || id(screen_dimmed))
+              // Когда дома никого, стук не будит — как и движение
+              if ((id(screen_off) || id(screen_dimmed)) && !id(nobody_home)) {
+                id(wake_src) = "стук";
                 id(wake_screen)->execute();
+              }
             } else {
               first = now;
             }
