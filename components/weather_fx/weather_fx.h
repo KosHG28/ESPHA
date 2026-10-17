@@ -17,7 +17,7 @@ struct Params {
   /// 0 нет, 1 дождь, 2 снег, 3 мокрый снег, 4 град, 5 листопад, 6 сердечки,
   /// 7 тюльпаны и мимоза, 8 воздушные шарики, 9 кленовые листья
   int mode{0};
-  int count{0};       ///< сколько частиц: капель до 32, снежинок и листьев до 16
+  int count{0};       ///< сила осадков: дождь и град до 32, снежинок и листьев до 16
   int clouds{0};      ///< сколько облаков, до 3
   bool storm{false};  ///< гроза: молнии
   bool stars{false};  ///< ясная ночь: звёзды
@@ -52,19 +52,31 @@ struct Params {
   uint32_t utc{0};           ///< секунды Unix
 };
 
+/// Картинка, которую компонент рисует сам при запуске: маска A8 (цвет
+/// задаётся при рисовании) или RGB565A8 (со своими цветами). ax, ay — точка
+/// привязки внутри картинки: голова струи дождя, центр капли
+struct FxSprite {
+  lv_image_dsc_t dsc;
+  uint8_t *buf;
+  int cap;  // сколько байт выделено
+  int ax, ay;
+};
+
 /// Погодный фон страницы часов.
 ///
 /// Капли, снежинки, брызги и звёзды — не отдельные объекты LVGL, а рисунок
-/// одного объекта-«холста»: он сам рисует все частицы в обработчике
+/// самого слоя погоды: он рисует все частицы в своих обработчиках
 /// отрисовки, а изменившиеся участки отмечаются напрямую. Сдвиг обычного
 /// объекта LVGL меняет его стиль и заставляет пересчитать раскладку всего
 /// контейнера — на 50–60 частицах при 30 кадрах в секунду это заметная
 /// работа, которой здесь нет. Облака и молния — редкие и крупные, они
-/// остаются обычными объектами.
+/// остаются обычными объектами — детьми слоя.
 ///
-/// Холстов два. Задний лежит под облаками — на нём небо: звёзды, созвездие,
-/// метеоры и солнце, так что облако их закрывает. Передний — над облаками:
-/// капли, брызги, снежинки и гирлянда.
+/// Небо (звёзды, созвездие, метеоры, солнце) слой рисует до своих детей,
+/// так что облако его закрывает; осадки и гирлянду — после детей, поверх
+/// облаков и молнии. Отдельных объектов-холстов нет: каждый объект во весь
+/// экран LVGL обходил бы на каждом перерисовываемом участке. Дождь и град —
+/// в rain.cpp.
 class WeatherFx : public Component {
  public:
   /// root — слой погоды на странице часов; clouds — контейнер с тремя
@@ -111,9 +123,8 @@ class WeatherFx : public Component {
   float get_setup_priority() const override { return setup_priority::LATE; }
 
  protected:
-  static const int ND = 32;   // капли и градины
+  static const int ND = 32;   // сила осадков (Params::count), не больше
   static const int NF = 16;   // снежинки
-  static const int NS = 8;    // брызги
   static const int NC = 3;    // облака
   static const int NST = 24;  // звёзды: 12 при часах, 24 на весь экран
   static const int NCS = 10;     // звёзд в созвездии, не больше
@@ -138,9 +149,6 @@ class WeatherFx : public Component {
 
   void apply_(const Params &p, bool relayout);
   float wind_(const Params &p, uint32_t now);
-  void drops_(float wind);
-  void glass_(float k, float dt);
-  void splashes_();
   void flakes_(float wind, float ks);
   void clouds_();
   void stars_(uint32_t now);
@@ -192,7 +200,7 @@ class WeatherFx : public Component {
       *glow_{nullptr};
   const lv_font_t *font_s_{nullptr}, *font_l_{nullptr}, *font_cap_{nullptr};
 
-  // Текущая настройка
+  // Текущая настройка. nd_ — сила дождя или града (0 — его нет)
   int applied_{-1};
   int nd_{0}, nf_{0}, ncl_{0};
   bool hail_{false}, storm_{false}, stars_on_{false}, dim_{false}, glass_on_{false};
@@ -252,12 +260,10 @@ class WeatherFx : public Component {
   uint32_t star_ms_{0};
   int star_grp_{0};
 
-  // Цвета (зависят от погоды и приглушения)
-  lv_color_t c_drop_{}, c_tail_{}, c_rim_{}, c_splash_{}, c_flake_s_{}, c_flake_l_{};
+  // Цвета снежинок (зависят от приглушения)
+  lv_color_t c_flake_s_{}, c_flake_l_{};
 
-  // Частицы и то, что сейчас нарисовано
-  float dx_[ND]{}, dy_[ND]{};
-  Spot ds_[ND]{};
+  // Снежинки, листья и прочие падающие знаки: где и что сейчас нарисовано
   float fx_[NF]{}, fy_[NF]{}, fph_[NF]{};
   Spot fs_[NF]{};
   // Прямоугольник знака относительно точки рисования и его размер: [0] —
@@ -331,19 +337,81 @@ class WeatherFx : public Component {
   float kite_x_{0}, kite_y_{0}, kite_dir_{1}, kite_speed_{0};
   lv_point_precise_t kite_tail_[NTAIL]{};
   Spot kite_spot_{};
-  float sx_[NS]{}, sy_[NS]{}, svx_[NS]{}, svy_[NS]{};
-  float slife_[NS]{};  // сколько ещё жить брызгам, мс
-  Spot ss_[NS]{};
   int stx_[NST]{}, sty_[NST]{};
   float stph_[NST]{};
   lv_color_t stc_[NST]{};
   Spot sts_[NST]{};
   float cx_[NC]{};
 
-  // Капли на стекле: состояние (0 ждёт, 1 на стекле), сколько прожила и
-  // сколько проживёт, мс; когда начнёт сползать (0 — не сползёт)
-  uint8_t gst_[ND]{};
-  float gt_[ND]{}, glife_[ND]{}, gslide_[ND]{};
+  // ---- Дождь и град (rain.cpp) ----
+  using Sprite = FxSprite;
+  static const int NRS = 40;   // струй дождя и градин
+  static const int NSPL = 32;  // брызг и отскоков
+  static const int NGL = 36;   // капель на стекле
+  static const int NBD = 48;   // бусинок в следах сползающих капель
+  static const int NGSZ = 7;   // размеров капли на стекле
+  static const int NSTV = 6;   // картинок струи: 3 слоя глубины × 2 длины
+
+  void rain_apply_(const Params &p, bool relayout);
+  void rain_frame_(float wind);
+  void rain_paint_(lv_layer_t *layer, const lv_area_t &oc, const lv_area_t &clip, bool glass);
+  void rain_hide_();
+  void streaks_(float wind);
+  void respawn_streak_(int i, float tan_a, bool anywhere);
+  void streak_sprites_(int q);
+  void splash_(float x, float y, int kind, float wind);
+  void splashes_();
+  void glass_(float dt);
+  int glass_spawn_(float x, float y, int size, int life_ms);
+  void glass_sprites_(int pal);
+  void glass_mark_(int i);
+  void bead_(float x, float y, int size, int life_ms);
+  void bead_mark_(int j);
+  void hail_sprite_();
+  bool visible_(int x, int y, int w, int h) const;
+  int streak_parts_(int i, const FxSprite **spr, lv_area_t *rect, lv_opa_t *opa) const;
+
+  // Струи (пучки струй): голова первой струи, скорость (px за 50 мс), вид:
+  // 0–2 — пучки дальнего слоя, 3–5 — среднего, 6–7 — ближние струи (град — 6)
+  int nrs_{0};
+  float rx_[NRS]{}, ry_[NRS]{}, rv_[NRS]{};
+  uint8_t rkind_[NRS]{};
+  float rglass_[NRS]{};  // ударится о стекло на этой высоте (0 — нет)
+  float rgy_[NRS]{};     // нижний край круга под струёй: ниже её не видно
+  bool rland_[NRS]{};    // голова уже коснулась края (брызги были)
+  float rfar_k_[NRS]{};  // дальние пучки: сколько кадров копится до шага
+  uint8_t rain_tick_{0};
+  Spot rs_[NRS]{};
+  Sprite streak_[NSTV]{};
+  int streak_q_{-1000};    // угол наклона струй, при котором нарисованы картинки
+  float tan_a_{0};         // наклон, который сейчас у струй
+  // Брызги и отскоки градин: вид (0 капелька, 1 вспышка удара, 2 градина),
+  // скорость, сколько осталось жить и сколько жили всего, мс
+  float spx_[NSPL]{}, spy_[NSPL]{}, spvx_[NSPL]{}, spvy_[NSPL]{};
+  float splife_[NSPL]{}, spmax_[NSPL]{};
+  uint8_t spk_[NSPL]{};
+  lv_opa_t spopa_[NSPL]{};
+  Spot sps_[NSPL]{};
+  Sprite dot_{}, flash_{}, hail_spr_{};
+  // Капли на стекле: центр нижней (круглой) части, размер сейчас и к какому
+  // растёт, состояние (0 нет, 1 сидит, 2 сползает, 3 высыхает), сколько ещё
+  // сидеть, когда сползти; скорость сползания и её цель, px/с; когда сменить
+  // рывок; сколько ещё проползти до следующей бусинки
+  int ngl_max_{0};
+  float gdx_[NGL]{}, gdy_[NGL]{};
+  uint8_t gdsz_[NGL]{}, gdtg_[NGL]{}, gdst_[NGL]{};
+  float gdlife_[NGL]{}, gdslide_[NGL]{}, gdv_[NGL]{}, gdvt_[NGL]{}, gdmt_[NGL]{}, gdtr_[NGL]{};
+  Spot gds_[NGL]{};
+  float gd_spawn_ms_{0};
+  // Бусинки — крошечные капельки, которые оставляет сползающая капля
+  float bdx_[NBD]{}, bdy_[NBD]{}, bdlife_[NBD]{};
+  uint8_t bdsz_[NBD]{};
+  Spot bds_[NBD]{};
+  // Капли на стекле: [палитра][размер][0 круглая, 1 вытянутая сползающая]
+  Sprite drop_[2][NGSZ][2]{};
+  bool drop_ok_[2]{};
+  int pal_{0};
+  lv_color_t c_streak_[3]{}, c_splash_{};
 
   int n_ex_{0};
   int ex_[2][4]{};

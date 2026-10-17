@@ -20,14 +20,6 @@ namespace weather_fx {
 static const int CLOUD_Y[3] = {26, 40, 12};
 // Полный снос ветром — при такой скорости и сильнее, м/с
 static const float FULL_WIND = 15.0f;
-// Падающая капля: 2×20 px — тусклый «хвост» 14 px и яркая «голова» 6 px.
-// Длина больше шага за кадр (5–6 px при 33 мс), так что старое и новое место
-// перекрываются и перерисовываются одним куском
-static const int DROP_LEN = 20;
-static const int DROP_HEAD = 6;
-static const int HAIL_SIZE = 6;
-// Сколько живут брызги, мс
-static const float SPLASH_MS = 250.0f;
 // Снежинки: три формы Noto Sans Symbols 2 и две Material Design Icons
 static const uint32_t FLAKE_CP[5] = {0x2744, 0x2745, 0x2746, 0xF0717, 0xF0F2A};
 // Листья: обычный и кленовый, из Material Design Icons
@@ -240,28 +232,33 @@ void WeatherFx::bind(lv_obj_t *root, lv_obj_t *clouds, lv_obj_t *bolt, lv_obj_t 
       lv_obj_get_child_count(clouds) < (uint32_t) NC)
     return;
 
-  // Два холста во весь слой погоды: передний — поверх облаков (осадки,
-  // гирлянда), задний — под ними (небо)
-  auto canvas = [root, this](lv_event_cb_t cb) {
-    lv_obj_t *pt = lv_obj_create(root);
-    lv_obj_remove_style_all(pt);
-    lv_obj_set_size(pt, 466, 466);
-    lv_obj_set_pos(pt, 0, 0);
-    lv_obj_clear_flag(pt, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_clear_flag(pt, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_add_event_cb(pt, cb, LV_EVENT_DRAW_MAIN, this);
-    return pt;
-  };
+  // Небо и осадки рисует сам слой погоды: небо — в своей отрисовке, до
+  // детей (под облаками и молнией), осадки и гирлянду — после детей (поверх).
+  // Отдельные объекты-холсты для этого не нужны, а каждый объект во весь
+  // экран LVGL обходит на каждом перерисовываемом участке, перечитывая
+  // десятки свойств стиля: два таких холста стоили около четверти цены
+  // каждого участка
+  lv_obj_add_event_cb(root, paint_back_cb, LV_EVENT_DRAW_MAIN, this);
+  lv_obj_add_event_cb(root, paint_front_cb, LV_EVENT_DRAW_POST, this);
+  this->paint_ = root;
+  this->back_ = root;
+  // Слой погоды — непрозрачный чёрный, как и страница под ним: тогда LVGL
+  // начинает отрисовку каждого участка прямо с него и не рисует страницу
+  lv_obj_set_style_bg_color(root, lv_color_black(), 0);
+  lv_obj_set_style_bg_opa(root, LV_OPA_COVER, 0);
+  // Облака плывут только по верху круга — контейнер облаков высотой с эту
+  // полосу: участки ниже LVGL пропускает вместе со всеми облаками
+  lv_obj_set_height(clouds, 120);
+
   static bool join_hooked = false;
   if (!join_hooked) {
     join_hooked = true;
     lv_display_t *d = lv_obj_get_display(root);
     lv_display_add_event_cb(d, join_areas_cb, LV_EVENT_REFR_START, d);
+    // Системный слой LVGL (курсор мыши и отладочные надписи) прошивке не
+    // нужен, но LVGL обходил бы его на каждом участке каждого кадра
+    lv_obj_add_flag(lv_display_get_layer_sys(d), LV_OBJ_FLAG_HIDDEN);
   }
-
-  this->paint_ = canvas(paint_front_cb);
-  this->back_ = canvas(paint_back_cb);
-  lv_obj_move_to_index(this->back_, 0);
 
   // Лампочки гирлянды — по кругу у самого края экрана
   for (int i = 0; i < NG; i++) {
@@ -356,12 +353,20 @@ bool WeatherFx::excluded_(int x, int y, int w, int h) const {
 }
 
 void WeatherFx::invalidate_(const lv_area_t &a) {
-  // Координаты частиц — относительно холста; LVGL ждёт экранные
+  // Слой погоды — во весь экран, поэтому участок отмечается прямо в экране,
+  // без обхода всех родителей, как это делает lv_obj_invalidate_area: на
+  // десятках частиц за кадр этот обход заметен. Только если слой виден и
+  // его страница сейчас на экране — иначе рисовать нечего
+  lv_obj_t *root = this->paint_;
+  if (lv_obj_has_flag(root, LV_OBJ_FLAG_HIDDEN) || lv_obj_get_screen(root) != lv_screen_active())
+    return;
+  // Координаты частиц — относительно слоя; LVGL ждёт экранные
   lv_area_t oc;
-  lv_obj_get_coords(this->paint_, &oc);
+  lv_obj_get_coords(root, &oc);
   lv_area_t abs = {(int32_t) (a.x1 + oc.x1), (int32_t) (a.y1 + oc.y1), (int32_t) (a.x2 + oc.x1),
                    (int32_t) (a.y2 + oc.y1)};
-  lv_obj_invalidate_area(this->paint_, &abs);
+  if (lv_area_intersect(&abs, &abs, &oc))
+    lv_inv_area(lv_obj_get_display(root), &abs);
 }
 
 void WeatherFx::mark_(Spot &s, bool on, int x, int y, int w, int h) {
@@ -386,16 +391,11 @@ void WeatherFx::mark_(Spot &s, bool on, int x, int y, int w, int h) {
 }
 
 void WeatherFx::hide_all_() {
-  for (auto &s : this->ds_)
-    this->mark_(s, false, 0, 0, 1, 1);
+  this->rain_hide_();
   for (auto &s : this->fs_)
-    this->mark_(s, false, 0, 0, 1, 1);
-  for (auto &s : this->ss_)
     this->mark_(s, false, 0, 0, 1, 1);
   for (auto &s : this->sts_)
     this->mark_(s, false, 0, 0, 1, 1);
-  for (auto &l : this->slife_)
-    l = 0;
   this->mark_(this->met_spot_, false, 0, 0, 1, 1);
   this->met_on_ = false;
 }
@@ -772,47 +772,8 @@ void WeatherFx::paint_front(lv_layer_t *layer) {
   lv_draw_fill_dsc_init(&fill);
   fill.opa = LV_OPA_COVER;
 
-  // Капли и градины
-  for (int i = 0; i < ND; i++) {
-    if (!place(this->ds_[i]))
-      continue;
-    if (this->glass_on_) {
-      // Капля на стекле — кружок со светлым ободком
-      fill.radius = LV_RADIUS_CIRCLE;
-      fill.color = this->c_drop_;
-      lv_draw_fill(layer, &fill, &abs);
-      lv_draw_border_dsc_t b;
-      lv_draw_border_dsc_init(&b);
-      b.radius = LV_RADIUS_CIRCLE;
-      b.color = this->c_rim_;
-      b.width = 1;
-      b.opa = LV_OPA_COVER;
-      lv_draw_border(layer, &b, &abs);
-    } else if (this->hail_) {
-      fill.radius = 3;
-      fill.color = this->c_drop_;
-      lv_draw_fill(layer, &fill, &abs);
-    } else {
-      // Тусклый хвост и яркая голова
-      fill.radius = 0;
-      lv_area_t tail = abs, head = abs;
-      tail.y2 = abs.y1 + DROP_LEN - DROP_HEAD - 1;
-      head.y1 = tail.y2 + 1;
-      fill.color = this->c_tail_;
-      lv_draw_fill(layer, &fill, &tail);
-      fill.color = this->c_drop_;
-      lv_draw_fill(layer, &fill, &head);
-    }
-  }
-
-  // Брызги
-  fill.radius = 1;
-  fill.color = this->c_splash_;
-  for (int i = 0; i < NS; i++) {
-    if (!place(this->ss_[i]))
-      continue;
-    lv_draw_fill(layer, &fill, &abs);
-  }
+  // Струи дождя, градины и брызги (rain.cpp)
+  this->rain_paint_(layer, oc, clip, false);
 
   // Снежинки или листья
   lv_draw_letter_dsc_t let;
@@ -837,6 +798,9 @@ void WeatherFx::paint_front(lv_layer_t *layer) {
     lv_point_t pt = {abs.x1 - this->fox_[set][i], abs.y1 - this->foy_[set][i]};
     lv_draw_letter(layer, &let, &pt);
   }
+
+  // Капли на стекле — поверх дождя и снега: они на стекле, а не за ним
+  this->rain_paint_(layer, oc, clip, true);
 
   // Иней: морозный узор по краю — готовая маска, ледяным цветом. Внутри
   // круга его нет, так что участки в середине экрана его не рисуют
@@ -1229,11 +1193,6 @@ void WeatherFx::apply_(const Params &p, bool relayout) {
     lv_obj_invalidate(this->paint_);
   }
   this->dim_ = dim;
-  this->hail_ = p.mode == 4;
-  // Дождь (и дождь в мокром снеге) — каплями на стекле, если так выбрано.
-  // Град всегда падает
-  this->glass_on_ = !this->hail_ && p.rain_style == 0;
-  this->nd_ = (p.mode == 1 || p.mode == 4) ? cnt : (p.mode == 3 ? cnt / 2 : 0);
   const bool signs = p.mode == 2 || (p.mode >= 5 && p.mode <= 9);
   this->nf_ = std::min(signs ? cnt : (p.mode == 3 ? cnt / 2 : 0), NF);
   static const int SET_OF_MODE[10] = {0, 0, 0, 0, 0, 1, 2, 3, 4, 5};
@@ -1334,17 +1293,7 @@ void WeatherFx::apply_(const Params &p, bool relayout) {
   }
 
   // В приглушённом режиме палитра ярче: при низкой яркости панели тёмные
-  // частицы сливаются с чёрным
-  if (this->glass_on_) {
-    this->c_drop_ = lv_color_hex(dim ? 0x3F8FC4 : 0x1D4F72);
-    this->c_rim_ = lv_color_hex(dim ? 0xBFE8FF : 0x5FA8D8);
-  } else if (this->hail_) {
-    this->c_drop_ = lv_color_hex(dim ? 0xFFFFFF : 0xCFD8DC);
-  } else {
-    this->c_drop_ = lv_color_hex(dim ? 0x7FD4FF : 0x2A6F99);
-    this->c_tail_ = lv_color_hex(dim ? 0x2E5F80 : 0x123447);
-  }
-  this->c_splash_ = lv_color_hex(dim ? 0x7FD4FF : 0x2A6F99);
+  // частицы сливаются с чёрным. Цвета дождя — в rain_apply_()
   this->c_flake_s_ = lv_color_hex(dim ? 0xAEB8C2 : 0x59636D);
   this->c_flake_l_ = lv_color_hex(dim ? 0xFFFFFF : 0x9AA4AE);
   // Листья: ближние — яркие, дальние — притушенные
@@ -1365,12 +1314,6 @@ void WeatherFx::apply_(const Params &p, bool relayout) {
   if (relayout) {
     // Новая погода — всё с чистого листа
     this->hide_all_();
-    for (int i = 0; i < ND; i++) {
-      this->dx_[i] = rnd_(40, 426);
-      this->dy_[i] = rnd_(0, 440);
-      this->gst_[i] = 0;
-      this->glife_[i] = rnd_(0, 3000);
-    }
     for (int i = 0; i < NF; i++) {
       this->fx_[i] = rnd_(30, 430);
       this->fy_[i] = rnd_(0, 440);
@@ -1413,9 +1356,9 @@ void WeatherFx::apply_(const Params &p, bool relayout) {
     for (auto &s : this->sts_)
       this->mark_(s, false, 0, 0, 1, 1);
   }
-  // Лишние капли и снежинки — убрать
-  for (int i = this->nd_; i < ND; i++)
-    this->mark_(this->ds_[i], false, 0, 0, 1, 1);
+  // Дождь и град: струи, капли на стекле, их картинки и цвета
+  this->rain_apply_(p, relayout);
+  // Лишние снежинки — убрать
   for (int i = this->nf_; i < NF; i++)
     this->mark_(this->fs_[i], false, 0, 0, 1, 1);
 
@@ -1451,7 +1394,9 @@ void WeatherFx::apply_(const Params &p, bool relayout) {
   // Молния жёлтая; свечение в приглушённом режиме ярче
   lv_obj_set_style_line_color(this->glow_, lv_color_hex(dim ? 0xFFC107 : 0xFF9800), 0);
 
-  // Облака: при пасмурной погоде и грозе — темнее
+  // Облака: при пасмурной погоде и грозе — темнее. Нет облаков — нет и
+  // контейнера: LVGL не обходит его на каждом участке
+  show_(this->clouds_box_, this->ncl_ > 0);
   const bool heavy = this->ncl_ >= 3 || this->storm_;
   const uint32_t c_cloud = heavy ? (dim ? 0x3A4452 : 0x161B21) : (dim ? 0x465262 : 0x1D232A);
   for (int i = 0; i < NC; i++) {
@@ -1512,103 +1457,11 @@ static float wrap_x(float x) {
   return x;
 }
 
-// Капля разбивается о нижний край круглого экрана
+// Нижний край круглого экрана (чуть выше самого края): по нему катятся
+// пасхальные яйца
 static float ground(float x) {
   float d = x - 233.0f;
   return 233.0f + sqrtf(std::max(0.0f, 233.0f * 233.0f - d * d)) - 8.0f;
-}
-
-void WeatherFx::drops_(float wind) {
-  const float k = this->k_;
-  const int w = this->hail_ ? HAIL_SIZE : 2;
-  const int h = this->hail_ ? HAIL_SIZE : DROP_LEN;
-  for (int i = 0; i < this->nd_; i++) {
-    // Дождь падает неспешно (140–190 px/с)
-    this->dy_[i] += k * (this->hail_ ? 7.0f + (i % 3) : 7.0f + (i % 3) * 1.2f);
-    this->dx_[i] = wrap_x(this->dx_[i] + k * wind * 3.0f);
-    const float g = ground(this->dx_[i] + 1);
-    if (this->dy_[i] + h > g) {
-      // Брызги: две точки разлетаются вверх в стороны (не у каждой капли)
-      if (!this->hail_ && (random_uint32() % 10) < 3) {
-        int made = 0;
-        for (int j = 0; j < NS && made < 2; j++) {
-          if (this->slife_[j] > 0)
-            continue;
-          this->sx_[j] = this->dx_[i];
-          this->sy_[j] = g - 3;
-          this->svx_[j] = (made ? 1.3f : -1.3f) + wind;
-          this->svy_[j] = -2.2f;
-          this->slife_[j] = SPLASH_MS;
-          made++;
-        }
-      }
-      // Новая капля сверху, с поправкой на снос
-      this->dx_[i] = wrap_x(rnd_(40, 426) - wind * 60.0f);
-      this->dy_[i] = -DROP_LEN - 2 - rnd_(0, 120);
-    }
-    const int x = (int) this->dx_[i], y = (int) this->dy_[i];
-    this->mark_(this->ds_[i], !this->excluded_(x, y, w, h), x, y, w, h);
-  }
-}
-
-void WeatherFx::glass_(float k, float dt) {
-  for (int i = 0; i < this->nd_; i++) {
-    const int sz = 4 + 2 * (i % 3);
-    if (this->gst_[i] == 0) {
-      // Ждёт своей очереди
-      this->glife_[i] -= dt;
-      if (this->glife_[i] > 0)
-        continue;
-      int x, y, tries = 0;
-      do {
-        x = rnd_(40, 420);
-        y = rnd_(30, 400);
-      } while (++tries < 20 && ((x - 233) * (x - 233) + (y - 233) * (y - 233) > 205 * 205 ||
-                                this->excluded_(x, y, sz, sz)));
-      this->dx_[i] = x;
-      this->dy_[i] = y;
-      this->gt_[i] = 0;
-      this->glife_[i] = rnd_(2500, 7000);
-      // Примерно каждая третья капля через секунду-две начинает сползать
-      this->gslide_[i] = rnd_(0, 100) < 35 ? rnd_(600, 1800) : 0;
-      this->gst_[i] = 1;
-      this->mark_(this->ds_[i], true, x, y, sz, sz);
-      continue;
-    }
-    this->gt_[i] += dt;
-    bool gone = this->gt_[i] > this->glife_[i];
-    if (!gone && this->gslide_[i] > 0 && this->gt_[i] > this->gslide_[i]) {
-      // Сползает ~25 px/с — медленно, без мерцания
-      this->dy_[i] += k * 1.25f;
-      const float dxc = this->dx_[i] - 233.0f;
-      const float bottom = 233.0f + sqrtf(std::max(0.0f, 215.0f * 215.0f - dxc * dxc));
-      gone = this->dy_[i] + sz > bottom;
-      if (!gone) {
-        const int x = (int) this->dx_[i], y = (int) this->dy_[i];
-        this->mark_(this->ds_[i], !this->excluded_(x, y, sz, sz), x, y, sz, sz);
-      }
-    }
-    if (gone) {
-      this->mark_(this->ds_[i], false, 0, 0, 1, 1);
-      this->gst_[i] = 0;
-      this->glife_[i] = rnd_(300, 2000);
-    }
-  }
-}
-
-void WeatherFx::splashes_() {
-  const float kk = this->k_;
-  for (int j = 0; j < NS; j++) {
-    if (this->slife_[j] <= 0) {
-      this->mark_(this->ss_[j], false, 0, 0, 1, 1);
-      continue;
-    }
-    this->slife_[j] -= this->dt_ms_;
-    this->sx_[j] += kk * this->svx_[j];
-    this->sy_[j] += kk * this->svy_[j];
-    this->svy_[j] += kk * 0.7f;
-    this->mark_(this->ss_[j], this->slife_[j] > 0, (int) this->sx_[j], (int) this->sy_[j], 3, 3);
-  }
 }
 
 void WeatherFx::flakes_(float wind, float ks) {
@@ -2837,13 +2690,7 @@ void WeatherFx::frame(const Params &p) {
   this->garland_(now);
   this->fireworks_(now);
   this->kite_(now, wind);
-  if (this->glass_on_) {
-    if (ks > 0)
-      this->glass_(ks, ks * 50.0f);
-  } else {
-    this->drops_(wind);
-    this->splashes_();
-  }
+  this->rain_frame_(wind);
   this->flakes_(wind, ks);
   this->clouds_();
   this->lightning_(now);
