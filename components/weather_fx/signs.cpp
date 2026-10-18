@@ -313,6 +313,7 @@ void WeatherFx::sign_render_(int idx, int sz) {
       alpha[y * sh.w + x] = (uint8_t) std::min(255.0f, acc.a / 4.0f * 255.0f + 0.5f);
     }
   }
+  fx_sheet_crop(sh, idx);
   fx_sheet_done(sh, idx);
 }
 
@@ -330,25 +331,32 @@ void WeatherFx::sign_mark_(int i) {
   int idx = base + ti;
   if (!fx_sheet_ready(sh, idx)) {
     // Новых картинок — не больше пары за кадр, чтобы не было заминок; пока
-    // нужный наклон не нарисован — ближайший готовый
-    int near = -1;
-    if (this->render_budget_ <= 0)
+    // нужный наклон не нарисован — ближайший готовый, а если готовых этого
+    // цвета ещё нет (в самом начале) — знак появится кадром-другим позже:
+    // прежде в первом кадре рисовались все картинки разом
+    if (this->render_budget_ > 0) {
+      this->render_budget_--;
+      this->sign_render_(idx, sz);
+    } else {
+      int near = -1;
       for (int d = 1; d < nt && near < 0; d++) {
         if (ti - d >= 0 && fx_sheet_ready(sh, base + ti - d))
           near = base + ti - d;
         else if (ti + d < nt && fx_sheet_ready(sh, base + ti + d))
           near = base + ti + d;
       }
-    if (near >= 0) {
+      if (near < 0) {
+        this->mark_(this->fs_[i], false, 0, 0, 1, 1);
+        return;
+      }
       idx = near;
-    } else {
-      this->render_budget_--;
-      this->sign_render_(idx, sz);
     }
   }
   this->fidx_[i] = (uint8_t) idx;
-  const lv_area_t a = fx_sheet_area(sh, (int) this->fx_[i], (int) this->fy_[i]);
-  this->mark_(this->fs_[i], !this->excluded_(a.x1, a.y1, sh.w, sh.h), a.x1, a.y1, sh.w, sh.h);
+  // Рамка — по рисунку кадра: у каждого наклона своя
+  const lv_area_t a = fx_sheet_area(sh, idx, (int) this->fx_[i], (int) this->fy_[i]);
+  const int w = a.x2 - a.x1 + 1, h = a.y2 - a.y1 + 1;
+  this->mark_(this->fs_[i], !this->excluded_(a.x1, a.y1, w, h), a.x1, a.y1, w, h);
 }
 
 void WeatherFx::signs_paint_(lv_layer_t *layer, const lv_area_t &oc, const lv_area_t &clip) {
@@ -384,6 +392,7 @@ void WeatherFx::bat_render_(int sz, int frame) {
       p[y * sh.w + x] = (uint8_t) (acc / 9.0f * 255.0f + 0.5f);
     }
   }
+  fx_sheet_crop(sh, frame);
   fx_sheet_done(sh, frame);
 }
 
@@ -398,8 +407,9 @@ void WeatherFx::bat_mark_(int i, int x, int y) {
   const int frame = (int) ((millis() / 85 + i * 3) % NBATF);
   this->bat_frame_[i] = (uint8_t) frame;
   this->bat_render_(sz, frame);
-  const lv_area_t a = fx_sheet_area(sh, x, y);
-  this->mark_(this->bat_spot_[i], !this->excluded_(a.x1, a.y1, sh.w, sh.h), a.x1, a.y1, sh.w, sh.h);
+  const lv_area_t a = fx_sheet_area(sh, frame, x, y);
+  const int w = a.x2 - a.x1 + 1, h = a.y2 - a.y1 + 1;
+  this->mark_(this->bat_spot_[i], !this->excluded_(a.x1, a.y1, w, h), a.x1, a.y1, w, h);
 }
 
 void WeatherFx::bats_paint_(lv_layer_t *layer, const lv_area_t &oc, const lv_area_t &clip) {

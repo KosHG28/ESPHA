@@ -34,6 +34,8 @@ static const float COR_LEN[2] = {17.0f, 11.0f}, COR_W[2] = {2.6f, 1.8f};
 static const uint8_t COR_FLICK[NCOR] = {23, 31, 19, 37, 29, 17, 41, 25, 33, 21, 27, 35};
 static const float COR_AMP = 0.12f;  // насколько луч удлиняется и укорачивается
 static const uint32_t SUN_STEP_MS = 160;
+// Маска длинных лучей рисуется по столько строк за кадр
+static const int SKY_ROWS = 59;
 // Длинные лучи по небу — через 30°: угловая полуширина (рад), длина (px) и
 // яркость. Широкие и длинные чередуются с узкими и короткими
 static const int NBEAM = 12;
@@ -93,14 +95,17 @@ static void draw_core(FxSprite &s, float k) {
   fx_sprite_done(s);
 }
 
-// Длинные лучи и сияние неба вокруг солнца — маска во весь экран. Считается
-// только внутри круга экрана
-static void draw_sky(FxSprite &s) {
-  if (!fx_sprite_init(s, 466, 466, false))
+// Длинные лучи и сияние неба вокруг солнца — маска во весь экран, строки
+// [y0, y1): целиком она считается около десятой доли секунды, поэтому
+// рисуется частями в нескольких кадрах. Считается только внутри круга экрана
+static void draw_sky(FxSprite &s, int y0, int y1) {
+  if (y0 == 0 && !fx_sprite_init(s, 466, 466, false))
+    return;
+  if (!s.buf)
     return;
   s.ax = s.ay = 0;
   const float r0 = COR_R0 * SUN_FK + 10.0f;
-  for (int y = 0; y < 466; y++) {
+  for (int y = y0; y < y1; y++) {
     const float cy = y + 0.5f - FX_CY;
     const float half = sqrtf(std::max(0.0f, FX_R * FX_R - cy * cy));
     const int x0 = std::max(0, (int) (FX_CX - half)), x1 = std::min(465, (int) (FX_CX + half));
@@ -126,7 +131,8 @@ static void draw_sky(FxSprite &s) {
       row[x] = (uint8_t) std::min(255.0f, std::max(0.0f, v + 0.5f));
     }
   }
-  fx_sprite_done(s);
+  if (y1 >= 466)
+    fx_sprite_done(s);
 }
 
 // Венец: двенадцать заострённых лучей, сглаженных по краю, к концу тают.
@@ -189,17 +195,31 @@ void WeatherFx::sun_apply_() {
   const int x = this->full_ ? SUN_FX : SUN_X, y = this->full_ ? SUN_FY : SUN_Y, h = sun_half(k);
   this->mark_(this->sun_spot_, on && this->sun_core_.buf, x - h, y - h, 2 * h + 1, 2 * h + 1);
   // Длинные лучи — только когда часы убраны: иначе они легли бы на цифры.
-  // Маска рисуется один раз (на плате это около десятой доли секунды) и
+  // Маска рисуется один раз, по частям в нескольких кадрах (sun_sky_step_), и
   // остаётся, пока светит солнце: часы уходят и возвращаются часто
   const bool sky = on && this->full_;
-  if (sky && !this->sun_sky_.buf)
-    draw_sky(this->sun_sky_);
-  else if (!on)
+  if (!on) {
     fx_sprite_free(this->sun_sky_);
-  this->mark_(this->sun_sky_spot_, sky && this->sun_sky_.buf, 0, 0, 466, 466);
+    this->sun_sky_rows_ = 0;
+  }
+  this->mark_(this->sun_sky_spot_, sky && this->sun_sky_rows_ >= 466, 0, 0, 466, 466);
+}
+
+// Очередная часть маски длинных лучей — вместо прочих новых картинок кадра.
+// Готова — лучи появляются
+void WeatherFx::sun_sky_step_() {
+  if (!this->sun_on_ || !this->full_ || this->sun_sky_rows_ >= 466 || this->render_budget_ <= 0)
+    return;
+  this->render_budget_ = 0;
+  const int y0 = this->sun_sky_rows_, y1 = std::min(466, y0 + SKY_ROWS);
+  draw_sky(this->sun_sky_, y0, y1);
+  this->sun_sky_rows_ = this->sun_sky_.buf ? y1 : 0;
+  if (this->sun_sky_rows_ >= 466)
+    this->mark_(this->sun_sky_spot_, true, 0, 0, 466, 466);
 }
 
 void WeatherFx::sun_(uint32_t now) {
+  this->sun_sky_step_();
   if (!this->sun_on_ || !this->sun_spot_.on || now - this->sun_ms_ < SUN_STEP_MS)
     return;
   const uint32_t dt = this->sun_ms_ ? std::min<uint32_t>(now - this->sun_ms_, 1000) : SUN_STEP_MS;

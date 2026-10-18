@@ -69,6 +69,7 @@ struct FxSheet {
   lv_image_dsc_t *dsc;
   uint8_t *buf;
   uint8_t *ready;  // по биту на картинку
+  int16_t *crop;   // картинка обрезана по рисунку: где её левый верхний угол
   int n, w, h;
   int ax, ay;  // точка привязки
   bool rgb;
@@ -141,7 +142,6 @@ class WeatherFx : public Component {
   static const int NG = 24;      // лампочек гирлянды
   static const int NB = 3;       // вспышек салюта одновременно
   static const int NP = 14;      // искр во вспышке
-  static const int NTAIL = 9;    // точек хвоста воздушного змея
   static const int NSET = 6;     // наборов падающего: снег, листья, сердечки, цветы, шарики, клёны
   static const int NFF = 10;     // светлячков
   static const int NBAT = 4;     // летучих мышей
@@ -149,6 +149,7 @@ class WeatherFx : public Component {
   static const int NMX = 9;      // столбцов «матрицы»
   static const int MX_LEN = 8;   // знаков в столбце
   static const int NPUFF = 6;    // клубов дыма за ракетой
+  static const int NPUFF_R = 7;  // размеров клуба: радиус 4…10 px
 
   /// Что сейчас нарисовано для частицы: прямоугольник относительно холста
   struct Spot {
@@ -161,6 +162,7 @@ class WeatherFx : public Component {
   void flakes_(float wind, float ks);
   void clouds_();
   void clouds_apply_(bool relayout);
+  void cloud_prepare_(int i);
   void clouds_paint_(lv_layer_t *layer, const lv_area_t &oc, const lv_area_t &clip);
   void bolt_build_(int x0, int y0);
   void bolt_light_(uint8_t opa, bool lit, bool sky);
@@ -171,24 +173,39 @@ class WeatherFx : public Component {
   void sky_(const Params &p);
   void layout_con_(int idx, const float (*pts)[2], int n);
   void meteor_(uint32_t now);
+  void meteor_sprite_();
+  void meteor_paint_(lv_layer_t *layer, const lv_area_t &oc, const lv_area_t &clip);
   void sun_(uint32_t now);
   void sun_apply_();
   void sun_paint_(lv_layer_t *layer, const lv_area_t &oc, const lv_area_t &clip);
   void garland_(uint32_t now);
   void fireworks_(uint32_t now);
   void kite_(uint32_t now, float wind);
+  void kite_stop_();
+  void kite_paint_(lv_layer_t *layer, const lv_area_t &oc, const lv_area_t &clip);
   void moon_(uint32_t utc, int force);
   void planets_(double jd, float lst, float sphi, float cphi);
   void build_frost_();
   void free_frost_();
   void frost_sparks_(uint32_t now);
   void heat_();
+  void heat_apply_(bool on);
+  void heat_paint_(lv_layer_t *layer, const lv_area_t &oc, const lv_area_t &clip);
   void plane_(uint32_t now);
   void candles_(uint32_t now);
   /// Показать слой погоды, если на нём хоть что-то есть
   void update_root_();
   void bstar_(uint32_t now);
+  void bstar_apply_(bool on);
+  void bstar_render_(int i);
+  void bstar_paint_(lv_layer_t *layer, const lv_area_t &oc, const lv_area_t &clip);
   void rocket_(uint32_t now);
+  void rocket_render_(int bin);
+  void rocket_apply_(bool on);
+  void rocket_stop_();
+  void rocket_paint_(lv_layer_t *layer, const lv_area_t &oc, const lv_area_t &clip);
+  void icicles_apply_();
+  void icicles_paint_(lv_layer_t *layer, const lv_area_t &oc, const lv_area_t &clip);
   void fireflies_(uint32_t now);
   void bats_();
   void eggs_(uint32_t now);
@@ -227,6 +244,7 @@ class WeatherFx : public Component {
   // Иней: узор собирается один раз в маску прозрачности во весь экран (A8,
   // 466×466, в PSRAM) и рисуется ледяным цветом одной картинкой. Искорки на
   // кончиках кристаллов поблёскивают. В сильный мороз под цифрами — сосульки
+  // (extras.cpp): одна картинка и при какой яркости экрана нарисована
   static const int NFSP = 12;
   bool frost_on_{false};
   uint8_t *frost_buf_{nullptr};
@@ -238,14 +256,18 @@ class WeatherFx : public Component {
   Spot fsp_spot_[NFSP]{};
   uint32_t fsp_ms_{0};
   int fsp_grp_{0};
+  FxSprite ice_spr_{};
+  bool ice_dim_{false};
   // Зарево у горизонта: сила 0..1, утро ли
   float horizon_{0};
   bool dawn_{false};
-  // Жара: струйки марева поднимаются над нижним краем и тают
+  // Жара: струйки марева поднимаются над нижним краем и тают; картинки
+  // струйки — по фазе волны (extras.cpp)
   static const int NHEAT = 6;
   bool heat_on_{false};
   float hx_[NHEAT]{}, hy_[NHEAT]{}, hage_[NHEAT]{}, hph_[NHEAT]{};
   Spot heat_spot_[NHEAT]{};
+  FxSheet heat_sheet_{};
   // Самолёт ночью: огни на крыльях и проблесковый маяк
   int plane_mode_{0};
   bool air_on_{false};
@@ -258,6 +280,12 @@ class WeatherFx : public Component {
   uint32_t cnd_ms_{0};
   float cnd_fh_[NCND]{}, cnd_dx_[NCND]{}, cnd_glow_[NCND]{};
   Spot cnd_spot_[NCND]{};
+  // Картинки свечей (candles.cpp): ореол, тела свечей, пламя в высотах и
+  // наклонах
+  FxSprite cnd_glow_spr_{}, cnd_body_[NCND]{};
+  FxSheet cnd_flame_{};
+  void candles_apply_(bool on);
+  void candles_paint_(lv_layer_t *layer, const lv_area_t &oc, const lv_area_t &clip);
   int shake_{0};
   // Луна: фаза 0..1 (0 — новолуние, 0,5 — полнолуние), нарисована ли
   float moon_phase_{-1};
@@ -307,18 +335,25 @@ class WeatherFx : public Component {
   int hol_{0};
   bool night_{false}, bats_on_{false}, ff_on_{false}, mx_on_{false};
   int fw_pal_{0};
-  // Вифлеемская звезда: фаза мерцания
+  // Вифлеемская звезда (extras.cpp): фаза мерцания; кадры «дыхания» лучей,
+  // какой сейчас и при какой яркости экрана нарисованы
   bool bstar_on_{false};
   float bstar_ph_{0};
   uint32_t bstar_ms_{0};
   Spot bstar_spot_{};
-  // Ракета: летит ли, когда вылетела, когда следующая; положение, курс,
-  // длина пламени и клубы дыма позади
+  FxSheet bstar_sheet_{};
+  int bstar_idx_{0};
+  bool bstar_dim_{false};
+  // Ракета (extras.cpp): летит ли, когда вылетела, когда следующая;
+  // положение, курс, длина пламени и клубы дыма позади. Картинки корпуса и
+  // трёх длин пламени — под курс rk_bin_·2°, клубы дыма по размеру
   bool rk_on_{false};
   uint32_t rk_t0_{0}, next_rk_{0}, rk_puff_ms_{0};
   float rk_x_{0}, rk_y_{0}, rk_a_{0}, rk_flame_{0};
   float puff_x_[NPUFF]{}, puff_y_[NPUFF]{}, puff_age_[NPUFF]{};
   Spot rk_spot_{};
+  int rk_bin_{0};
+  FxSprite rk_body_{}, rk_fl_[3]{}, rk_puff_[NPUFF_R]{};
   // Светлячки: место «дома», фазы движения и мерцания
   float ffx_[NFF]{}, ffy_[NFF]{}, ffph_[NFF][3]{};
   float ffk_[NFF]{};
@@ -381,12 +416,15 @@ class WeatherFx : public Component {
   void fw_mark_(Spot &spot, const FxSprite &s, int x, int y, bool on);
   void fireworks_paint_(lv_layer_t *layer, const lv_area_t &oc, const lv_area_t &clip);
 
-  // Воздушный змей: летит ли, откуда, когда вылетел; точки хвоста
+  // Воздушный змей (extras.cpp): летит ли, откуда, когда вылетел; где
+  // нарисован ромб и каким наклоном, где хвост и какой его кадр. Картинки —
+  // ромб в наклонах и хвост по фазе волны
   bool kite_on_{false};
   uint32_t kite_t0_{0}, next_kite_{0};
   float kite_x_{0}, kite_y_{0}, kite_dir_{1}, kite_speed_{0};
-  lv_point_precise_t kite_tail_[NTAIL]{};
+  int kite_cx_{0}, kite_cy_{0}, kite_frame_{-1}, kite_tx_{0}, kite_ty_{0}, kite_tframe_{-1};
   Spot kite_spot_{};
+  FxSheet kite_sheet_{}, kite_tail_{};
   // Звёзды (stars.cpp): где (левый верхний угол прежнего квадратика 3×3),
   // фаза мерцания, оттенок, яркая ли с лучиками, непрозрачность сейчас, где
   // нарисованы; картинки — обычная и яркая звезда, звёзды созвездия по размеру
@@ -402,12 +440,14 @@ class WeatherFx : public Component {
   void star_mark_(int i, bool on);
   void stars_paint_(lv_layer_t *layer, const lv_area_t &oc, const lv_area_t &clip);
   void con_star_paint_(lv_layer_t *layer, int x, int y, int sz);
-  // Облака (clouds.cpp): левый край; маски тела и света, цветные картинки —
-  // обычная и во вспышке молнии; под какие цвета собраны (0 — ни под какие);
-  // где нарисованы; подсвечены ли сейчас молнией
+  // Облака (clouds.cpp): левый край; маски тела и света и сколько их строк
+  // уже нарисовано; цветные картинки — обычная и во вспышке молнии; под
+  // какие цвета собрана каждая и какие нужны сейчас (0 — ни под какие); где
+  // нарисованы; подсвечены ли сейчас молнией
   float cx_[NC]{};
   FxSprite cloud_body_[NC]{}, cloud_light_[NC]{}, cloud_img_[NC]{}, cloud_flash_[NC]{};
-  int cloud_look_{0};
+  int cloud_rows_[NC]{};
+  int cloud_look_[NC]{}, cloud_want_{0};
   Spot cloud_spot_[NC]{};
   bool clouds_lit_{false};
 
@@ -542,13 +582,15 @@ class WeatherFx : public Component {
   lv_area_t con_area_{};
   lv_area_t cap_area_{};
 
-  // Метеор: откуда и куда летит, когда начался; что нарисовано сейчас
+  // Метеор (extras.cpp): откуда и куда летит, когда начался; что нарисовано
+  // сейчас; картинка следа под его курс
   bool met_on_{false};
   uint32_t met_t0_{0}, met_len_{0}, next_met_{0};
   float met_x0_{0}, met_y0_{0}, met_vx_{0}, met_vy_{0};
   float met_hx_{0}, met_hy_{0}, met_tx_{0}, met_ty_{0};
   lv_opa_t met_opa_{0};
   Spot met_spot_{};
+  FxSprite met_spr_{};
 
   // ---- Солнце (sun.cpp) ----
   // Венец: угол поворота и время для дрожания лучей, с; масштаб, под который
@@ -558,6 +600,8 @@ class WeatherFx : public Component {
   // Квадрат вокруг солнца и маска длинных лучей во весь экран
   Spot sun_spot_{}, sun_sky_spot_{};
   FxSprite sun_core_{}, sun_cor_{}, sun_sky_{};
+  int sun_sky_rows_{0};  // сколько строк маски длинных лучей уже нарисовано
+  void sun_sky_step_();
 
   // Радуга (rainbow.cpp): картинка, яркость 0..1 (идёт к rainbow_on_) и
   // когда она менялась

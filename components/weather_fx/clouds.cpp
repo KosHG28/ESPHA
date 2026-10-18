@@ -18,8 +18,8 @@
 namespace esphome {
 namespace weather_fx {
 
-// Картинка облака
-static const int CW = 200, CH = 74;
+// Картинка облака; сколько её строк рисуется за кадр в первый раз
+static const int CW = 200, CH = 74, CLOUD_ROWS = 19;
 // Облака плывут у верхнего края круга и не задевают строку с погодой (она
 // начинается на 113 px): иначе каждый сдвиг облака перерисовывал бы и её
 static const int CLOUD_Y[3] = {34, 39, 16};
@@ -68,11 +68,15 @@ static float cloud_sd(const Puff *pf, int n, float base, float x, float y) {
   return std::max(d, y - base);
 }
 
-// Облако v (0..2): тело и свет. Клубы рисуются от задних (верхних) к
-// передним (нижним): у каждого свой свет — верх светлый, низ в тени, — так
-// что передний клуб тенью ложится на задний и облако выглядит объёмным
-static void draw_cloud(FxSprite &body, FxSprite &light, int v) {
-  if (!fx_sprite_init(body, CW, CH, false) || !fx_sprite_init(light, CW, CH, false))
+// Облако v (0..2): тело и свет, строки [y0, y1) — облако рисуется
+// частями, по нескольку строк за кадр: целиком это десятки миллисекунд.
+// Клубы рисуются от задних (верхних) к передним (нижним): у каждого свой
+// свет — верх светлый, низ в тени, — так что передний клуб тенью ложится на
+// задний и облако выглядит объёмным
+static void draw_cloud(FxSprite &body, FxSprite &light, int v, int y0, int y1) {
+  if (y0 == 0 && (!fx_sprite_init(body, CW, CH, false) || !fx_sprite_init(light, CW, CH, false)))
+    return;
+  if (!body.buf || !light.buf)
     return;
   FxRand rnd(0xC10D5u + v * 7919u);
   const float base = CH - 6.0f;
@@ -92,13 +96,17 @@ static void draw_cloud(FxSprite &body, FxSprite &light, int v) {
   for (int i = 0; i < 4; i++)
     pf[n++] = {22.0f + i * (CW - 44) / 3.0f + rnd.range(-5.0f, 5.0f), base - 10.0f, 11.0f + rnd.range(0.0f, 3.0f)};
   const uint32_t seed = 977u + v * 131u;
-  for (int y = 0; y < CH; y++) {
+  for (int y = y0; y < y1; y++) {
     for (int x = 0; x < CW; x++) {
       const float px = x + 0.5f, py = y + 0.5f;
+      // Далеко от края — шум не нужен: он сдвигает край не больше чем на 2,4 px
+      const float sd0 = cloud_sd(pf, n, base, px, py);
+      if (sd0 > 3.1f)
+        continue;
       // Пушистый край: расстояние до края чуть «гуляет»
       const float fluff =
           (vnoise(px / 7.0f, py / 7.0f, seed) - 0.5f) * 3.5f + (vnoise(px / 3.0f, py / 3.0f, seed + 7) - 0.5f) * 1.2f;
-      const float sd = cloud_sd(pf, n, base, px, py) + fluff;
+      const float sd = sd0 + fluff;
       const float a = fx_clamp01(0.5f - sd / 1.4f);
       if (a <= 0)
         continue;
@@ -122,6 +130,8 @@ static void draw_cloud(FxSprite &body, FxSprite &light, int v) {
       light.buf[y * CW + x] = (uint8_t) (fx_clamp01(lit) * a * 255.0f + 0.5f);
     }
   }
+  if (y1 < CH)
+    return;
   body.ax = body.ay = light.ax = light.ay = 0;
   fx_sprite_done(body);
   fx_sprite_done(light);
@@ -148,31 +158,56 @@ static void paint_cloud(FxSprite &dst, const FxSprite &body, const FxSprite &lig
   fx_sprite_done(dst);
 }
 
+// Облако i: форма (один раз), цветная картинка под нынешние цвета и — в
+// грозу — подсвеченная молнией. Форма — заметная работа: она рисуется по
+// CLOUD_ROWS строк за кадр, вместо прочих новых картинок этого кадра, —
+// облака в первый раз появляются по одному за несколько кадров
+void WeatherFx::cloud_prepare_(int i) {
+  const int pal = this->dim_ ? 1 : 0, heavy = (this->ncl_ >= 3 || this->storm_) ? 1 : 0;
+  if (this->cloud_rows_[i] < CH) {
+    if (this->render_budget_ <= 0)
+      return;
+    this->render_budget_ = 0;
+    const int y0 = this->cloud_rows_[i], y1 = std::min(CH, y0 + CLOUD_ROWS);
+    draw_cloud(this->cloud_body_[i], this->cloud_light_[i], i, y0, y1);
+    if (!this->cloud_body_[i].buf || !this->cloud_light_[i].buf) {
+      fx_sprite_free(this->cloud_body_[i]);
+      fx_sprite_free(this->cloud_light_[i]);
+      this->cloud_rows_[i] = 0;
+      return;
+    }
+    this->cloud_rows_[i] = y1;
+    if (y1 < CH)
+      return;
+  }
+  // Цвета сменились или облако новое — собрать картинку заново; облака,
+  // подсвеченные молнией, нужны только в грозу
+  if (this->cloud_look_[i] != this->cloud_want_ || !this->cloud_img_[i].buf) {
+    paint_cloud(this->cloud_img_[i], this->cloud_body_[i], this->cloud_light_[i], CLOUD_C[pal][heavy][0],
+                CLOUD_C[pal][heavy][1]);
+    this->cloud_look_[i] = this->cloud_want_;
+    if (this->cloud_spot_[i].on)
+      this->invalidate_(this->cloud_spot_[i].a);
+  }
+  if (this->storm_ && !this->cloud_flash_[i].buf)
+    paint_cloud(this->cloud_flash_[i], this->cloud_body_[i], this->cloud_light_[i], CLOUD_FLASH_C[0],
+                CLOUD_FLASH_C[1]);
+}
+
 void WeatherFx::clouds_apply_(bool relayout) {
   const int pal = this->dim_ ? 1 : 0, heavy = (this->ncl_ >= 3 || this->storm_) ? 1 : 0;
-  const int look = 1 + pal * 2 + heavy;
+  this->cloud_want_ = 1 + pal * 2 + heavy;
   for (int i = 0; i < NC; i++) {
     const bool on = i < this->ncl_;
-    if (on && !this->cloud_body_[i].buf)
-      draw_cloud(this->cloud_body_[i], this->cloud_light_[i], i);
-    // Цвета сменились или облако новое — собрать картинку заново; облака,
-    // подсвеченные молнией, нужны только в грозу
-    if (on && (look != this->cloud_look_ || !this->cloud_img_[i].buf)) {
-      paint_cloud(this->cloud_img_[i], this->cloud_body_[i], this->cloud_light_[i], CLOUD_C[pal][heavy][0],
-                  CLOUD_C[pal][heavy][1]);
-      if (this->cloud_spot_[i].on)
-        this->invalidate_(this->cloud_spot_[i].a);
-    }
-    if (on && this->storm_ && !this->cloud_flash_[i].buf)
-      paint_cloud(this->cloud_flash_[i], this->cloud_body_[i], this->cloud_light_[i], CLOUD_FLASH_C[0],
-                  CLOUD_FLASH_C[1]);
+    // Новые облака дорисовываются в следующих кадрах (clouds_)
+    if (on)
+      this->cloud_prepare_(i);
     if (!this->storm_)
       fx_sprite_free(this->cloud_flash_[i]);
     if (relayout)
       this->cx_[i] = 40 + i * 150 - 90;
     this->mark_(this->cloud_spot_[i], on && this->cloud_img_[i].buf, (int) this->cx_[i], CLOUD_Y[i], CW, CH);
   }
-  this->cloud_look_ = look;
   if (!this->storm_) {
     this->end_strike_();
     fx_sprite_free(this->bolt_core_);
@@ -188,7 +223,11 @@ void WeatherFx::clouds_() {
     this->cx_[i] += this->k_ * (0.10f + i * 0.03f);
     if (this->cx_[i] > 466)
       this->cx_[i] = -CW;
-    this->mark_(this->cloud_spot_[i], this->cloud_spot_[i].on, (int) this->cx_[i], CLOUD_Y[i], CW, CH);
+    // Облако ещё не нарисовано — дорисовать по очереди с остальными
+    // картинками
+    if (!this->cloud_img_[i].buf)
+      this->cloud_prepare_(i);
+    this->mark_(this->cloud_spot_[i], this->cloud_img_[i].buf != nullptr, (int) this->cx_[i], CLOUD_Y[i], CW, CH);
   }
 }
 
@@ -353,8 +392,10 @@ void WeatherFx::lightning_(uint32_t now) {
     this->end_strike_();
     return;
   }
-  // Гром: экран вздрагивает на первых долях удара
-  const int off = t < 50 ? 3 : (t < 100 ? -3 : (t < 150 ? 2 : 0));
+  // Гром: экран вздрагивает одним толчком вместе со вспышкой неба — сдвиг
+  // экрана перерисовывает его целиком, так что толчок и вспышка обходятся
+  // в две полные перерисовки на удар (прежде дрожь в три стороны — четыре)
+  const int off = t < 60 ? 4 : 0;
   if (off != this->shake_) {
     this->shake_ = off;
     lv_obj_set_style_translate_x(lv_screen_active(), off, 0);
@@ -368,9 +409,9 @@ void WeatherFx::lightning_(uint32_t now) {
     opa = 235;
   else
     opa = (uint8_t) (235 * (340 - t) / 140);
-  // Вспышка неба — пока экран вздрагивает в первый раз: он и так
-  // перерисовывается целиком
-  this->bolt_light_(opa, opa >= 200, t < 50);
+  // Вспышка неба — пока экран вздрагивает: он и так перерисовывается
+  // целиком
+  this->bolt_light_(opa, opa >= 200, t < 60);
   this->bolt_on_ = opa >= 200;
 }
 

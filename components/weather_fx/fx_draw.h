@@ -107,6 +107,8 @@ static inline void fx_sheet_free(FxSheet &s) {
     lv_free(s.buf);
   if (s.ready)
     lv_free(s.ready);
+  if (s.crop)
+    lv_free(s.crop);
   s = FxSheet{};
 }
 
@@ -118,12 +120,14 @@ static inline bool fx_sheet_init(FxSheet &s, int n, int w, int h, bool rgb) {
   s.dsc = static_cast<lv_image_dsc_t *>(lv_malloc(n * sizeof(lv_image_dsc_t)));
   s.buf = static_cast<uint8_t *>(lv_malloc(n * px));
   s.ready = static_cast<uint8_t *>(lv_malloc((n + 7) / 8));
-  if (!s.dsc || !s.buf || !s.ready) {
+  s.crop = static_cast<int16_t *>(lv_malloc(2 * n * sizeof(int16_t)));
+  if (!s.dsc || !s.buf || !s.ready || !s.crop) {
     fx_sheet_free(s);
     return false;
   }
   memset(s.dsc, 0, n * sizeof(lv_image_dsc_t));
   memset(s.ready, 0, (n + 7) / 8);
+  memset(s.crop, 0, 2 * n * sizeof(int16_t));
   for (int i = 0; i < n; i++) {
     lv_image_dsc_t &d = s.dsc[i];
     d.header.magic = LV_IMAGE_HEADER_MAGIC;
@@ -147,9 +151,56 @@ static inline uint8_t *fx_sheet_take(FxSheet &s, int i) {
   if (!s.buf || i < 0 || i >= s.n || (s.ready[i >> 3] & (1 << (i & 7))))
     return nullptr;
   s.ready[i >> 3] |= (uint8_t) (1 << (i & 7));
-  uint8_t *p = const_cast<uint8_t *>(static_cast<const uint8_t *>(s.dsc[i].data));
-  memset(p, 0, s.dsc[i].data_size);
+  // Прежде картинка могла быть обрезана — снова во весь размер
+  lv_image_dsc_t &d = s.dsc[i];
+  d.header.w = s.w;
+  d.header.h = s.h;
+  d.header.stride = s.rgb ? s.w * 2 : s.w;
+  d.data_size = s.w * s.h * (s.rgb ? 3 : 1);
+  s.crop[2 * i] = s.crop[2 * i + 1] = 0;
+  uint8_t *p = const_cast<uint8_t *>(static_cast<const uint8_t *>(d.data));
+  memset(p, 0, d.data_size);
   return p;
+}
+
+// Только что нарисованную картинку i обрезать по рисунку: прозрачные поля
+// не попадают ни в участок перерисовки, ни в смешивание при каждом выводе.
+// Строки сдвигаются к началу на месте
+static inline void fx_sheet_crop(FxSheet &s, int i) {
+  lv_image_dsc_t &d = s.dsc[i];
+  uint8_t *p = const_cast<uint8_t *>(static_cast<const uint8_t *>(d.data));
+  const uint8_t *al = s.rgb ? p + s.w * s.h * 2 : p;
+  int x0 = s.w, y0 = s.h, x1 = -1, y1 = -1;
+  for (int y = 0; y < s.h; y++) {
+    for (int x = 0; x < s.w; x++) {
+      if (al[y * s.w + x]) {
+        x0 = std::min(x0, x);
+        x1 = std::max(x1, x);
+        y0 = std::min(y0, y);
+        y1 = y;
+      }
+    }
+  }
+  if (x1 < 0)
+    x0 = y0 = x1 = y1 = 0;  // пустая — одна прозрачная точка
+  const int cw = x1 - x0 + 1, ch = y1 - y0 + 1;
+  if (cw == s.w && ch == s.h)
+    return;
+  if (s.rgb) {
+    for (int y = 0; y < ch; y++)
+      memmove(p + y * cw * 2, p + ((y + y0) * s.w + x0) * 2, cw * 2);
+    for (int y = 0; y < ch; y++)
+      memmove(p + cw * ch * 2 + y * cw, al + (y + y0) * s.w + x0, cw);
+  } else {
+    for (int y = 0; y < ch; y++)
+      memmove(p + y * cw, p + (y + y0) * s.w + x0, cw);
+  }
+  d.header.w = cw;
+  d.header.h = ch;
+  d.header.stride = s.rgb ? cw * 2 : cw;
+  d.data_size = cw * ch * (s.rgb ? 3 : 1);
+  s.crop[2 * i] = (int16_t) x0;
+  s.crop[2 * i + 1] = (int16_t) y0;
 }
 
 static inline void fx_sheet_done(FxSheet &s, int i) { lv_image_cache_drop(&s.dsc[i]); }
@@ -169,9 +220,13 @@ static inline void fx_sheet_reset(FxSheet &s) {
   memset(s.ready, 0, (s.n + 7) / 8);
 }
 
-// Прямоугольник картинки набора, привязанной точкой (ax, ay) к (x, y)
-static inline lv_area_t fx_sheet_area(const FxSheet &s, int x, int y) {
-  return {x - s.ax, y - s.ay, x - s.ax + s.w - 1, y - s.ay + s.h - 1};
+// Прямоугольник картинки i набора (с учётом обрезки), привязанной точкой
+// (ax, ay) к (x, y)
+static inline lv_area_t fx_sheet_area(const FxSheet &s, int i, int x, int y) {
+  if (!s.buf || i < 0 || i >= s.n)
+    return {x - s.ax, y - s.ay, x - s.ax + s.w - 1, y - s.ay + s.h - 1};
+  const int x1 = x - s.ax + s.crop[2 * i], y1 = y - s.ay + s.crop[2 * i + 1];
+  return {x1, y1, x1 + (int32_t) s.dsc[i].header.w - 1, y1 + (int32_t) s.dsc[i].header.h - 1};
 }
 
 // Нарисовать картинку i набора в прямоугольнике a. Маска A8 — цветом c
