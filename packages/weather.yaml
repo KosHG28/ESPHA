@@ -147,20 +147,6 @@ sensor:
     internal: true
 
 select:
-  # Как рисовать дождь (components/weather_fx/rain.cpp). «Капли на стекле» —
-  # капли садятся на стекло, сливаются, крупные сползают с дорожкой бусинок;
-  # самый лёгкий для платы. «Падающий» — струи в три слоя глубины, по ветру
-  # наклонены, с брызгами о нижний край круга; изредка капля бьёт в стекло
-  - platform: template
-    id: rain_style_select
-    name: Стиль дождя
-    icon: mdi:weather-pouring
-    entity_category: config
-    options: ["Капли на стекле", "Падающий"]
-    initial_option: "Капли на стекле"
-    optimistic: true
-    restore_value: true
-
   # «Авто» — по погоде из Home Assistant. Остальные пункты — чтобы проверить
   # эффект, не дожидаясь погоды. Новые пункты добавляются только в конец:
   # сохраняется номер выбранного пункта
@@ -392,10 +378,9 @@ interval:
           static bool bound = false;
           if (!bound) {
             bound = true;
-            // Капли, снежинки, брызги и звёзды рисует холст компонента —
-            // объектами LVGL здесь только облака и молния
-            id(wfx)->bind(id(fx_root), id(fx_clouds), id(fx_bolt)->obj, id(fx_bolt_glow)->obj,
-                          id(font_flake_s)->get_lv_font(), id(font_flake_l)->get_lv_font(),
+            // Всё погодное — капли, снежинки, облака, молнию, звёзды —
+            // рисует сам слой погоды, отдельных объектов LVGL для этого нет
+            id(wfx)->bind(id(fx_root), id(font_flake_s)->get_lv_font(), id(font_flake_l)->get_lv_font(),
                           id(font_con)->get_lv_font());
             // За крупными цифрами времени частицы не рисуются: перерисовывать
             // кусок цифры 101 px ради пролетающей капли — самое дорогое.
@@ -429,6 +414,8 @@ interval:
           p.fireworks = (int32_t) (id(fireworks_until) - millis()) > 0;
           p.kite = id(weather_kite);
           p.dim = id(screen_dimmed);
+          // Сугроб после снега тает сам; при «Фоне погоды: Выкл» — сразу убрать
+          p.snow_cover = fx_sel != 1;
           // Для созвездия: координаты дома и время
           p.lat = std::isnan(id(ha_home_lat).state) ? ${home_latitude} : id(ha_home_lat).state;
           p.lon = std::isnan(id(ha_home_lon).state) ? ${home_longitude} : id(ha_home_lon).state;
@@ -443,8 +430,6 @@ interval:
           p.wind_speed = id(ha_wind_speed).state;
           p.wind_bearing = id(ha_wind_bearing).state;
           p.wind_gust = id(ha_wind_gust).state;
-          // «Стиль дождя»: 0 — капли на стекле, 1 — падающий
-          p.rain_style = (int) id(rain_style_select).active_index().value_or(0);
           // Праздник: звезда, ракета, яйца, летучие мыши, «матрица», цвета салюта.
           // При «Фоне погоды: Выкл» — ничего
           using namespace weather_fx;

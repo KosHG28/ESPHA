@@ -148,59 +148,39 @@ font:
     # в День программиста
     glyphs: [" 01АБВКЛМОПСТЦЮабвгдезийлмнопрстуфцчшыья"]
 
-  # Снежинки погодного фона: три формы из Noto Sans Symbols 2 и две из
-  # Material Design Icons, в двух размерах — дальние и ближние. Там же два
-  # листа для осеннего листопада, два сердечка для 14 февраля и праздничное:
-  # тюльпан и мимоза (8 Марта), шарик (1 июня), летучая мышь (Хэллоуин)
+  # Знаки, которые падают или всплывают на погодном фоне, в двух размерах —
+  # дальние и ближние: два сердечка для 14 февраля, тюльпан и мимоза
+  # (8 Марта), шарик (1 июня), летучая мышь (Хэллоуин). Снег и листья
+  # компонент weather_fx рисует сам
   - file:
-      type: gfonts
-      family: Noto Sans Symbols 2
-      weight: 400
+      url: "https://raw.githubusercontent.com/Templarian/MaterialDesign-Webfont/master/fonts/materialdesignicons-webfont.ttf"
+      type: web
     id: font_flake_s
     size: 14
     bpp: 4
     glyphsets: []
-    glyphs: ["❄", "❅", "❆"]
-    extras:
-      - file:
-          url: "https://raw.githubusercontent.com/Templarian/MaterialDesign-Webfont/master/fonts/materialdesignicons-webfont.ttf"
-          type: web
-        glyphs:
-          - "\U000F0717"   # mdi-snowflake
-          - "\U000F0F2A"   # mdi-snowflake-variant
-          - "\U000F032A"   # mdi-leaf — листопад
-          - "\U000F0C93"   # mdi-leaf-maple
-          - "\U000F02D1"   # mdi-heart — 14 февраля
-          - "\U000F08D0"   # mdi-cards-heart
-          - "\U000F09F1"   # mdi-flower-tulip — 8 Марта
-          - "\U000F024A"   # mdi-flower — мимоза
-          - "\U000F0A26"   # mdi-balloon — 1 июня
-          - "\U000F0B5F"   # mdi-bat — Хэллоуин
+    glyphs:
+      - "\U000F02D1"   # mdi-heart — 14 февраля
+      - "\U000F08D0"   # mdi-cards-heart
+      - "\U000F09F1"   # mdi-flower-tulip — 8 Марта
+      - "\U000F024A"   # mdi-flower — мимоза
+      - "\U000F0A26"   # mdi-balloon — 1 июня
+      - "\U000F0B5F"   # mdi-bat — Хэллоуин
 
   - file:
-      type: gfonts
-      family: Noto Sans Symbols 2
-      weight: 400
+      url: "https://raw.githubusercontent.com/Templarian/MaterialDesign-Webfont/master/fonts/materialdesignicons-webfont.ttf"
+      type: web
     id: font_flake_l
     size: 26
     bpp: 4
     glyphsets: []
-    glyphs: ["❄", "❅", "❆"]
-    extras:
-      - file:
-          url: "https://raw.githubusercontent.com/Templarian/MaterialDesign-Webfont/master/fonts/materialdesignicons-webfont.ttf"
-          type: web
-        glyphs:
-          - "\U000F0717"   # mdi-snowflake
-          - "\U000F0F2A"   # mdi-snowflake-variant
-          - "\U000F032A"   # mdi-leaf — листопад
-          - "\U000F0C93"   # mdi-leaf-maple
-          - "\U000F02D1"   # mdi-heart — 14 февраля
-          - "\U000F08D0"   # mdi-cards-heart
-          - "\U000F09F1"   # mdi-flower-tulip — 8 Марта
-          - "\U000F024A"   # mdi-flower — мимоза
-          - "\U000F0A26"   # mdi-balloon — 1 июня
-          - "\U000F0B5F"   # mdi-bat — Хэллоуин
+    glyphs:
+      - "\U000F02D1"   # mdi-heart — 14 февраля
+      - "\U000F08D0"   # mdi-cards-heart
+      - "\U000F09F1"   # mdi-flower-tulip — 8 Марта
+      - "\U000F024A"   # mdi-flower — мимоза
+      - "\U000F0A26"   # mdi-balloon — 1 июня
+      - "\U000F0B5F"   # mdi-bat — Хэллоуин
 
   # Значок «нет воды в поилке» — крупная перечёркнутая капля
   - file:
@@ -295,13 +275,6 @@ lvgl:
       height: 466
       align: TOP_LEFT
       bg_opa: TRANSP
-      border_width: 0
-      pad_all: 0
-
-    # Клуб облака; цвет задаёт packages/weather.yaml
-    - id: style_puff
-      bg_color: 0x1D232A
-      bg_opa: COVER
       border_width: 0
       pad_all: 0
 
@@ -733,82 +706,15 @@ lvgl:
             id: mark_page
             idx: 0
       widgets:
-        # Погодный фон — первым, чтобы лежать под часами. Всё двигает
-        # packages/weather.yaml, только пока открыта эта страница
+        # Погодный фон — первым, чтобы лежать под часами. Всё на нём —
+        # небо, облака, молнию, осадки — рисует сам компонент weather_fx
+        # (packages/weather.yaml), только пока открыта эта страница
         - obj:
             id: fx_root
             styles: style_fx_layer
             hidden: true
             clickable: false
             scrollable: false
-            widgets:
-              # Молния: свечение и яркая сердцевина по одним и тем же точкам.
-              # Точки задаёт packages/weather.yaml при каждом ударе
-              - line:
-                  id: fx_bolt_glow
-                  points: [[0, 0], [0, 1]]
-                  line_width: 11
-                  line_color: 0xFF9800
-                  line_rounded: true
-                  hidden: true
-                  clickable: false
-              - line:
-                  id: fx_bolt
-                  points: [[0, 0], [0, 1]]
-                  line_width: 4
-                  line_color: 0xFFEB3B
-                  line_rounded: true
-                  hidden: true
-                  clickable: false
-              # Облака: каждое — несколько перекрывающихся клубов
-              - obj:
-                  id: fx_clouds
-                  styles: style_fx_layer
-                  clickable: false
-                  scrollable: false
-                  widgets:
-                    - obj:
-                        width: 180
-                        height: 72
-                        bg_opa: TRANSP
-                        border_width: 0
-                        pad_all: 0
-                        hidden: true
-                        clickable: false
-                        scrollable: false
-                        widgets:
-                          - obj: { styles: style_puff, x: 0, y: 32, width: 72, height: 40, radius: 20, clickable: false }
-                          - obj: { styles: style_puff, x: 38, y: 6, width: 70, height: 66, radius: 33, clickable: false }
-                          - obj: { styles: style_puff, x: 88, y: 0, width: 58, height: 58, radius: 29, clickable: false }
-                          - obj: { styles: style_puff, x: 116, y: 26, width: 64, height: 46, radius: 23, clickable: false }
-                    - obj:
-                        width: 180
-                        height: 72
-                        bg_opa: TRANSP
-                        border_width: 0
-                        pad_all: 0
-                        hidden: true
-                        clickable: false
-                        scrollable: false
-                        widgets:
-                          - obj: { styles: style_puff, x: 0, y: 32, width: 72, height: 40, radius: 20, clickable: false }
-                          - obj: { styles: style_puff, x: 38, y: 6, width: 70, height: 66, radius: 33, clickable: false }
-                          - obj: { styles: style_puff, x: 88, y: 0, width: 58, height: 58, radius: 29, clickable: false }
-                          - obj: { styles: style_puff, x: 116, y: 26, width: 64, height: 46, radius: 23, clickable: false }
-                    - obj:
-                        width: 180
-                        height: 72
-                        bg_opa: TRANSP
-                        border_width: 0
-                        pad_all: 0
-                        hidden: true
-                        clickable: false
-                        scrollable: false
-                        widgets:
-                          - obj: { styles: style_puff, x: 0, y: 32, width: 72, height: 40, radius: 20, clickable: false }
-                          - obj: { styles: style_puff, x: 38, y: 6, width: 70, height: 66, radius: 33, clickable: false }
-                          - obj: { styles: style_puff, x: 88, y: 0, width: 58, height: 58, radius: 29, clickable: false }
-                          - obj: { styles: style_puff, x: 116, y: 26, width: 64, height: 46, radius: 23, clickable: false }
         - obj:
             id: root_clock
             styles: style_root
