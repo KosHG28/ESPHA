@@ -62,6 +62,18 @@ struct FxSprite {
   int ax, ay;
 };
 
+/// Набор картинок одного размера — кадры поворота, взмахов крыльев, — которые
+/// рисуются, когда впервые понадобились. Описания, пиксели и отметки «уже
+/// нарисована» — в куче LVGL (на плате это PSRAM)
+struct FxSheet {
+  lv_image_dsc_t *dsc;
+  uint8_t *buf;
+  uint8_t *ready;  // по биту на картинку
+  int n, w, h;
+  int ax, ay;  // точка привязки
+  bool rgb;
+};
+
 /// Погодный фон страницы часов.
 ///
 /// Капли, снежинки, облака, молния и звёзды — не отдельные объекты LVGL, а
@@ -78,9 +90,9 @@ struct FxSprite {
 /// clouds.cpp.
 class WeatherFx : public Component {
  public:
-  /// root — слой погоды на странице часов; шрифты — для снежинок и подписи
-  /// созвездия
-  void bind(lv_obj_t *root, const lv_font_t *flake_s, const lv_font_t *flake_l, const lv_font_t *caption);
+  /// root — слой погоды на странице часов; caption — шрифт подписи
+  /// созвездия, планет и «матрицы»
+  void bind(lv_obj_t *root, const lv_font_t *caption);
 
   /// Что показывать — packages/weather.yaml обновляет это раз в
   /// weather_fx_interval. Сам кадр считается в таймере LVGL (см. bind) —
@@ -201,7 +213,7 @@ class WeatherFx : public Component {
   Params params_{};
   lv_timer_t *timer_{nullptr};
   lv_obj_t *root_{nullptr}, *paint_{nullptr}, *back_{nullptr};
-  const lv_font_t *font_s_{nullptr}, *font_l_{nullptr}, *font_cap_{nullptr};
+  const lv_font_t *font_cap_{nullptr};
 
   // Текущая настройка. nd_ — сила дождя или града (0 — его нет)
   int applied_{-1};
@@ -250,6 +262,11 @@ class WeatherFx : public Component {
   // Луна: фаза 0..1 (0 — новолуние, 0,5 — полнолуние), нарисована ли
   float moon_phase_{-1};
   Spot moon_spot_{};
+  // Картинка луны (moon.cpp) и при какой яркости экрана нарисована
+  FxSprite moon_spr_{};
+  bool moon_dim_{false};
+  void moon_sprite_();
+  void moon_paint_(lv_layer_t *layer, int cx, int cy);
   int kite_mode_{0};
 
   // Движение считается по реально прошедшему времени: k_ — во сколько раз
@@ -260,16 +277,26 @@ class WeatherFx : public Component {
   // Мелкие падающие знаки (сердечки, цветы, шарики) двигаются раз в
   // ~66 мс: шаг всё равно меньше пары пикселей, а отправок в экран вдвое меньше
   float slow_ms_{0.0f};
+  // Сколько ещё картинок поворота (листья, сердечки, цветы, шарики) можно
+  // нарисовать в этом кадре: каждая — заметная работа, все разом дали бы
+  // заминку
+  int render_budget_{0};
   uint32_t star_ms_{0};
   int star_grp_{0};
 
-  // Падающие и всплывающие знаки шрифта (сердечки, цветы, шарики): где и
-  // что сейчас нарисовано
+  // Падающие и всплывающие картинки (сердечки, цветы, шарики — signs.cpp):
+  // где, фаза покачивания, что сейчас нарисовано и какой кадр
   float fx_[NF]{}, fy_[NF]{}, fph_[NF]{};
   Spot fs_[NF]{};
-  // Прямоугольник знака относительно точки рисования и его размер: [2] —
-  // сердечки, [3] — тюльпаны и мимоза, [4] — шарики
-  int fox_[NSET][NF]{}, foy_[NSET][NF]{}, fw_[NSET][NF]{}, fh_[NSET][NF]{};
+  uint8_t fidx_[NF]{};
+  // Картинки: дальние и ближние, для какого набора, при какой яркости
+  FxSheet sign_sheet_[2]{};
+  int sign_set_{-1};
+  bool sign_dim_{false};
+  void signs_apply_();
+  void sign_render_(int idx, int sz);
+  void sign_mark_(int i);
+  void signs_paint_(lv_layer_t *layer, const lv_area_t &oc, const lv_area_t &clip);
   // Что падает (или всплывает): 0 снег (snow.cpp), 1 листья (leaves.cpp),
   // 2 сердечки, 3 цветы, 4 шарики, 5 клёны (leaves.cpp)
   int fset_{0};
@@ -298,10 +325,15 @@ class WeatherFx : public Component {
   int ffpx_[NFF]{}, ffpy_[NFF]{};
   uint32_t ff_ms_{0};
   Spot ff_spot_[NFF]{};
-  // Летучие мыши: где, скорость, фаза взмахов; рамка знака для двух размеров
+  // Летучие мыши (signs.cpp): где, скорость, фаза полёта, кадр взмаха;
+  // кадры взмаха — дальней и ближней
   float bat_x_[NBAT]{}, bat_y_[NBAT]{}, bat_v_[NBAT]{}, bat_ph_[NBAT]{};
-  int bat_ox_[2]{}, bat_oy_[2]{}, bat_w_[2]{}, bat_h_[2]{};
+  uint8_t bat_frame_[NBAT]{};
   Spot bat_spot_[NBAT]{};
+  FxSheet bat_sheet_[2]{};
+  void bat_render_(int sz, int frame);
+  void bat_mark_(int i, int x, int y);
+  void bats_paint_(lv_layer_t *layer, const lv_area_t &oc, const lv_area_t &clip);
   // Пасхальные яйца катятся по низу: когда покатились, когда следующие
   bool egg_on_{false};
   uint32_t egg_t0_{0}, next_egg_{0};
@@ -318,18 +350,36 @@ class WeatherFx : public Component {
   float moon_red_{0};
   int64_t moon_ev_min_{-1};
 
-  // Салют: вспышки, у каждой — центр, начало, цвет и разлетающиеся искры
+  // Салют (fireworks.cpp). Залп: что сейчас (0 — ничего, 1 — летит ракета,
+  // 2 — разлетаются искры), начало этого этапа, сколько летит ракета; где
+  // взорвётся и откуда взлетела; цвет залпа и цвет искр сейчас; скорость,
+  // направление и яркость каждой искры; ракета, вспышка и дым — где и с
+  // какой яркостью
   struct Burst {
-    bool on;
-    uint32_t t0;
-    float x, y;
-    lv_color_t c;
+    uint8_t st;
+    uint32_t t0, len;
+    float x, y, rx;
+    lv_color_t c, cur;
     float vx[NP], vy[NP];
+    uint8_t dir[NP];
+    lv_opa_t opa[NP];
     Spot sp[NP];
+    Spot rk, fl, sm;
+    int rkx, rky;
+    lv_opa_t fl_opa, sm_opa;
+    uint8_t sm_k;
+    uint32_t sm_t0;
+    float smx, smy;
   };
   Burst bursts_[NB]{};
   uint32_t next_burst_{0};
-  lv_opa_t burst_opa_[NB]{};
+  // Картинки: искры по 16 направлениям, голова и хвост ракеты, вспышка,
+  // клубы дыма четырёх размеров
+  FxSprite fw_spark_[16]{}, fw_dot_{}, fw_trail_{}, fw_flash_{}, fw_smoke_[4]{};
+  void fw_sprites_();
+  void fireworks_stop_();
+  void fw_mark_(Spot &spot, const FxSprite &s, int x, int y, bool on);
+  void fireworks_paint_(lv_layer_t *layer, const lv_area_t &oc, const lv_area_t &clip);
 
   // Воздушный змей: летит ли, откуда, когда вылетел; точки хвоста
   bool kite_on_{false};
@@ -509,11 +559,29 @@ class WeatherFx : public Component {
   Spot sun_spot_{}, sun_sky_spot_{};
   FxSprite sun_core_{}, sun_cor_{}, sun_sky_{};
 
-  // Гирлянда: шаг перемигивания
+  // Радуга (rainbow.cpp): картинка, яркость 0..1 (идёт к rainbow_on_) и
+  // когда она менялась
+  FxSprite rb_spr_{};
+  float rb_level_{0};
+  uint32_t rb_ms_{0};
+  void rainbow_sprite_();
+  void rainbow_(uint32_t now);
+  void rainbow_paint_(lv_layer_t *layer, const lv_area_t &oc, const lv_area_t &clip);
+
+  // Гирлянда (garland.cpp): шаг бегущей волны и когда он начался; середины
+  // лампочек, где они нарисованы и как горят (0 погасла, 1 полутон,
+  // 2 горит); маски лампочек — свечение, патрон, колба, блик — и отрезков
+  // провода с их левым верхним углом
   int gar_step_{0};
   uint32_t gar_ms_{0};
   int gx_[NG]{}, gy_[NG]{};
   Spot gs_[NG]{};
+  uint8_t glev_[NG]{};
+  FxSprite gb_glow_[NG]{}, gb_cap_[NG]{}, gb_body_[NG]{}, gb_spec_[NG]{}, gw_[NG]{};
+  int gw_x_[NG]{}, gw_y_[NG]{};
+  void garland_sprites_();
+  void garland_apply_();
+  void garland_paint_(lv_layer_t *layer, const lv_area_t &oc, const lv_area_t &clip);
 };
 
 }  // namespace weather_fx

@@ -331,8 +331,26 @@ void WeatherFx::leaves_frame_(float wind) {
     const int fl = af > 0.8f ? 0 : (af > 0.45f ? 1 : 2);
     this->lfback_[i] = cf < 0;
     const int shape = this->leaf_maple_only_ ? 1 : (i / 2) % 2;
-    this->lfidx_[i] = (uint16_t) leaf_idx(shape, big ? 1 : 0, fl, rot);
-    this->leaf_frame_(this->lfidx_[i]);
+    int idx = leaf_idx(shape, big ? 1 : 0, fl, rot);
+    if (!(this->leaf_ready_[idx >> 3] & (1 << (idx & 7)))) {
+      // Новых картинок — не больше пары за кадр; пока нужный поворот не
+      // нарисован — ближайший готовый
+      int near = -1;
+      if (this->render_budget_ <= 0)
+        for (int d = 1; d < NLROT / 2 && near < 0; d++)
+          for (int sgn = -1; sgn <= 1 && near < 0; sgn += 2) {
+            const int j = leaf_idx(shape, big ? 1 : 0, fl, (rot + sgn * d + NLROT) % NLROT);
+            if (this->leaf_ready_[j >> 3] & (1 << (j & 7)))
+              near = j;
+          }
+      if (near >= 0) {
+        idx = near;
+      } else {
+        this->render_budget_--;
+        this->leaf_frame_(idx);
+      }
+    }
+    this->lfidx_[i] = (uint16_t) idx;
     this->mark_(this->lfs_[i], this->visible_(x1, y1, n, n) && !this->excluded_(x1, y1, n, n), x1, y1, n, n);
   }
 }

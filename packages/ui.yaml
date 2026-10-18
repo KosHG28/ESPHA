@@ -148,40 +148,6 @@ font:
     # в День программиста
     glyphs: [" 01АБВКЛМОПСТЦЮабвгдезийлмнопрстуфцчшыья"]
 
-  # Знаки, которые падают или всплывают на погодном фоне, в двух размерах —
-  # дальние и ближние: два сердечка для 14 февраля, тюльпан и мимоза
-  # (8 Марта), шарик (1 июня), летучая мышь (Хэллоуин). Снег и листья
-  # компонент weather_fx рисует сам
-  - file:
-      url: "https://raw.githubusercontent.com/Templarian/MaterialDesign-Webfont/master/fonts/materialdesignicons-webfont.ttf"
-      type: web
-    id: font_flake_s
-    size: 14
-    bpp: 4
-    glyphsets: []
-    glyphs:
-      - "\U000F02D1"   # mdi-heart — 14 февраля
-      - "\U000F08D0"   # mdi-cards-heart
-      - "\U000F09F1"   # mdi-flower-tulip — 8 Марта
-      - "\U000F024A"   # mdi-flower — мимоза
-      - "\U000F0A26"   # mdi-balloon — 1 июня
-      - "\U000F0B5F"   # mdi-bat — Хэллоуин
-
-  - file:
-      url: "https://raw.githubusercontent.com/Templarian/MaterialDesign-Webfont/master/fonts/materialdesignicons-webfont.ttf"
-      type: web
-    id: font_flake_l
-    size: 26
-    bpp: 4
-    glyphsets: []
-    glyphs:
-      - "\U000F02D1"   # mdi-heart — 14 февраля
-      - "\U000F08D0"   # mdi-cards-heart
-      - "\U000F09F1"   # mdi-flower-tulip — 8 Марта
-      - "\U000F024A"   # mdi-flower — мимоза
-      - "\U000F0A26"   # mdi-balloon — 1 июня
-      - "\U000F0B5F"   # mdi-bat — Хэллоуин
-
   # Значок «нет воды в поилке» — крупная перечёркнутая капля
   - file:
       url: "https://raw.githubusercontent.com/Templarian/MaterialDesign-Webfont/master/fonts/materialdesignicons-webfont.ttf"
