@@ -146,6 +146,18 @@ sensor:
     attribute: elevation
     internal: true
 
+switch:
+  # Зарево на восходе и закате: низ экрана мягко подсвечивается тёплым.
+  # Выключить — без него. «Фон погоды: Закат» показывает его всё равно —
+  # чтобы посмотреть
+  - platform: template
+    id: sw_glow
+    name: Зарево
+    icon: mdi:weather-sunset
+    entity_category: config
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+
 select:
   # «Авто» — по погоде из Home Assistant. Остальные пункты — чтобы проверить
   # эффект, не дожидаясь погоды. Новые пункты добавляются только в конец:
@@ -454,14 +466,15 @@ interval:
           p.fw_palette = id(fw_palette);
           p.moon_force = preview && (hol == HOL_FULL_MOON || hol == HOL_SUPERMOON || hol == HOL_ECLIPSE) ? hol : 0;
           // Зарево у горизонта: Солнце в пределах ~6° от горизонта, сильнее
-          // всего — у самого горизонта. Утром розовое, вечером оранжевое. В
-          // дождь, снег и грозу зарева не видно
+          // всего — у самого горизонта. Утром золотистое, вечером оранжевое.
+          // В дождь, снег и грозу зарева не видно; выключатель «Зарево»
+          // убирает его совсем
           const float elev = id(ha_sun_elev).state;
           const int wm = id(weather_mode);
           const bool sky_open = !id(weather_storm) && (wm == 0 || wm >= 5);
           if (fx_sel == 14) {
             p.glow = 1.0f;
-          } else if (fx_sel != 1 && sky_open && !std::isnan(elev)) {
+          } else if (fx_sel != 1 && id(sw_glow).state && sky_open && !std::isnan(elev)) {
             p.glow = std::max(0.0f, 1.0f - std::fabs(elev - 0.5f) / 6.0f);
           }
           {

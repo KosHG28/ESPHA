@@ -309,25 +309,8 @@ void WeatherFx::paint_back(lv_layer_t *layer) {
   // Вспышка молнии на миг освещает всё небо (clouds.cpp)
   this->sky_flash_paint_(layer, clip);
 
-  // Зарево у горизонта на восходе и закате: тёплый градиент снизу вверх
-  if (this->horizon_ > 0.01f) {
-    lv_area_t ga = {oc.x1, oc.y1 + 250, oc.x1 + 465, oc.y1 + 465};
-    if (hit(ga, clip)) {
-      lv_draw_fill_dsc_t g;
-      lv_draw_fill_dsc_init(&g);
-      g.opa = (lv_opa_t) (this->horizon_ * (dim ? 150.0f : 110.0f));
-      g.grad.dir = LV_GRAD_DIR_VER;
-      g.grad.stops_count = 2;
-      const lv_color_t c = lv_color_hex(this->dawn_ ? 0xFF8FA3 : 0xFF5E3A);
-      g.grad.stops[0].color = c;
-      g.grad.stops[0].opa = LV_OPA_TRANSP;
-      g.grad.stops[0].frac = 0;
-      g.grad.stops[1].color = c;
-      g.grad.stops[1].opa = LV_OPA_COVER;
-      g.grad.stops[1].frac = 255;
-      lv_draw_fill(layer, &g, &ga);
-    }
-  }
+  // Зарево у горизонта на восходе и закате: тёплый свет снизу (extras.cpp)
+  this->glow_paint_(layer, oc, clip);
 
   // Солнце (sun.cpp)
   this->sun_paint_(layer, oc, clip);
@@ -808,6 +791,7 @@ void WeatherFx::apply_(const Params &p, bool relayout) {
   if (!this->stars_on_)
     fx_sprite_free(this->met_spr_);
   this->sun_apply_();
+  this->glow_apply_();
   this->garland_apply_();
 
   // Облака: цвет по погоде и яркости, места при новой раскладке (clouds.cpp)
@@ -1659,6 +1643,7 @@ void WeatherFx::frame(const Params &p) {
     const bool vis = (glow > 0.01f) != (this->horizon_ > 0.01f);
     this->horizon_ = glow;
     this->dawn_ = p.dawn;
+    this->glow_apply_();
     lv_area_t ga = {0, 250, 465, 465};
     this->invalidate_(ga);
     if (vis)

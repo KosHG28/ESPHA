@@ -1,10 +1,11 @@
 // Праздничное и редкое: Вифлеемская звезда, метеор, воздушный змей, ракета
-// с дымом, марево в жару и сосульки в мороз.
+// с дымом, марево в жару, сосульки в мороз и зарево на восходе и закате.
 //
 // Всё — готовыми картинками, как остальной погодный фон. Прежде это были
-// треугольники, отрезки и круги LVGL, которые заново считались на каждом
-// участке перерисовки: марево из 36 сглаженных отрезков обходилось дороже
-// ливня, змей и ракета — вдвое дороже звёздного неба.
+// треугольники, отрезки, круги и градиенты LVGL, которые заново считались на
+// каждом участке перерисовки: марево из 36 сглаженных отрезков обходилось
+// дороже ливня, змей и ракета — вдвое дороже звёздного неба, а градиент
+// зарева в 16-битном цвете ложился заметными ступенями.
 #include "fx_draw.h"
 
 namespace esphome {
@@ -990,6 +991,81 @@ void WeatherFx::icicles_paint_(lv_layer_t *layer, const lv_area_t &oc, const lv_
   const lv_area_t a = fx_sprite_area(this->ice_spr_, ICE_X0 + oc.x1, ICE_Y + oc.y1);
   if (fx_hit(a, clip))
     fx_draw(layer, this->ice_spr_, a, LV_OPA_COVER);
+}
+
+// ---- Зарево ----
+
+// Полоса зарева — от этой строки до низа круга. Она одинакова по всей
+// ширине, поэтому картинка — узкая полоска, которую LVGL повторяет вдоль
+// строки (ширина кратна 4 — так узор сглаживания не рвётся на стыках)
+static const int GL_Y0 = 250, GL_H = 466 - GL_Y0, GL_W = 64;
+// Цвета: у самого горизонта и выше. Утром — золотистое и персиковое, вечером
+// — оранжевое и алое. Без синевы: прежнее розовое утро на этом экране
+// выглядело лиловым
+static const uint32_t GLOW_LOW[2] = {0xFF7A33, 0xFFC27A}, GLOW_HIGH[2] = {0xFF4E45, 0xFF946B};
+
+// Перерисовать полоску под нынешние силу зарева, время суток и яркость экрана.
+// Сила зашита в прозрачность самой картинки, а не задаётся при выводе: тогда
+// упорядоченный шум сглаживания попадает ровно на ступени смешивания LVGL
+// (32 уровня прозрачности), и переход выходит плавным, без полос
+void WeatherFx::glow_apply_() {
+  if (this->horizon_ <= 0.01f) {
+    fx_sprite_free(this->glow_spr_);
+    return;
+  }
+  if (this->glow_spr_.buf && this->glow_k_ == this->horizon_ && this->glow_dawn_ == this->dawn_ &&
+      this->glow_dim_ == this->dim_)
+    return;
+  FxSprite &s = this->glow_spr_;
+  if (!fx_sprite_init(s, GL_W, GL_H, true))
+    return;
+  s.ax = s.ay = 0;
+  this->glow_k_ = this->horizon_;
+  this->glow_dawn_ = this->dawn_;
+  this->glow_dim_ = this->dim_;
+  const int tod = this->dawn_ ? 1 : 0;
+  const float amax = this->horizon_ * (this->dim_ ? 150.0f : 110.0f);
+  uint16_t *rgb = reinterpret_cast<uint16_t *>(s.buf);
+  uint8_t *alpha = s.buf + GL_W * GL_H * 2;
+  const uint32_t lo = GLOW_LOW[tod], hi = GLOW_HIGH[tod];
+  for (int y = 0; y < GL_H; y++) {
+    // 0 — верх полосы, 1 — нижний край: свет плавно набирается к горизонту,
+    // а цвет переходит от верхнего к цвету у горизонта
+    const float t = (y + 0.5f) / GL_H;
+    const float a = amax * powf(t, 1.4f), m = powf(t, 1.2f);
+    const float r = ((hi >> 16) & 0xFF) + ((float) ((lo >> 16) & 0xFF) - ((hi >> 16) & 0xFF)) * m;
+    const float g = ((hi >> 8) & 0xFF) + ((float) ((lo >> 8) & 0xFF) - ((hi >> 8) & 0xFF)) * m;
+    const float b = (hi & 0xFF) + ((float) (lo & 0xFF) - (hi & 0xFF)) * m;
+    for (int x = 0; x < GL_W; x++) {
+      // И цвет, и прозрачность — с упорядоченным шумом на шаг своей
+      // ступени: 5 и 6 бит цвета, 32 уровня смешивания
+      const float d = fx_dither(x, y);
+      const int r5 = std::min(31, std::max(0, (int) ((r + 4.0f + d * 8.0f) / 8.0f)));
+      const int g6 = std::min(63, std::max(0, (int) ((g + 2.0f + d * 4.0f) / 4.0f)));
+      const int b5 = std::min(31, std::max(0, (int) ((b + 4.0f + d * 8.0f) / 8.0f)));
+      rgb[y * GL_W + x] = (uint16_t) ((r5 << 11) | (g6 << 5) | b5);
+      alpha[y * GL_W + x] = (uint8_t) std::min(255.0f, std::max(0.0f, a + d * 8.0f + 0.5f));
+    }
+  }
+  fx_sprite_done(s);
+}
+
+void WeatherFx::glow_paint_(lv_layer_t *layer, const lv_area_t &oc, const lv_area_t &clip) {
+  if (this->horizon_ <= 0.01f || !this->glow_spr_.buf)
+    return;
+  const lv_area_t band = {oc.x1, oc.y1 + GL_Y0, oc.x1 + 465, oc.y1 + GL_Y0 + GL_H - 1};
+  lv_area_t c;
+  if (!lv_area_intersect(&c, &band, &clip))
+    return;
+  // Полоска повторяется по ширине участка — с ближайшего к нему своего начала
+  const int32_t x0 = oc.x1 + (c.x1 - oc.x1) / GL_W * GL_W;
+  lv_draw_image_dsc_t im;
+  lv_draw_image_dsc_init(&im);
+  im.src = &this->glow_spr_.dsc;
+  im.tile = 1;
+  im.image_area = {x0, band.y1, x0 + GL_W - 1, band.y2};
+  const lv_area_t a = {x0, band.y1, c.x2, band.y2};
+  lv_draw_image(layer, &im, &a);
 }
 
 }  // namespace weather_fx

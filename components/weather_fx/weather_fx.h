@@ -258,9 +258,16 @@ class WeatherFx : public Component {
   int fsp_grp_{0};
   FxSprite ice_spr_{};
   bool ice_dim_{false};
-  // Зарево у горизонта: сила 0..1, утро ли
+  // Зарево у горизонта (extras.cpp): сила 0..1, утро ли; картинка —
+  // полоса, повторяемая по ширине, и под какие силу, утро и яркость экрана
+  // она нарисована
   float horizon_{0};
   bool dawn_{false};
+  FxSprite glow_spr_{};
+  float glow_k_{0};
+  bool glow_dawn_{false}, glow_dim_{false};
+  void glow_apply_();
+  void glow_paint_(lv_layer_t *layer, const lv_area_t &oc, const lv_area_t &clip);
   // Жара: струйки марева поднимаются над нижним краем и тают; картинки
   // струйки — по фазе волны (extras.cpp)
   static const int NHEAT = 6;
