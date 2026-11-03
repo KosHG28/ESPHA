@@ -266,6 +266,44 @@ static inline float fx_dither(int x, int y) {
   return (B[y & 3][x & 3] + 0.5f) / 16.0f - 0.5f;
 }
 
+// Пи — для рисунков в частях погодного фона
+static const float FX_PI = 3.14159265f;
+
+// Точка картинки RGB565A8, собираемая слоями снизу вверх: цвет, умноженный
+// на непрозрачность, и сама непрозрачность
+struct FxMix {
+  float r{0}, g{0}, b{0}, a{0};
+  // Слой цвета c с непрозрачностью k поверх
+  void over(uint32_t c, float k) {
+    if (k <= 0)
+      return;
+    k = std::min(k, 1.0f);
+    this->r = ((c >> 16) & 0xFF) * k + this->r * (1 - k);
+    this->g = ((c >> 8) & 0xFF) * k + this->g * (1 - k);
+    this->b = (c & 0xFF) * k + this->b * (1 - k);
+    this->a = k + this->a * (1 - k);
+  }
+  // Сложить с долей w — для сглаживания по нескольким точкам пикселя
+  void add(const FxMix &o, float w) {
+    this->r += o.r * w;
+    this->g += o.g * w;
+    this->b += o.b * w;
+    this->a += o.a * w;
+  }
+};
+
+// Записать точку i картинки RGB565A8 из n точек
+static inline void fx_put(uint8_t *p, int n, int i, const FxMix &m, int x, int y) {
+  if (m.a <= 0.004f)
+    return;
+  reinterpret_cast<uint16_t *>(p)[i] =
+      lv_color_to_u16(lv_color_make((uint8_t) std::min(255.0f, m.r / m.a), (uint8_t) std::min(255.0f, m.g / m.a),
+                                    (uint8_t) std::min(255.0f, m.b / m.a)));
+  p[n * 2 + i] = (uint8_t) std::min(255.0f, std::max(0.0f, m.a * 255.0f + fx_dither(x, y) * 3.0f));
+}
+
+static inline float fx_sq(float v) { return v * v; }
+
 // Простой генератор случайных чисел с зерном — для рисунков, которые должны
 // выходить одинаковыми при каждом запуске (облака, кристаллы снежинок)
 struct FxRand {

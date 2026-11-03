@@ -1,165 +1,15 @@
-// Праздничное и редкое: Вифлеемская звезда, метеор, воздушный змей, ракета
-// с дымом, марево в жару, сосульки в мороз и зарево на восходе и закате.
+// Редкое на небе и по краю: метеор, воздушный змей, марево в жару, зарево
+// на восходе и закате, светлячки летними ночами, самолёт ночью.
 //
 // Всё — готовыми картинками, как остальной погодный фон. Прежде это были
 // треугольники, отрезки, круги и градиенты LVGL, которые заново считались на
 // каждом участке перерисовки: марево из 36 сглаженных отрезков обходилось
-// дороже ливня, змей и ракета — вдвое дороже звёздного неба, а градиент
-// зарева в 16-битном цвете ложился заметными ступенями.
+// дороже ливня, змей — вдвое дороже звёздного неба, а градиент зарева в
+// 16-битном цвете ложился заметными ступенями.
 #include "fx_draw.h"
 
 namespace esphome {
 namespace weather_fx {
-
-static const float PI_X = 3.14159265f;
-
-namespace {
-
-// Точка картинки RGB565A8, собираемая слоями снизу вверх: цвет, умноженный
-// на непрозрачность, и сама непрозрачность
-struct Layered {
-  float r{0}, g{0}, b{0}, a{0};
-  // Слой цвета c с непрозрачностью k поверх
-  void over(uint32_t c, float k) {
-    if (k <= 0)
-      return;
-    k = std::min(k, 1.0f);
-    this->r = ((c >> 16) & 0xFF) * k + this->r * (1 - k);
-    this->g = ((c >> 8) & 0xFF) * k + this->g * (1 - k);
-    this->b = (c & 0xFF) * k + this->b * (1 - k);
-    this->a = k + this->a * (1 - k);
-  }
-  // Сложить с долей w — для сглаживания по нескольким точкам пикселя
-  void add(const Layered &o, float w) {
-    this->r += o.r * w;
-    this->g += o.g * w;
-    this->b += o.b * w;
-    this->a += o.a * w;
-  }
-};
-
-}  // namespace
-
-// Записать точку i картинки RGB565A8 из n точек
-static void put_px(uint8_t *p, int n, int i, const Layered &m, int x, int y) {
-  if (m.a <= 0.004f)
-    return;
-  reinterpret_cast<uint16_t *>(p)[i] =
-      lv_color_to_u16(lv_color_make((uint8_t) std::min(255.0f, m.r / m.a), (uint8_t) std::min(255.0f, m.g / m.a),
-                                    (uint8_t) std::min(255.0f, m.b / m.a)));
-  p[n * 2 + i] = (uint8_t) std::min(255.0f, std::max(0.0f, m.a * 255.0f + fx_dither(x, y) * 3.0f));
-}
-
-static inline float sq(float v) { return v * v; }
-
-// ---- Вифлеемская звезда ----
-
-// Над часами слева от середины, мимо солнца. Картинка: привязка —
-// сердцевина, длинный луч — вниз
-static const int BSTAR_X = 190, BSTAR_Y = 66;
-static const int BS_W = 55, BS_H = 66, BS_AX = 27, BS_AY = 27;
-static const int BS_N = 8;  // кадров «дыхания» лучей
-
-// Главные лучи (вверх, в стороны и длинный вниз) — длиной tw от полной,
-// косые — наоборот, длиннее. Лучи сужаются и тускнеют к концу, вдоль
-// главных — тонкое сияние; тёплый ореол и белая сердцевина. На
-// приглушённом экране — ярче и белее
-static void draw_bstar(uint8_t *p, float tw, bool dim) {
-  float ux[8], uy[8], len[8], wid[8];
-  for (int k = 0; k < 8; k++) {
-    const float a = k * (PI_X / 4) - PI_X / 2;
-    ux[k] = cosf(a);
-    uy[k] = sinf(a);
-    len[k] = (k == 4 ? 34.0f : (k % 2 ? 13.0f : 24.0f)) * (k % 2 ? 2.0f - tw : tw);
-    wid[k] = k % 2 ? 1.3f : 2.2f;
-  }
-  const uint32_t ray_c = dim ? 0xFFFFFF : 0xFFF3C4;
-  for (int y = 0; y < BS_H; y++) {
-    for (int x = 0; x < BS_W; x++) {
-      const float px = (float) (x - BS_AX), py = (float) (y - BS_AY);
-      const float d = sqrtf(px * px + py * py);
-      Layered m;
-      const float g = fx_clamp01(1.0f - d / 27.0f);
-      m.over(0xFFE9A8, (dim ? 0.36f : 0.28f) * g * sqrtf(g));
-      const float in = fx_clamp01(1.0f - d / 13.0f);
-      m.over(0xFFF3C4, (dim ? 0.5f : 0.4f) * in * sqrtf(in));
-      float ray = 0, halo = 0;
-      for (int k = 0; k < 8; k++) {
-        const float s = px * ux[k] + py * uy[k];
-        if (s < -1.0f || s > len[k] + 1.0f)
-          continue;
-        const float q = fabsf(py * ux[k] - px * uy[k]);
-        const float f = fx_clamp01(s / len[k]);
-        if (k % 2 == 0 && q < 6.0f)
-          halo = std::max(halo, 0.3f * expf(-q * q / 6.0f) * (1.0f - f));
-        const float w = wid[k] * (1.0f - f) + 0.2f;
-        ray = std::max(ray, fx_clamp01(w + 0.5f - q) * (1.0f - 0.5f * f * f) * fx_clamp01(len[k] + 0.5f - s));
-      }
-      m.over(ray_c, halo);
-      m.over(ray_c, 0.95f * ray);
-      m.over(0xFFFFFF, fx_clamp01(4.0f - d));
-      put_px(p, BS_W * BS_H, y * BS_W + x, m, x, y);
-    }
-  }
-}
-
-// Кадр по фазе мерцания: длина главных лучей 0,7…1
-static int bstar_frame(float ph) {
-  const float tw = 0.85f + 0.15f * sinf(ph);
-  return std::min(BS_N - 1, std::max(0, (int) lroundf((tw - 0.7f) / 0.3f * (BS_N - 1))));
-}
-
-void WeatherFx::bstar_apply_(bool on) {
-  this->bstar_on_ = on;
-  this->mark_(this->bstar_spot_, on, BSTAR_X - BS_AX, BSTAR_Y - BS_AY, BS_W, BS_H);
-  if (!on) {
-    fx_sheet_free(this->bstar_sheet_);
-    return;
-  }
-  if (!this->bstar_sheet_.buf) {
-    if (!fx_sheet_init(this->bstar_sheet_, BS_N, BS_W, BS_H, true))
-      return;
-    this->bstar_sheet_.ax = BS_AX;
-    this->bstar_sheet_.ay = BS_AY;
-  } else if (this->bstar_dim_ != this->dim_) {
-    fx_sheet_reset(this->bstar_sheet_);
-  }
-  this->bstar_dim_ = this->dim_;
-  this->bstar_idx_ = bstar_frame(this->bstar_ph_);
-  this->bstar_render_(this->bstar_idx_);
-}
-
-// Нарисовать кадр звезды i, если его ещё нет
-void WeatherFx::bstar_render_(int i) {
-  if (uint8_t *p = fx_sheet_take(this->bstar_sheet_, i)) {
-    draw_bstar(p, 0.7f + 0.3f * i / (BS_N - 1), this->dim_);
-    fx_sheet_done(this->bstar_sheet_, i);
-  }
-}
-
-void WeatherFx::bstar_(uint32_t now) {
-  // Лучи чуть вытягиваются и укорачиваются, 8 раз в секунду; перерисовать —
-  // только если сменился кадр
-  if (!this->bstar_on_ || now - this->bstar_ms_ < 120)
-    return;
-  this->bstar_ms_ = now;
-  this->bstar_ph_ = fmodf(this->bstar_ph_ + 0.35f, 2 * PI_X);
-  const int i = bstar_frame(this->bstar_ph_);
-  if (i == this->bstar_idx_)
-    return;
-  this->bstar_render_(i);
-  this->bstar_idx_ = i;
-  if (this->bstar_spot_.on)
-    this->invalidate_(this->bstar_spot_.a);
-}
-
-void WeatherFx::bstar_paint_(lv_layer_t *layer, const lv_area_t &oc, const lv_area_t &clip) {
-  if (!this->bstar_spot_.on || !fx_sheet_ready(this->bstar_sheet_, this->bstar_idx_))
-    return;
-  const lv_area_t a = fx_sheet_area(this->bstar_sheet_, this->bstar_idx_, BSTAR_X + oc.x1, BSTAR_Y + oc.y1);
-  if (fx_hit(a, clip))
-    fx_sheet_draw(layer, this->bstar_sheet_, this->bstar_idx_, a, LV_OPA_COVER);
-}
 
 // ---- Метеор ----
 
@@ -193,20 +43,20 @@ void WeatherFx::meteor_sprite_() {
       // sb — насколько позади головы, q — как далеко от оси хвоста
       const float sb = -(px * ux + py * uy);
       const float q = sb > 0 ? fabsf(px * uy - py * ux) : d;
-      Layered m;
+      FxMix m;
       if (sb < MET_TAIL) {
         const float f = fx_clamp01(sb / MET_TAIL), fade = (1.0f - f) * sqrtf(1.0f - f);
         if (q < 6.0f)
-          m.over(0x9DB8FF, 0.4f * expf(-q * q / 5.0f) * sq(1.0f - f));
+          m.over(0x9DB8FF, 0.4f * expf(-q * q / 5.0f) * fx_sq(1.0f - f));
         m.over(tint, fx_clamp01(1.3f * (1.0f - f) + 0.8f - q) * fade);
       }
-      m.over(0xE8F0FF, 0.7f * sq(fx_clamp01(1.0f - d / 6.0f)));
+      m.over(0xE8F0FF, 0.7f * fx_sq(fx_clamp01(1.0f - d / 6.0f)));
       m.over(0xFFFFFF, fx_clamp01(2.5f - d));
       m.r *= br;
       m.g *= br;
       m.b *= br;
       m.a *= br;
-      put_px(s.buf, w * h, y * w + x, m, x, y);
+      fx_put(s.buf, w * h, y * w + x, m, x, y);
     }
   }
   fx_sprite_done(s);
@@ -226,7 +76,7 @@ void WeatherFx::meteor_(uint32_t now) {
       return;
     // Пролетает по верхней части неба наискосок вниз, влево или вправо
     const bool right = rnd_(0, 2);
-    const float a = rnd_(12, 33) * (PI_X / 180.0f);
+    const float a = rnd_(12, 33) * (FX_PI / 180.0f);
     const float sp = rnd_(32, 43) / 100.0f;  // px/мс
     this->met_vx_ = (right ? sp : -sp) * cosf(a);
     this->met_vy_ = sp * sinf(a);
@@ -292,7 +142,7 @@ void WeatherFx::meteor_paint_(lv_layer_t *layer, const lv_area_t &oc, const lv_a
 // одного наклона, привязка — середина ромба
 static const int KB_W = 33, KB_H = 47, KB_AX = 16, KB_AY = 20;
 static const int KB_N = 9;  // наклонов: −12°…+12° через 3°
-static const float KB_STEP = 3.0f * PI_X / 180.0f;
+static const float KB_STEP = 3.0f * FX_PI / 180.0f;
 // Хвост с бантиками — кадры по фазе волны, привязка — нижний угол ромба.
 // Нарисован под змея, летящего вправо (хвост тянется влево); летит влево —
 // кадры отражены
@@ -307,7 +157,7 @@ static void draw_kite(uint8_t *p, float th) {
   const float c = cosf(th), s = sinf(th);
   for (int y = 0; y < KB_H; y++) {
     for (int x = 0; x < KB_W; x++) {
-      Layered px;
+      FxMix px;
       for (int q = 0; q < 4; q++) {
         const float sx = x - KB_AX + (q & 1 ? 0.25f : -0.25f), sy = y - KB_AY + (q & 2 ? 0.25f : -0.25f);
         // В осях змея
@@ -326,11 +176,11 @@ static void draw_kite(uint8_t *p, float th) {
                        (uint32_t) std::min(255.0f, (col & 0xFF) * k);
         if (fabsf(lx) < 0.7f || fabsf(ly) < 0.7f)
           out = 0x5D4037;
-        Layered one;
+        FxMix one;
         one.over(out, 1.0f);
         px.add(one, 0.25f);
       }
-      put_px(p, KB_W * KB_H, y * KB_W + x, px, x, y);
+      fx_put(p, KB_W * KB_H, y * KB_W + x, px, x, y);
     }
   }
 }
@@ -386,14 +236,14 @@ static void draw_tail(uint8_t *p, const float *x, const float *y, int n) {
         const float k = knot >= wing ? 0.72f : 0.8f + 0.2f * u / 4.4f;
         // Поверх нитки: её цвет известен — смешать без разбора RGB565
         const int i = py * w + px;
-        Layered m;
+        FxMix m;
         m.over(0xCFD8DC, al[i] / 255.0f);
         m.r = br * k * cov + m.r * (1 - cov);
         m.g = bg * k * cov + m.g * (1 - cov);
         m.b = bb * k * cov + m.b * (1 - cov);
         m.a = cov + m.a * (1 - cov);
         al[i] = 0;
-        put_px(p, w * h, i, m, px, py);
+        fx_put(p, w * h, i, m, px, py);
       }
     }
   }
@@ -402,7 +252,7 @@ static void draw_tail(uint8_t *p, const float *x, const float *y, int n) {
 // Кадр хвоста i: волна бежит от угла ромба к концу и треплет хвост вверх-
 // вниз и чуть вбок; у самого угла он почти не качается
 static void draw_tail_frame(uint8_t *p, int i, float dir) {
-  const float ph = 2 * PI_X * i / KT_N;
+  const float ph = 2 * FX_PI * i / KT_N;
   const float ax = dir > 0 ? KT_AX : KT_W - 1 - KT_AX;
   float x[9], y[9];
   for (int j = 0; j < 9; j++) {
@@ -475,7 +325,7 @@ void WeatherFx::kite_(uint32_t now, float wind) {
   const int fi = std::min(KB_N - 1, std::max(0, (int) lroundf(th / KB_STEP) + KB_N / 2));
   this->kite_frame_ = kite_pick(this->kite_sheet_, fi, this->kite_frame_, this->render_budget_,
                                 [fi](uint8_t *p) { draw_kite(p, (fi - KB_N / 2) * KB_STEP); });
-  const int ti = (int) (fmodf(t * 0.009f, 2 * PI_X) / (2 * PI_X) * KT_N) % KT_N;
+  const int ti = (int) (fmodf(t * 0.009f, 2 * FX_PI) / (2 * FX_PI) * KT_N) % KT_N;
   const float dir = this->kite_dir_;
   this->kite_tframe_ =
       kite_pick(this->kite_tail_, ti, this->kite_tframe_, this->render_budget_, [this, ti, dir](uint8_t *p) {
@@ -517,304 +367,6 @@ void WeatherFx::kite_paint_(lv_layer_t *layer, const lv_area_t &oc, const lv_are
                   LV_OPA_COVER);
 }
 
-// ---- Ракета ----
-
-// Летит 4,5 с снизу слева вверх направо, над строкой погоды
-static const uint32_t RK_MS = 4500;
-static const float PUFF_MS = 900.0f;  // клуб дыма тает
-// Картинки корпуса и пламени (привязка — середина ракеты) — точно под
-// повёрнутые очертания; перерисовываются, когда курс сменится на 2°
-static const float RK_BIN = 2.0f * PI_X / 180.0f;
-static const float RK_FLAME[3] = {9.0f, 12.5f, 16.0f};
-
-// Точка (x, y) внутри треугольника?
-static bool in_tri(float x, float y, float ax, float ay, float bx, float by, float cx, float cy) {
-  const float d1 = (x - bx) * (ay - by) - (ax - bx) * (y - by);
-  const float d2 = (x - cx) * (by - cy) - (bx - cx) * (y - cy);
-  const float d3 = (x - ax) * (cy - ay) - (cx - ax) * (y - ay);
-  return !(((d1 < 0) || (d2 < 0) || (d3 < 0)) && ((d1 > 0) || (d2 > 0) || (d3 > 0)));
-}
-
-// Ракета в своих осях: x — вперёд по курсу, y — вниз от оси. Красные
-// стабилизаторы (нижний в тени), сопло, белый корпус-цилиндр со светом
-// сверху и бликом, красные нос и полоса, иллюминатор с ободком и бликом
-static Layered rocket_at(float lx, float ly) {
-  Layered m;
-  if (lx < -17.5f || lx > 19.5f || fabsf(ly) > 11.5f)
-    return m;
-  if (fabsf(ly) > 4.0f && lx < -3.5f)
-    m.over(ly > 0 ? 0xB71C1C : 0xE53935, in_tri(lx, fabsf(ly), -12, 4.5f, -4, 4.5f, -17, 11) ? 1.0f : 0.0f);
-  if (lx > -14.6f && lx < -11.5f && fabsf(ly) < 2.0f + (lx + 14.6f) * 0.35f)
-    m.over(0x455A64, 1.0f);
-  const float hw = lx < 9.0f ? 5.0f : 5.0f * sqrtf(fx_clamp01(1.0f - sq((lx - 9.0f) / 10.5f)));
-  if (lx > -12.3f && lx < 19.5f && fabsf(ly) < hw) {
-    const bool red = lx >= 9.0f || (lx > -8.5f && lx < -6.5f);
-    const float u = ly / 5.0f;  // −1 — верх, 1 — низ
-    const float k = 0.8f + 0.3f * (1.0f - sq(u + 0.35f)) + 0.25f * sq(fx_clamp01(1.0f - sq((u + 0.5f) / 0.35f)));
-    const uint32_t c = red ? 0xE53935 : 0xECEFF1;
-    m.over(((uint32_t) std::min(255.0f, ((c >> 16) & 0xFF) * k) << 16) |
-               ((uint32_t) std::min(255.0f, ((c >> 8) & 0xFF) * k) << 8) | (uint32_t) std::min(255.0f, (c & 0xFF) * k),
-           1.0f);
-    const float dw = sqrtf(sq(lx - 2.0f) + ly * ly);
-    if (dw < 3.4f)
-      m.over(dw < 2.6f ? (ly < -0.5f ? 0x81D4FA : 0x29B6F6) : 0x90A4AE, 1.0f);
-    if (sq(lx - 1.2f) + sq(ly + 1.0f) < 0.7f)
-      m.over(0xFFFFFF, 1.0f);
-  }
-  return m;
-}
-
-// Пламя длиной fl позади сопла: ядро почти белое, к краю и концу — жёлтое,
-// оранжевое, красноватое; вокруг — тёплое сияние. Край сглаживается
-// расстоянием до контура — хватает одной точки на пиксель
-static Layered flame_at(float lx, float ly, float fl) {
-  Layered m;
-  const float s = -14.0f - lx;
-  const float sc = std::min(std::max(s, 0.0f), fl);
-  const float gd = sq(s - sc) + ly * ly;
-  if (gd < 30.0f)
-    m.over(0xFF9A3C, 0.4f * sq(1.0f - gd / 30.0f) * (1.0f - 0.7f * sc / fl));
-  if (s > -0.5f && s < fl) {
-    const float t = fx_clamp01(s / fl);
-    const float hw = 2.9f * sqrtf(1.0f - t) + 0.2f;
-    const float d = fabsf(ly);
-    const float cov = fx_clamp01(hw + 0.5f - d);
-    if (cov > 0) {
-      const float heat = (1.0f - sq(std::min(d / hw, 1.0f))) * (1.0f - t);
-      uint32_t c;
-      if (heat > 0.55f)
-        c = 0xFFF8E1;
-      else if (heat > 0.3f)
-        c = 0xFFEB3B;
-      else if (heat > 0.12f)
-        c = 0xFF9800;
-      else
-        c = 0xF4511E;
-      m.over(c, cov * (1.0f - 0.55f * t));
-    }
-  }
-  return m;
-}
-
-// Клуб дыма радиусом r: плотный в середине, мягкий по краю, чуть
-// неровный — к нему прилип клубок поменьше
-static void draw_puff(FxSprite &s, float r) {
-  const int h = (int) ceilf(r) + 1, n = 2 * h + 1;
-  if (!fx_sprite_init(s, n, n, false))
-    return;
-  s.ax = s.ay = h;
-  for (int y = 0; y < n; y++) {
-    for (int x = 0; x < n; x++) {
-      const float dx = (x - h) / r, dy = (y - h) / r;
-      const float ex = (dx - 0.38f) / 0.62f, ey = (dy + 0.3f) / 0.62f;
-      const float v = std::max(1.0f - dx * dx - dy * dy, 0.85f * (1.0f - ex * ex - ey * ey));
-      if (v > 0)
-        s.buf[y * n + x] = (uint8_t) std::min(255.0f, std::max(0.0f, 255.0f * sqrtf(v) + fx_dither(x, y) * 4.0f));
-    }
-  }
-  fx_sprite_done(s);
-}
-
-// Прямоугольник пикселей вокруг привязки, в который попадает повёрнутый
-// (cos c, sin s) прямоугольник [x0, x1]×[y0, y1] в осях ракеты
-static void rot_box(float x0, float x1, float y0, float y1, float c, float s, int *bx, int *by, int *bw, int *bh) {
-  float mnx = 1e9f, mny = 1e9f, mxx = -1e9f, mxy = -1e9f;
-  for (int k = 0; k < 4; k++) {
-    const float x = k & 1 ? x1 : x0, y = k & 2 ? y1 : y0;
-    const float X = x * c - y * s, Y = x * s + y * c;
-    mnx = std::min(mnx, X);
-    mxx = std::max(mxx, X);
-    mny = std::min(mny, Y);
-    mxy = std::max(mxy, Y);
-  }
-  *bx = (int) floorf(mnx) - 1;
-  *by = (int) floorf(mny) - 1;
-  *bw = (int) ceilf(mxx) + 1 - *bx + 1;
-  *bh = (int) ceilf(mxy) + 1 - *by + 1;
-}
-
-// Корпус и три длины пламени под курс bin·2°
-void WeatherFx::rocket_render_(int bin) {
-  const float a = bin * RK_BIN, c = cosf(a), s = sinf(a);
-  int bx, by, bw, bh;
-  rot_box(-17.5f, 19.5f, -11.5f, 11.5f, c, s, &bx, &by, &bw, &bh);
-  FxSprite &b = this->rk_body_;
-  if (fx_sprite_init(b, bw, bh, true)) {
-    b.ax = -bx;
-    b.ay = -by;
-    for (int y = 0; y < bh; y++) {
-      for (int x = 0; x < bw; x++) {
-        Layered px;
-        for (int q = 0; q < 4; q++) {
-          const float sx = x + bx + (q & 1 ? 0.25f : -0.25f), sy = y + by + (q & 2 ? 0.25f : -0.25f);
-          px.add(rocket_at(sx * c + sy * s, -sx * s + sy * c), 0.25f);
-        }
-        put_px(b.buf, bw * bh, y * bw + x, px, x, y);
-      }
-    }
-    fx_sprite_done(b);
-  }
-  rot_box(-14.0f - RK_FLAME[2] - 3.5f, -10.5f, -6.0f, 6.0f, c, s, &bx, &by, &bw, &bh);
-  for (int k = 0; k < 3; k++) {
-    FxSprite &f = this->rk_fl_[k];
-    if (!fx_sprite_init(f, bw, bh, true))
-      continue;
-    f.ax = -bx;
-    f.ay = -by;
-    for (int y = 0; y < bh; y++) {
-      for (int x = 0; x < bw; x++) {
-        const float sx = (float) (x + bx), sy = (float) (y + by);
-        put_px(f.buf, bw * bh, y * bw + x, flame_at(sx * c + sy * s, -sx * s + sy * c, RK_FLAME[k]), x, y);
-      }
-    }
-    fx_sprite_done(f);
-  }
-}
-
-void WeatherFx::rocket_apply_(bool on) {
-  if (on)
-    return;
-  // Праздник кончился — убрать ракету
-  if (this->rk_on_)
-    this->rocket_stop_();
-  this->next_rk_ = 0;
-}
-
-void WeatherFx::rocket_stop_() {
-  this->mark_(this->rk_spot_, false, 0, 0, 1, 1);
-  this->rk_on_ = false;
-  fx_sprite_free(this->rk_body_);
-  for (auto &f : this->rk_fl_)
-    fx_sprite_free(f);
-  for (auto &p : this->rk_puff_)
-    fx_sprite_free(p);
-}
-
-void WeatherFx::rocket_(uint32_t now) {
-  if (this->hol_ != HOL_COSMOS)
-    return;
-  if (!this->rk_on_) {
-    if (this->next_rk_ == 0)
-      this->next_rk_ = now + 2000;
-    if ((int32_t) (now - this->next_rk_) < 0)
-      return;
-    this->rk_on_ = true;
-    this->rk_t0_ = now;
-    this->rk_puff_ms_ = now;
-    this->rk_bin_ = 1000;
-    for (auto &a : this->puff_age_)
-      a = PUFF_MS;
-    for (int i = 0; i < NPUFF_R; i++)
-      draw_puff(this->rk_puff_[i], 4.0f + i);
-  }
-  const uint32_t t = now - this->rk_t0_;
-  // Дым: клубы остаются позади, расплываются и тают
-  for (auto &a : this->puff_age_)
-    a += this->dt_ms_;
-  if (t >= RK_MS) {
-    bool smoke = false;
-    for (float a : this->puff_age_)
-      smoke |= a < PUFF_MS;
-    if (!smoke) {
-      this->rocket_stop_();
-      this->next_rk_ = now + rnd_(20000, 45000);
-      return;
-    }
-  }
-  // Путь — плавная дуга от левого края над строкой погоды к верху справа
-  const float u = std::min(t / (float) RK_MS, 1.0f);
-  const float x = -40.0f + 546.0f * u;
-  const float y = 205.0f - 185.0f * u - 45.0f * sinf(PI_X * u);
-  const float dx = 546.0f, dy = -185.0f - 45.0f * PI_X * cosf(PI_X * u);
-  if (t < RK_MS) {
-    this->rk_x_ = x;
-    this->rk_y_ = y;
-    this->rk_a_ = atan2f(dy, dx);
-    this->rk_flame_ = 8.0f + rnd_(0, 9);
-    const int bin = (int) lroundf(this->rk_a_ / RK_BIN);
-    if (bin != this->rk_bin_) {
-      this->rocket_render_(bin);
-      this->rk_bin_ = bin;
-    }
-    if (now - this->rk_puff_ms_ > 110) {
-      this->rk_puff_ms_ = now;
-      int j = 0;
-      for (int i = 1; i < NPUFF; i++)
-        if (this->puff_age_[i] > this->puff_age_[j])
-          j = i;
-      this->puff_x_[j] = x - 26.0f * cosf(this->rk_a_);
-      this->puff_y_[j] = y - 26.0f * sinf(this->rk_a_);
-      this->puff_age_[j] = 0;
-    }
-  } else {
-    this->rk_x_ = -1000;  // ракета улетела, остаётся тающий дым
-  }
-  float x0 = 1e9f, y0 = 1e9f, x1 = -1e9f, y1 = -1e9f;
-  if (t < RK_MS && this->rk_body_.buf) {
-    // Корпус и самое длинное пламя
-    const int rx = (int) lroundf(this->rk_x_), ry = (int) lroundf(this->rk_y_);
-    const lv_area_t b = fx_sprite_area(this->rk_body_, rx, ry), f = fx_sprite_area(this->rk_fl_[2], rx, ry);
-    x0 = std::min(b.x1, f.x1);
-    y0 = std::min(b.y1, f.y1);
-    x1 = std::max(b.x2, f.x2);
-    y1 = std::max(b.y2, f.y2);
-  }
-  for (int j = 0; j < NPUFF; j++) {
-    if (this->puff_age_[j] >= PUFF_MS)
-      continue;
-    x0 = std::min(x0, this->puff_x_[j] - 13);
-    y0 = std::min(y0, this->puff_y_[j] - 13);
-    x1 = std::max(x1, this->puff_x_[j] + 13);
-    y1 = std::max(y1, this->puff_y_[j] + 13);
-  }
-  if (x0 > x1) {
-    this->mark_(this->rk_spot_, false, 0, 0, 1, 1);
-    return;
-  }
-  // Пламя мигает, дым тает — перерисовать, даже если рамка та же
-  if (this->rk_spot_.on)
-    this->invalidate_(this->rk_spot_.a);
-  this->mark_(this->rk_spot_, true, (int) x0, (int) y0, (int) (x1 - x0) + 1, (int) (y1 - y0) + 1);
-}
-
-void WeatherFx::rocket_paint_(lv_layer_t *layer, const lv_area_t &oc, const lv_area_t &clip) {
-  const Spot &s = this->rk_spot_;
-  if (!s.on)
-    return;
-  const lv_area_t box = {s.a.x1 + oc.x1, s.a.y1 + oc.y1, s.a.x2 + oc.x1, s.a.y2 + oc.y1};
-  if (!fx_hit(box, clip))
-    return;
-  // Дым — от старых клубов к свежим: свежие тёплые от пламени, потом серые,
-  // расплываются и тают
-  int ord[NPUFF];
-  for (int j = 0; j < NPUFF; j++) {
-    int k = j;
-    while (k > 0 && this->puff_age_[ord[k - 1]] < this->puff_age_[j]) {
-      ord[k] = ord[k - 1];
-      k--;
-    }
-    ord[k] = j;
-  }
-  for (int j : ord) {
-    const float age = this->puff_age_[j];
-    if (age >= PUFF_MS)
-      continue;
-    const float f = age / PUFF_MS;
-    const FxSprite &p = this->rk_puff_[std::min(NPUFF_R - 1, (int) lroundf(f * (NPUFF_R - 1)))];
-    const lv_color_t c =
-        lv_color_mix(lv_color_hex(0xA0A8B0), lv_color_hex(0xFFD6A0), (uint8_t) (255 * fx_clamp01(age / 400.0f)));
-    const lv_opa_t o = (lv_opa_t) ((this->dim_ ? 190.0f : 150.0f) * powf(1.0f - f, 1.2f));
-    fx_draw(layer, p,
-            fx_sprite_area(p, (int) lroundf(this->puff_x_[j]) + oc.x1, (int) lroundf(this->puff_y_[j]) + oc.y1), o, c);
-  }
-  if (this->rk_x_ > -500 && this->rk_body_.buf) {
-    const int x = (int) lroundf(this->rk_x_) + oc.x1, y = (int) lroundf(this->rk_y_) + oc.y1;
-    const int k = this->rk_flame_ < 10.7f ? 0 : (this->rk_flame_ < 14.2f ? 1 : 2);
-    fx_draw(layer, this->rk_fl_[k], fx_sprite_area(this->rk_fl_[k], x, y), LV_OPA_COVER);
-    fx_draw(layer, this->rk_body_, fx_sprite_area(this->rk_body_, x, y), LV_OPA_COVER);
-  }
-}
-
 // ---- Марево ----
 
 // Струйка: волна на 26 px, толще посередине, концы тают. Кадры — по фазе
@@ -831,7 +383,7 @@ static void draw_heat(uint8_t *p, float ph) {
       const float ang = ph + u * 5.4f;
       const float yc = HT_AY + 2.0f * sinf(ang), slope = 2.0f * 5.4f / 26.4f * cosf(ang);
       const float d = fabsf(y - yc) / sqrtf(1.0f + slope * slope);
-      const float w = 0.55f + 0.8f * sinf(PI_X * fx_clamp01(u));
+      const float w = 0.55f + 0.8f * sinf(FX_PI * fx_clamp01(u));
       const float a = std::max(fx_clamp01(w + 0.5f - d), 0.25f * expf(-d * d / 2.0f)) * fx_smooth(-0.08f, 0.15f, u) *
                       (1.0f - fx_smooth(0.85f, 1.08f, u));
       p[y * HT_W + x] = (uint8_t) std::min(255.0f, std::max(0.0f, a * 255.0f + fx_dither(x, y) * 3.0f));
@@ -856,7 +408,7 @@ void WeatherFx::heat_apply_(bool on) {
     this->heat_sheet_.ax = HT_AX;
     this->heat_sheet_.ay = HT_AY;
     for (int i = 0; i < HT_N; i++) {
-      draw_heat(fx_sheet_take(this->heat_sheet_, i), 2 * PI_X * i / HT_N);
+      draw_heat(fx_sheet_take(this->heat_sheet_, i), 2 * FX_PI * i / HT_N);
       fx_sheet_done(this->heat_sheet_, i);
     }
   }
@@ -875,7 +427,7 @@ void WeatherFx::heat_() {
       this->hy_[i] = 440;
     }
     this->hy_[i] -= this->k_ * 0.5f;
-    this->hph_[i] = fmodf(this->hph_[i] + this->k_ * 0.35f, 2 * PI_X);
+    this->hph_[i] = fmodf(this->hph_[i] + this->k_ * 0.35f, 2 * FX_PI);
     const int x = (int) lroundf(this->hx_[i]) - HT_AX, y = (int) lroundf(this->hy_[i]) - HT_AY;
     if (this->heat_spot_[i].on)
       this->invalidate_(this->heat_spot_[i].a);
@@ -896,101 +448,9 @@ void WeatherFx::heat_paint_(lv_layer_t *layer, const lv_area_t &oc, const lv_are
       continue;
     const float age = this->hage_[i];
     const float vis = std::min(age * 4.0f, 1.0f) * (1.0f - age);
-    const int f = (int) (this->hph_[i] / (2 * PI_X) * HT_N) % HT_N;
+    const int f = (int) (this->hph_[i] / (2 * FX_PI) * HT_N) % HT_N;
     fx_sheet_draw(layer, this->heat_sheet_, f, a, (lv_opa_t) ((this->dim_ ? 170.0f : 135.0f) * vis), c);
   }
-}
-
-// ---- Сосульки ----
-
-// Полочка под цифрами часов и минут и сосульки на ней — x, длина и ширина
-// у основания. Не ниже строки «Ясно»
-static const int ICE_Y = 265;
-static const int ICE_SHELF[2][2] = {{74, 218}, {248, 392}};
-static const int16_t ICICLES[][3] = {
-    {82, 9, 5},   {97, 14, 6},  {113, 7, 4},  {128, 12, 6}, {146, 6, 4},  {161, 13, 5},
-    {179, 9, 5},  {196, 11, 6}, {211, 6, 4},  {256, 8, 4},  {271, 13, 6}, {289, 7, 5},
-    {305, 12, 5}, {323, 6, 4},  {339, 14, 6}, {357, 8, 5},  {372, 11, 5}, {386, 6, 4},
-};
-static const int ICE_X0 = 72, ICE_W = 323, ICE_H = 21;
-
-// Ледяная корка с неровным низом и светлым верхом; сосулька i (−1 — нет её
-// в этом столбце) сужается к округлому кончику, прозрачнее к концу, слева —
-// блик; на каждой третьей висит капля
-static Layered ice_at(float X, float Y, uint32_t ice, int i) {
-  Layered m;
-  for (const auto &sh : ICE_SHELF) {
-    if (Y < 0 || Y >= 3.5f || X < sh[0] - 2 || X > sh[1] + 2)
-      continue;
-    const float th = (2.6f + 0.6f * sinf(X * 0.41f) * sinf(X * 0.13f + 1.0f)) *
-                     fx_smooth(sh[0] - 2.0f, sh[0] + 1.5f, X) * (1.0f - fx_smooth(sh[1] - 1.5f, sh[1] + 2.0f, X));
-    if (Y >= 0 && Y < th)
-      m.over(Y < 1.0f ? lv_color_to_u32(lv_color_mix(lv_color_white(), lv_color_hex(ice), 150)) & 0xFFFFFF : ice,
-             0.88f);
-  }
-  if (i >= 0) {
-    const float ix = ICICLES[i][0], len = ICICLES[i][1], wb = ICICLES[i][2] / 2.0f;
-    const float v = (Y - 1.5f) / len;
-    if (v >= 0 && v < 1) {
-      const float hw = wb * powf(1.0f - v, 0.9f) + 0.15f;
-      const float dx = X - ix;
-      if (fabsf(dx) < hw) {
-        m.over(ice, 0.82f - 0.3f * v);
-        if (dx < -0.2f * hw && dx > -0.65f * hw && v < 0.8f)
-          m.over(0xFFFFFF, 0.75f * (1.0f - v));
-      }
-    }
-    if (i % 3 == 1 && sq(X - ix) + sq(Y - 1.5f - len - 0.9f) < 1.1f)
-      m.over(lv_color_to_u32(lv_color_mix(lv_color_white(), lv_color_hex(ice), 128)) & 0xFFFFFF, 0.9f);
-  }
-  return m;
-}
-
-void WeatherFx::icicles_apply_() {
-  // Только при часах на экране — под цифрами; при новой яркости — заново
-  const bool on = this->frost_on_ && !this->full_;
-  if (on && this->ice_spr_.buf && this->ice_dim_ == this->dim_)
-    return;
-  const lv_area_t a = {ICE_X0, ICE_Y, ICE_X0 + ICE_W - 1, ICE_Y + ICE_H - 1};
-  if (!on) {
-    if (this->ice_spr_.buf)
-      this->invalidate_(a);
-    fx_sprite_free(this->ice_spr_);
-    return;
-  }
-  FxSprite &s = this->ice_spr_;
-  if (!fx_sprite_init(s, ICE_W, ICE_H, true))
-    return;
-  s.ax = s.ay = 0;
-  this->ice_dim_ = this->dim_;
-  const uint32_t ice = this->dim_ ? 0xDDF0FF : 0xA8CCEA;
-  // Какая сосулька в каком столбце: они далеко друг от друга, в столбце —
-  // не больше одной
-  int8_t col[ICE_W];
-  memset(col, -1, sizeof(col));
-  for (size_t i = 0; i < sizeof(ICICLES) / sizeof(ICICLES[0]); i++) {
-    const int ix = ICICLES[i][0] - ICE_X0, r = ICICLES[i][2] / 2 + 2;
-    for (int x = std::max(0, ix - r); x <= std::min(ICE_W - 1, ix + r); x++)
-      col[x] = (int8_t) i;
-  }
-  for (int y = 0; y < ICE_H; y++) {
-    for (int x = 0; x < ICE_W; x++) {
-      Layered px;
-      for (int q = 0; q < 4; q++)
-        px.add(ice_at(ICE_X0 + x + (q & 1 ? 0.25f : -0.25f), y + (q & 2 ? 0.25f : -0.25f), ice, col[x]), 0.25f);
-      put_px(s.buf, ICE_W * ICE_H, y * ICE_W + x, px, x, y);
-    }
-  }
-  fx_sprite_done(s);
-  this->invalidate_(a);
-}
-
-void WeatherFx::icicles_paint_(lv_layer_t *layer, const lv_area_t &oc, const lv_area_t &clip) {
-  if (!this->ice_spr_.buf || !this->frost_on_ || this->full_)
-    return;
-  const lv_area_t a = fx_sprite_area(this->ice_spr_, ICE_X0 + oc.x1, ICE_Y + oc.y1);
-  if (fx_hit(a, clip))
-    fx_draw(layer, this->ice_spr_, a, LV_OPA_COVER);
 }
 
 // ---- Зарево ----
@@ -1066,6 +526,182 @@ void WeatherFx::glow_paint_(lv_layer_t *layer, const lv_area_t &oc, const lv_are
   im.image_area = {x0, band.y1, x0 + GL_W - 1, band.y2};
   const lv_area_t a = {x0, band.y1, c.x2, band.y2};
   lv_draw_image(layer, &im, &a);
+}
+
+// ---- Светлячки ----
+
+// Светлячок — тёплая жёлто-зелёная точка в мягком ореоле. Три картинки: чем
+// ярче вспышка, тем шире ореол — светлячок разгорается и гаснет
+static const int FF_N = 3, FF_W = 17, FF_A = 8;
+static const float FF_HALO[FF_N] = {5.5f, 7.0f, 8.5f};
+
+static void draw_firefly(FxSprite &s, float halo) {
+  if (!fx_sprite_init(s, FF_W, FF_W, true))
+    return;
+  s.ax = s.ay = FF_A;
+  for (int y = 0; y < FF_W; y++) {
+    for (int x = 0; x < FF_W; x++) {
+      const float d = sqrtf((float) ((x - FF_A) * (x - FF_A) + (y - FF_A) * (y - FF_A)));
+      FxMix m;
+      const float o = fx_clamp01(1.0f - d / halo);
+      m.over(0xB0FF3C, 0.75f * o * sqrtf(o));
+      const float g = fx_clamp01(1.0f - d / 3.4f);
+      m.over(0xE4FF66, 0.9f * g);
+      m.over(0xFAFFC8, fx_clamp01(2.3f - d));
+      fx_put(s.buf, FF_W * FF_W, y * FF_W + x, m, x, y);
+    }
+  }
+  fx_sprite_done(s);
+}
+
+void WeatherFx::fireflies_apply_(bool on) {
+  if (on && !this->ff_on_) {
+    // Светлячки — над травой внизу круга, у каждого своё место и ритм
+    for (int i = 0; i < NFF; i++) {
+      int x, y;
+      do {
+        x = rnd_(60, 406);
+        y = rnd_(290, 420);
+      } while ((x - 233) * (x - 233) + (y - 233) * (y - 233) > 205 * 205);
+      this->ffx_[i] = x;
+      this->ffy_[i] = y;
+      for (auto &ph : this->ffph_[i])
+        ph = rnd_(0, 628) / 100.0f;
+    }
+    for (int i = 0; i < FF_N; i++)
+      draw_firefly(this->ff_spr_[i], FF_HALO[i]);
+  }
+  if (!on) {
+    for (auto &f : this->ff_spot_)
+      this->mark_(f, false, 0, 0, 1, 1);
+    for (auto &s : this->ff_spr_)
+      fx_sprite_free(s);
+  }
+  this->ff_on_ = on;
+}
+
+void WeatherFx::fireflies_(uint32_t now) {
+  // Светлячки кружат у своего места и мерцают — раз в ~66 мс
+  if (!this->ff_on_ || now - this->ff_ms_ < 60)
+    return;
+  this->ff_ms_ = now;
+  const float t = now / 1000.0f;
+  for (int i = 0; i < NFF; i++) {
+    const float *ph = this->ffph_[i];
+    const int x = (int) (this->ffx_[i] + 18.0f * sinf(t * (0.35f + i * 0.03f) + ph[0]));
+    const int y = (int) (this->ffy_[i] + 10.0f * sinf(t * (0.5f + i * 0.02f) + ph[1]));
+    // Вспыхивает на пару секунд и надолго гаснет
+    const float b = sinf(t * (0.9f + i * 0.07f) + ph[2]);
+    const float k = b > 0.3f ? (b - 0.3f) / 0.7f : 0.0f;
+    const bool was = this->ff_spot_[i].on;
+    if (was && k != this->ffk_[i])
+      this->invalidate_(this->ff_spot_[i].a);
+    this->ffk_[i] = k;
+    this->ffpx_[i] = x;
+    this->ffpy_[i] = y;
+    this->mark_(this->ff_spot_[i], k > 0.02f, x - FF_A, y - FF_A, FF_W, FF_W);
+  }
+}
+
+void WeatherFx::fireflies_paint_(lv_layer_t *layer, const lv_area_t &oc, const lv_area_t &clip) {
+  if (!this->ff_on_)
+    return;
+  for (int i = 0; i < NFF; i++) {
+    const Spot &s = this->ff_spot_[i];
+    if (!s.on)
+      continue;
+    const lv_area_t a = {s.a.x1 + oc.x1, s.a.y1 + oc.y1, s.a.x2 + oc.x1, s.a.y2 + oc.y1};
+    if (!fx_hit(a, clip))
+      continue;
+    const float k = this->ffk_[i];
+    const FxSprite &spr = this->ff_spr_[k < 0.35f ? 0 : (k < 0.7f ? 1 : 2)];
+    fx_draw(layer, spr, a, (lv_opa_t) (255.0f * std::min(1.0f, k * 1.15f)));
+  }
+}
+
+// ---- Самолёт ----
+
+// Скорость, px/мс
+static const float AIR_SPEED = 0.022f;
+// Огни: проблесковый маяк — белая точка в ореоле, бортовые — маленькие
+// точки с ореолом (красная слева, зелёная справа)
+static const int AIR_SW = 13, AIR_NW = 7;
+
+static void draw_light(FxSprite &s, int n, float core, float halo, float k) {
+  if (!fx_sprite_init(s, n, n, false))
+    return;
+  const int h = n / 2;
+  s.ax = s.ay = h;
+  for (int y = 0; y < n; y++) {
+    for (int x = 0; x < n; x++) {
+      const float d = sqrtf((float) ((x - h) * (x - h) + (y - h) * (y - h)));
+      const float v = std::max(fx_clamp01(core + 0.5f - d), k * fx_sq(fx_clamp01(1.0f - d / halo)));
+      s.buf[y * n + x] = (uint8_t) std::min(255.0f, std::max(0.0f, v * 255.0f + fx_dither(x, y) * 4.0f));
+    }
+  }
+  fx_sprite_done(s);
+}
+
+void WeatherFx::plane_apply_(int mode) {
+  this->plane_mode_ = mode;
+  this->next_air_ = 0;
+  if (!mode) {
+    if (this->air_on_) {
+      this->mark_(this->air_spot_, false, 0, 0, 1, 1);
+      this->air_on_ = false;
+    }
+    fx_sprite_free(this->air_strobe_);
+    fx_sprite_free(this->air_nav_);
+  }
+}
+
+void WeatherFx::plane_(uint32_t now) {
+  if (!this->plane_mode_)
+    return;
+  if (!this->air_on_) {
+    if (this->next_air_ == 0)
+      this->next_air_ = now + (this->plane_mode_ == 2 ? 1500 : rnd_(120000, 480000));
+    if ((int32_t) (now - this->next_air_) < 0)
+      return;
+    this->air_on_ = true;
+    this->air_t0_ = now;
+    this->air_v_ = rnd_(0, 2) ? AIR_SPEED : -AIR_SPEED;
+    this->air_y_ = rnd_(45, 140);
+    if (!this->air_strobe_.buf) {
+      draw_light(this->air_strobe_, AIR_SW, 2.2f, 6.0f, 0.75f);
+      draw_light(this->air_nav_, AIR_NW, 1.5f, 3.4f, 0.5f);
+    }
+  }
+  const float t = now - this->air_t0_;
+  this->air_x_ = (this->air_v_ > 0 ? -20.0f : 486.0f) + this->air_v_ * t;
+  const float y = this->air_y_;
+  if (this->air_x_ < -30.0f || this->air_x_ > 496.0f) {
+    this->mark_(this->air_spot_, false, 0, 0, 1, 1);
+    this->air_on_ = false;
+    this->next_air_ = now + (this->plane_mode_ == 2 ? rnd_(3000, 6000) : rnd_(240000, 600000));
+    return;
+  }
+  const int x = (int) this->air_x_, yy = (int) y;
+  if (this->air_spot_.on)
+    this->invalidate_(this->air_spot_.a);  // мигает — перерисовать
+  this->mark_(this->air_spot_, true, x - 10, yy - 6, 21, 13);
+}
+
+void WeatherFx::plane_paint_(lv_layer_t *layer, const lv_area_t &oc, const lv_area_t &clip) {
+  const Spot &s = this->air_spot_;
+  if (!s.on || !this->air_strobe_.buf)
+    return;
+  const lv_area_t a = {s.a.x1 + oc.x1, s.a.y1 + oc.y1, s.a.x2 + oc.x1, s.a.y2 + oc.y1};
+  if (!fx_hit(a, clip))
+    return;
+  // Красный и зелёный огни на крыльях, между ними — белая проблесковая
+  // вспышка (двойная, раз в 1,2 с)
+  const int x = (int) this->air_x_ + oc.x1, y = (int) this->air_y_ + oc.y1;
+  const uint32_t t = (millis() - this->air_t0_) % 1200;
+  if (t < 70 || (t > 160 && t < 230))
+    fx_draw(layer, this->air_strobe_, fx_sprite_area(this->air_strobe_, x, y), this->dim_ ? LV_OPA_COVER : 225);
+  fx_draw(layer, this->air_nav_, fx_sprite_area(this->air_nav_, x - 7, y + 1), LV_OPA_COVER, lv_color_hex(0xFF3B30));
+  fx_draw(layer, this->air_nav_, fx_sprite_area(this->air_nav_, x + 7, y + 1), LV_OPA_COVER, lv_color_hex(0x30D158));
 }
 
 }  // namespace weather_fx

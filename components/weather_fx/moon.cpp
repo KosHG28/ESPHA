@@ -110,5 +110,49 @@ void WeatherFx::moon_paint_(lv_layer_t *layer, int cx, int cy) {
     fx_draw(layer, this->moon_spr_, fx_sprite_area(this->moon_spr_, cx, cy), LV_OPA_COVER);
 }
 
+void WeatherFx::moon_(uint32_t utc, int force) {
+  if (!this->stars_on_ || (utc < 1600000000u && !force))
+    return;
+  // Полнолуние, суперлуние, затмение — по небу раз в минуту или по выбору
+  // «Показать праздник»
+  int ev = this->moon_ev_;
+  float red = this->moon_red_;
+  const int64_t minute = utc / 60;
+  if (force) {
+    ev = force;
+    red = force == HOL_ECLIPSE ? 1.0f : 0.0f;
+  } else if (minute != this->moon_ev_min_) {
+    this->moon_ev_min_ = minute;
+    ev = moon_event(utc, &red);
+  }
+  const int r_moon = ev == HOL_SUPERMOON ? 24 : (ev == HOL_FULL_MOON || ev == HOL_ECLIPSE ? 20 : MOON_R);
+  const bool changed = ev != this->moon_ev_ || r_moon != this->moon_r_ || std::fabs(red - this->moon_red_) > 0.02f;
+  // Фаза по среднему синодическому месяцу от новолуния 6 января 2000 года.
+  // Точность — несколько часов, на рисунке 30 px это не видно. В полнолуние
+  // по выбору — ровно полная
+  double ph = 0.5;
+  if (!force) {
+    const double days = (utc - 947182440.0) / 86400.0;
+    ph = fmod(days / 29.530588853, 1.0);
+    if (ph < 0)
+      ph += 1.0;
+    if (ev)
+      ph = 0.5;
+  }
+  // Перерисовывать, только когда фаза заметно сменилась (раз в пару часов)
+  // или сменилась яркость экрана
+  if (this->moon_spot_.on && !changed && std::fabs(ph - this->moon_phase_) < 0.003 && this->dim_ == this->moon_dim_)
+    return;
+  if (this->moon_spot_.on)
+    this->invalidate_(this->moon_spot_.a);
+  this->moon_ev_ = ev;
+  this->moon_red_ = red;
+  this->moon_r_ = r_moon;
+  this->moon_phase_ = (float) ph;
+  this->moon_sprite_();
+  const int r = r_moon + 8;
+  this->mark_(this->moon_spot_, true, MOON_X - r, MOON_Y - r, 2 * r + 1, 2 * r + 1);
+}
+
 }  // namespace weather_fx
 }  // namespace esphome

@@ -18,6 +18,8 @@
 #
 # Вид осадков (глобальная weather_mode):
 #   0 нет  1 дождь  2 снег  3 мокрый снег (дождь + снег)  4 град  5 листопад
+#   6–9 праздничное (сердечки, цветы, шарики, кленовые листья)
+#   10 лепестки яблонь  11 тополиный пух
 # ---------------------------------------------------------------------------
 
 globals:
@@ -167,7 +169,7 @@ select:
     name: Фон погоды
     icon: mdi:weather-snowy-rainy
     entity_category: config
-    options: ["Авто", "Выкл", "Дождь", "Снег", "Гроза", "Облачно", "Ясная ночь", "Ясный день", "Листопад", "Сердечки", "Воздушный змей", "Радуга", "Иней", "Жара", "Закат", "Самолёт"]
+    options: ["Авто", "Выкл", "Дождь", "Снег", "Гроза", "Облачно", "Ясная ночь", "Ясный день", "Листопад", "Сердечки", "Воздушный змей", "Радуга", "Иней", "Жара", "Закат", "Самолёт", "Лепестки", "Тополиный пух", "Зарницы", "Гало"]
     initial_option: "Авто"
     optimistic: true
     restore_value: true
@@ -267,7 +269,8 @@ script:
           // Номер пункта «Фона погоды»:
           // 0 Авто, 1 Выкл, 2 Дождь, 3 Снег, 4 Гроза, 5 Облачно, 6 Ясная ночь,
           // 7 Ясный день, 8 Листопад, 9 Сердечки, 10 Воздушный змей, 11 Радуга,
-          // 12 Иней
+          // 12 Иней, 13 Жара, 14 Закат, 15 Самолёт, 16 Лепестки, 17 Тополиный
+          // пух, 18 Зарницы, 19 Гало
           size_t sel = id(weather_fx_select).active_index().value_or(0);
           std::string s;
           switch (sel) {
@@ -286,12 +289,19 @@ script:
             case 13: s = "clear"; break;
             case 14: s = "partly_cloudy"; break;
             case 15: s = "clear"; break;
+            case 16: s = "clear"; break;
+            case 17: s = "clear"; break;
+            case 18: s = "clear"; break;
+            case 19: s = "clear"; break;
             default: s = ""; break;
           }
           // Звёзды — ясной или малооблачной ночью, солнце — таким же днём.
-          // «Ясная ночь» и «Ясный день» показывают своё в любое время
+          // «Ясная ночь» и «Ясный день» показывают своё в любое время;
+          // «Самолёт» и «Зарницы» — ночь, «Гало» — как сейчас на улице
           const bool fair = s == "clear" || s == "partly_cloudy";
-          const bool night = sel == 6 || sel == 15 ? true : (sel == 7 || sel >= 10 ? false : id(is_night));
+          const bool night = sel == 6 || sel == 15 || sel == 18
+                                 ? true
+                                 : (sel == 19 ? id(is_night) : (sel == 7 || sel >= 10 ? false : id(is_night)));
           id(weather_stars) = fair && night;
           id(weather_sun) = fair && !night;
           int mode = 0, cnt = 0, clouds = 0;
@@ -331,6 +341,27 @@ script:
             clouds = 0;  // листья летят по чистому небу, облака не нужны
             const bool strong = (!std::isnan(ws) && ws >= 9.0f) || (!std::isnan(wg) && wg >= 14.0f);
             cnt = sel == 8 || strong ? 14 : 10;
+          }
+          // Приметы весны и лета: с 10 мая сухим днём облетают яблони —
+          // кружатся лепестки; с 5 июня по 5 июля сухим тёплым днём (на улице
+          // от 18°) летит тополиный пух. Только днём и не в сильный ветер (от
+          // 9 м/с). Облаков при них нет, как и при листопаде. «Лепестки» и
+          // «Тополиный пух» в «Фоне погоды» — всегда
+          {
+            const float t_out = id(ha_slot1).state;
+            const bool blossom = now.is_valid() && now.month == 5 && now.day_of_month >= 10;
+            const bool poplar = now.is_valid() && ((now.month == 6 && now.day_of_month >= 5) ||
+                                                   (now.month == 7 && now.day_of_month <= 5));
+            const bool fair_day = sel == 0 && mode == 0 && dry && !id(is_night) && (std::isnan(ws) || ws < 9.0f);
+            if (sel == 16 || (fair_day && blossom)) {
+              mode = 10;
+              cnt = 12;
+              clouds = 0;
+            } else if (sel == 17 || (fair_day && poplar && !std::isnan(t_out) && t_out >= 18.0f)) {
+              mode = 11;
+              cnt = 12;
+              clouds = 0;
+            }
           }
           // 14 февраля вместо пустого неба всплывают сердечки (если праздники
           // не выключены — «Праздники: Все»)
@@ -462,6 +493,26 @@ interval:
           }
           p.fireflies = fx_sel != 1 && p.night &&
                         (hol == HOL_KUPALA || (summer && warm && id(weather_mode) == 0 && !id(weather_storm)));
+          // Зарницы — душной летней ночью: на улице от 20° (гаснут ниже 19°),
+          // без дождя и грозы — изредка; «Фон погоды: Зарницы» — часто
+          static bool sultry = false;
+          if (!std::isnan(t_out))
+            sultry = t_out >= 20.0f || (sultry && t_out >= 19.0f);
+          const bool sultry_night =
+              fx_sel != 1 && id(is_night) && summer && sultry && id(weather_mode) == 0 && !id(weather_storm);
+          p.heat_lightning = fx_sel == 18 ? 2 : (sultry_night ? 1 : 0);
+          if (fx_sel == 18)
+            p.night = true;
+          // Гало — в мороз от −12° (сходит выше −11°) при ясном небе: днём
+          // у солнца, с ложными солнцами, ночью — вокруг яркой луны. «Фон
+          // погоды: Гало» — всегда, ночью — в любую фазу луны
+          static bool icy = false;
+          if (!std::isnan(t_out))
+            icy = t_out <= -12.0f || (icy && t_out <= -11.0f);
+          if (fx_sel == 19)
+            p.halo = id(weather_stars) ? 3 : 2;
+          else if (fx_sel != 1 && icy)
+            p.halo = id(weather_stars) ? 1 : (id(weather_sun) ? 2 : 0);
           p.matrix = fx_sel != 1 && (int32_t) (id(binary_until) - millis()) > 0;
           p.fw_palette = id(fw_palette);
           p.moon_force = preview && (hol == HOL_FULL_MOON || hol == HOL_SUPERMOON || hol == HOL_ECLIPSE) ? hol : 0;

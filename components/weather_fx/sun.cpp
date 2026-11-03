@@ -179,6 +179,13 @@ static void draw_corona(FxSprite &s, float k, float ang, float t) {
 
 // ---------------------------------------------------------------------------
 
+// Где солнце и какого размера: в «шапке» или крупнее, когда часы убраны
+void WeatherFx::sun_place_(int *x, int *y, float *k) const {
+  *x = this->full_ ? SUN_FX : SUN_X;
+  *y = this->full_ ? SUN_FY : SUN_Y;
+  *k = this->full_ ? SUN_FK : 1.0f;
+}
+
 void WeatherFx::sun_apply_() {
   const bool on = this->sun_on_;
   const float k = this->full_ ? SUN_FK : 1.0f;
