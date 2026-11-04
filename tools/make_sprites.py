@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Рисует пиксельные спрайты «гостей» экрана (кот, птица, улитка, снеговик,
-сова, бабочка, ёжик, тыква, мышка, чёрный кот, котята для розыгрыша) и
-праздничные вещи кота
+сова, бабочка, ёжик, тыква, мышка, чёрный кот, котята для розыгрыша), позы
+кота (бег и шаг, сидит, умывается, зевает, потягивается, лежит «буханкой»,
+охотится, прыгает, валяется, пугается, чихает), праздничные вещи кота
 (колпак, шапка Деда Мороза, пилотка, корона, шлем космонавта, ранец, зонтик,
-миска, кулич, блины, снежинка) и записывает их в components/critters/sprites.h
+миска, кулич, блины, снежинка) и вещи для его сценок (клубок, лепесток,
+пушинка, лист, светлячок, сердечко) и записывает их в components/critters/sprites.h
 как изображения LVGL (RGB565A8). Запуск: python3 tools/make_sprites.py [папка_для_png]
 
 Спрайты хранятся в исходной маленькой сетке — каждая клетка один пиксель.
@@ -245,6 +247,12 @@ BOWL_AT = (25.0, 16.0)
 
 # Кончик поднятой лапы в спрайте cat_paw_r (клетки сетки): сюда садится снежинка
 PAW_TIP = (21.5, 6.5)
+# Нос сидящего кота (cat_sit_r): сюда подлетает пушинка
+NOSE_AT = (16.0, 6.0)
+# Лапы прыгающего кота (cat_jump_r): тут он ловит добычу
+JUMP_TIP = (22.0, 0.5)
+# Лапа, которой кот бьёт клубок (cat_bat_r): у земли
+BAT_TIP = (23.5, 15.5)
 
 
 def umbrella():
@@ -510,6 +518,29 @@ def cat_anchors():
     for v in (0, 1):
         both(f"cat_rude{v}", (16.0, 2), (15.5, 4.5), (8.0, 9.5), (15.0, 8.5))
     a["cat_sleep"] = ((20.0, 6), (19.0, 8.5), (10.0, 7.0), (16.5, 10.0))
+    # Новые позы: голова cat_head с левым верхним углом (x, y) — макушка
+    # (x + 5, y + 1), середина (x + 4,5, y + 3,5), шея (x + 4, y + 7,5)
+    def by_head(name, x, y, back, f=""):
+        pts = ((x + 5.0, y + 1.0), (x + 4.5, y + 3.5), back, (x + 4.0, y + 7.5))
+        a[f"{name}_r{f}"] = pts
+        a[f"{name}_l{f}"] = tuple(m(p) for p in pts)
+
+    for p in range(4):
+        bob = [0, 0, 1, 0][p]
+        by_head("cat_walk", 15, 2 + bob, (10.0, 5.5 + bob), str(p))
+    for f in (0, 1):
+        by_head("cat_groom", 11, 2, (8.0, 9.5), str(f))
+        by_head("cat_tail", 11, 1, (8.0, 9.5), str(f))
+        by_head("cat_crouch", 16, 7, (9.0, 8.5), str(f))
+    by_head("cat_yawn", 11, 1, (8.0, 9.5))
+    by_head("cat_stretch", 15, 7, (8.0, 4.5))
+    by_head("cat_loaf", 14, 5, (10.0, 9.0))
+    by_head("cat_loafb", 14, 5, (10.0, 9.0))
+    by_head("cat_jump", 12, 4, (9.0, 7.0))
+    by_head("cat_bat", 14, 3, (9.0, 8.5))
+    by_head("cat_sneeze", 12, 3, (8.0, 9.5))
+    both("cat_arch", (20.0, 5.5), (20.0, 8.5), (11.0, 3.0), (18.0, 11.0))
+    # Валяясь на спине, кот вещи не носит: точек нет — шапка не рисуется
     return a
 
 
@@ -611,6 +642,361 @@ def pumpkin(lit):
     return im
 
 
+# ---- Новые позы кота: шаг, умывание, зевок, потягивание, «буханка», хвост
+# трубой, охота, прыжок, валяние на спине, испуг, удар лапой, чих — и вещи
+# для его сценок: клубок, лепесток, пушинка, лист, светлячок, сердечко ----
+
+TONGUE = (255, 120, 150, 255)
+MOUTH = (120, 30, 40, 255)
+
+
+def cat_head(d, x, y, eyes="open", ears=True):
+    """Голова кота (как у сидящего): овал 10×8 с ушами, глаза, нос. x, y —
+    левый верхний угол овала."""
+    d.ellipse([x, y, x + 9, y + 7], fill=FUR)
+    if ears:
+        d.polygon([(x, y + 2), (x + 1, y - 1), (x + 3, y + 1)], fill=FUR)
+        d.polygon([(x + 6, y + 1), (x + 8, y - 1), (x + 9, y + 2)], fill=FUR)
+    ey = y + 3
+    if eyes == "open":
+        d.point((x + 3, ey), fill=EYE)
+        d.point((x + 6, ey), fill=EYE)
+    elif eyes == "closed":
+        d.line([x + 2, ey, x + 3, ey], fill=EYE)
+        d.line([x + 6, ey, x + 7, ey], fill=EYE)
+    elif eyes == "wide":
+        d.line([x + 3, ey - 1, x + 3, ey], fill=EYE)
+        d.line([x + 6, ey - 1, x + 6, ey], fill=EYE)
+    elif eyes == "squeeze":
+        d.point((x + 2, ey - 1), fill=EYE)
+        d.point((x + 3, ey), fill=EYE)
+        d.point((x + 7, ey - 1), fill=EYE)
+        d.point((x + 6, ey), fill=EYE)
+    d.point((x + 4, y + 5), fill=NOSE)
+    d.point((x + 5, y + 5), fill=NOSE)
+
+
+def cat_walk(phase):
+    """Кот идёт вправо шагом: спина ровная, хвост трубой с загнутым кончиком,
+    лапы переступают по диагонали."""
+    im = canvas(26, 16)
+    d = ImageDraw.Draw(im)
+    bob = [0, 0, 1, 0][phase]
+    # хвост поднят и загнут вперёд
+    for x, y in [(4, 8), (3, 7), (2, 6), (2, 5), (2, 4), (2, 3), (3, 2)]:
+        d.point((x, y + bob), fill=FUR)
+    d.point((4, 2 + bob), fill=FUR_D)
+    # туловище
+    d.ellipse([3, 6 + bob, 18, 11 + bob], fill=FUR)
+    for x in (7, 11, 15):
+        d.line([x, 7 + bob, x, 8 + bob], fill=FUR_D)
+    d.line([7, 11 + bob, 15, 11 + bob], fill=BELLY)
+    # голова — чуть выше спины
+    cat_head(d, 15, 2 + bob)
+    # лапы: (x наверху, x внизу); дальние темнее
+    legs = [
+        [(6, 5), (8, 9), (14, 15), (16, 15)],
+        [(6, 6), (8, 8), (14, 14), (16, 16)],
+        [(6, 7), (8, 7), (14, 13), (16, 17)],
+        [(6, 6), (8, 8), (14, 14), (16, 16)],
+    ][phase]
+    for i, (x0, x1) in enumerate(legs):
+        c = FUR_D if i in (0, 2) else FUR
+        d.line([x0, 11 + bob, x1, 15], fill=c)
+    return im
+
+
+def cat_sit_body(d, tail="wrap"):
+    """Туловище сидящего кота (как в cat_sit) и хвост: wrap — обвивает лапы,
+    up0 / up1 — поднят и покачивается."""
+    if tail == "wrap":
+        d.line([3, 15, 12, 15], fill=FUR_D)
+        d.line([2, 14, 2, 12], fill=FUR_D)
+    elif tail == "up0":
+        for x, y in [(6, 14), (5, 13), (4, 12), (3, 11), (3, 10), (3, 9), (3, 8), (4, 7)]:
+            d.point((x, y), fill=FUR_D)
+    elif tail == "up1":
+        for x, y in [(6, 14), (5, 13), (4, 13), (3, 12), (2, 11), (1, 10), (1, 9), (2, 8)]:
+            d.point((x, y), fill=FUR_D)
+    d.ellipse([6, 6, 17, 15], fill=FUR)
+    d.line([9, 8, 9, 11], fill=FUR_D)
+    d.line([12, 9, 12, 12], fill=FUR_D)
+    d.ellipse([12, 10, 16, 15], fill=BELLY)
+    d.line([13, 13, 13, 15], fill=FUR)
+
+
+def cat_groom(f):
+    """Умывается: f 0 — лижет поднятую лапу, f 1 — трёт лапой мордочку."""
+    im = canvas(26, 16)
+    d = ImageDraw.Draw(im)
+    cat_sit_body(d)
+    cat_head(d, 11, 2, eyes="closed")
+    if f == 0:
+        # лапа поднята ко рту, подушечка светлая, язык
+        d.line([16, 12, 19, 8], fill=FUR)
+        d.line([17, 12, 20, 8], fill=FUR)
+        d.rectangle([19, 6, 21, 8], fill=FUR)
+        d.line([19, 6, 21, 6], fill=BELLY)
+        d.point((18, 7), fill=TONGUE)
+    else:
+        # лапа трёт мордочку у глаза
+        d.line([16, 12, 17, 8], fill=FUR)
+        d.line([17, 12, 18, 8], fill=FUR)
+        d.rectangle([15, 4, 18, 7], fill=FUR)
+        d.line([15, 4, 18, 4], fill=BELLY)
+        d.line([15, 7, 18, 7], fill=FUR_D)
+    return im
+
+
+def cat_yawn():
+    """Зевает: голова запрокинута, глаза зажмурены, пасть открыта."""
+    im = canvas(26, 16)
+    d = ImageDraw.Draw(im)
+    cat_sit_body(d)
+    d.line([16, 13, 16, 15], fill=FUR)
+    cat_head(d, 11, 1, eyes="closed")
+    d.rectangle([14, 5, 16, 7], fill=MOUTH)
+    d.point((15, 7), fill=TONGUE)
+    d.point((14, 5), fill=(250, 250, 245, 255))
+    d.point((16, 5), fill=(250, 250, 245, 255))
+    return im
+
+
+def cat_stretch():
+    """Потягивается: передние лапы вытянуты вперёд по земле, грудь у земли,
+    зад поднят, хвост трубой."""
+    im = canvas(26, 16)
+    d = ImageDraw.Draw(im)
+    for x, y in [(4, 6), (3, 5), (3, 4), (2, 3), (2, 2), (3, 1)]:
+        d.point((x, y), fill=FUR_D)
+    # зад высоко, грудь низко
+    d.polygon([(4, 5), (9, 4), (16, 9), (18, 13), (12, 13), (5, 11)], fill=FUR)
+    d.line([8, 6, 9, 8], fill=FUR_D)
+    d.line([12, 8, 12, 10], fill=FUR_D)
+    # задние лапы прямые
+    d.line([5, 10, 5, 15], fill=FUR_D)
+    d.line([7, 10, 7, 15], fill=FUR)
+    # передние вытянуты вперёд
+    d.line([14, 13, 23, 14], fill=FUR_D)
+    d.line([15, 14, 24, 15], fill=FUR)
+    # голова низко, вперёд, глаза прикрыты
+    cat_head(d, 15, 7, eyes="closed")
+    return im
+
+
+def cat_loaf(blink=False):
+    """Лежит «буханкой»: лапы подобраны, голова над грудью, хвост вдоль бока."""
+    im = canvas(26, 16)
+    d = ImageDraw.Draw(im)
+    d.line([2, 15, 12, 15], fill=FUR_D)
+    d.ellipse([3, 9, 20, 15], fill=FUR)
+    d.line([8, 10, 8, 12], fill=FUR_D)
+    d.line([12, 10, 12, 12], fill=FUR_D)
+    d.line([15, 15, 19, 15], fill=BELLY)
+    cat_head(d, 14, 5, eyes="closed" if blink else "open")
+    return im
+
+
+def cat_crouch(f):
+    """Охотится: припал к земле, зад чуть поднят и покачивается, глаза
+    широко открыты, хвост вытянут, кончик дёргается."""
+    im = canvas(26, 16)
+    d = ImageDraw.Draw(im)
+    rear = 7 if f == 0 else 9
+    d.line([0, 13 - f, 4, 12], fill=FUR_D)
+    d.polygon([(3, rear + 2), (6, rear), (12, 9), (18, 10), (19, 14), (4, 14)], fill=FUR)
+    d.line([7, rear + 1, 7, 12], fill=FUR_D)
+    d.line([11, 10, 11, 12], fill=FUR_D)
+    d.line([5, 14, 7, 15], fill=FUR_D)
+    d.line([15, 14, 17, 15], fill=FUR)
+    cat_head(d, 16, 7, eyes="wide")
+    return im
+
+
+def cat_jump():
+    """Прыгает вверх: задние лапы на земле, тело вытянуто вверх-вперёд,
+    передние лапы тянутся к добыче над головой."""
+    im = canvas(26, 16)
+    d = ImageDraw.Draw(im)
+    d.line([0, 15, 3, 12], fill=FUR_D)
+    d.polygon([(4, 13), (7, 9), (13, 5), (16, 6), (11, 11), (7, 14)], fill=FUR)
+    d.line([9, 8, 10, 10], fill=FUR_D)
+    d.line([5, 13, 4, 15], fill=FUR_D)
+    d.line([7, 13, 7, 15], fill=FUR)
+    cat_head(d, 12, 4, eyes="wide")
+    # лапы вверх-вперёд, над мордой
+    d.line([17, 6, 20, 1], fill=FUR)
+    d.line([18, 7, 22, 2], fill=FUR_D)
+    d.rectangle([20, 0, 21, 1], fill=BELLY)
+    d.rectangle([22, 1, 23, 2], fill=BELLY)
+    return im
+
+
+def cat_roll(f):
+    """Валяется на спине: живот кверху, лапы в воздухе, голова набок."""
+    im = canvas(26, 16)
+    d = ImageDraw.Draw(im)
+    d.line([0, 15, 5, 14], fill=FUR_D)
+    d.ellipse([4, 9, 19, 15], fill=FUR)
+    d.ellipse([6, 9, 17, 12], fill=BELLY)
+    legs = [(7, 6), (9, 6), (14, 6), (16, 7)] if f == 0 else [(6, 7), (9, 5), (14, 7), (17, 6)]
+    for i, (x, top) in enumerate(legs):
+        d.line([x, 10, x, top], fill=FUR if i % 2 else FUR_D)
+        d.point((x, top), fill=BELLY)
+    # голова лежит набок, уши вниз
+    d.ellipse([17, 8, 25, 14], fill=FUR)
+    d.polygon([(18, 13), (18, 16), (20, 14)], fill=FUR)
+    d.polygon([(23, 14), (25, 16), (25, 12)], fill=FUR)
+    d.line([19, 11, 20, 10], fill=EYE)
+    d.line([22, 10, 23, 11], fill=EYE)
+    d.point((21, 9), fill=NOSE)
+    return im
+
+
+def cat_arch():
+    """Испугался: спина дугой, шерсть дыбом, хвост трубой, лапы прямые."""
+    im = canvas(26, 16)
+    d = ImageDraw.Draw(im)
+    # хвост трубой, пушистый
+    d.rectangle([2, 1, 3, 8], fill=FUR)
+    d.point((1, 2), fill=FUR)
+    d.point((4, 3), fill=FUR)
+    d.point((1, 5), fill=FUR)
+    # спина дугой и шерсть дыбом
+    d.chord([4, 2, 19, 16], 180, 360, fill=FUR)
+    for x in range(6, 18, 2):
+        d.point((x, 2 if 8 <= x <= 14 else 3), fill=FUR)
+    d.line([8, 5, 8, 7], fill=FUR_D)
+    d.line([12, 4, 12, 6], fill=FUR_D)
+    # прямые лапы
+    for x, c in ((5, FUR_D), (7, FUR), (15, FUR_D), (17, FUR)):
+        d.line([x, 9, x, 15], fill=c)
+    # голова ниже дуги, глаза широко, уши прижаты, шипит
+    d.ellipse([16, 5, 24, 12], fill=FUR)
+    d.polygon([(16, 7), (16, 5), (18, 6)], fill=FUR)
+    d.polygon([(22, 6), (24, 5), (24, 7)], fill=FUR)
+    d.line([19, 7, 19, 8], fill=EYE)
+    d.line([22, 7, 22, 8], fill=EYE)
+    d.point((21, 10), fill=TONGUE)
+    return im
+
+
+def cat_bat():
+    """Бьёт лапой по клубку на земле: присел, передняя лапа вытянута вперёд."""
+    im = canvas(26, 16)
+    d = ImageDraw.Draw(im)
+    d.line([0, 14, 4, 13], fill=FUR_D)
+    d.ellipse([4, 8, 17, 15], fill=FUR)
+    d.line([8, 9, 8, 11], fill=FUR_D)
+    d.line([11, 9, 11, 11], fill=FUR_D)
+    d.line([6, 14, 6, 15], fill=FUR_D)
+    cat_head(d, 14, 3)
+    d.line([16, 12, 22, 14], fill=FUR)
+    d.line([16, 13, 22, 15], fill=FUR)
+    d.rectangle([22, 14, 23, 15], fill=FUR)
+    return im
+
+
+def cat_sneeze():
+    """Чихает: голова дёрнулась вниз, глаза зажмурены, брызги из носа."""
+    im = canvas(26, 16)
+    d = ImageDraw.Draw(im)
+    cat_sit_body(d)
+    d.line([16, 13, 16, 15], fill=FUR)
+    cat_head(d, 12, 3, eyes="squeeze")
+    d.point((17, 9), fill=MOUTH)
+    for x, y in ((23, 6), (24, 8), (22, 9)):
+        d.point((x, y), fill=(200, 230, 255, 255))
+    return im
+
+
+def cat_tail(f):
+    """Сидит, хвост поднят и покачивается."""
+    im = canvas(26, 16)
+    d = ImageDraw.Draw(im)
+    cat_sit_body(d, tail="up0" if f == 0 else "up1")
+    d.line([16, 13, 16, 15], fill=FUR)
+    cat_head(d, 11, 1)
+    return im
+
+
+# ---- Вещи ----
+
+def yarn(f):
+    """Клубок ниток: голубой, нитки бегут по-разному в двух кадрах, хвостик нитки."""
+    im = canvas(8, 6)
+    d = ImageDraw.Draw(im)
+    blue, dark, light = (66, 165, 245, 255), (25, 118, 210, 255), (170, 215, 255, 255)
+    d.ellipse([2, 0, 7, 5], fill=blue)
+    if f == 0:
+        d.line([3, 1, 6, 4], fill=dark)
+        d.line([3, 3, 5, 5], fill=dark)
+        d.point((4, 1), fill=light)
+    else:
+        d.line([3, 4, 6, 1], fill=dark)
+        d.line([2, 2, 4, 0], fill=dark)
+        d.point((6, 3), fill=light)
+    d.line([0, 5, 2, 4], fill=dark)
+    return im
+
+
+def petal():
+    im = canvas(5, 4)
+    d = ImageDraw.Draw(im)
+    d.ellipse([0, 0, 4, 3], fill=(248, 187, 208, 255))
+    d.line([1, 1, 3, 1], fill=(255, 250, 250, 255))
+    d.point((2, 2), fill=(255, 240, 245, 255))
+    return im
+
+
+def fluff():
+    im = canvas(7, 7)
+    px = im.load()
+    for (x, y), a in {(3, 3): 255, (2, 3): 200, (4, 3): 200, (3, 2): 200, (3, 4): 200,
+                      (1, 1): 110, (5, 1): 110, (1, 5): 110, (5, 5): 110, (0, 3): 90, (6, 3): 90,
+                      (3, 0): 90, (3, 6): 90, (2, 2): 150, (4, 4): 150, (4, 2): 150, (2, 4): 150}.items():
+        px[x, y] = (250, 250, 255, a)
+    return im
+
+
+def leaf():
+    im = canvas(6, 6)
+    d = ImageDraw.Draw(im)
+    d.polygon([(0, 2), (2, 0), (5, 0), (5, 3), (3, 5), (0, 5)], fill=(230, 110, 30, 255))
+    d.line([0, 5, 4, 1], fill=(180, 70, 20, 255))
+    d.point((5, 0), fill=(250, 170, 60, 255))
+    return im
+
+
+def firefly(bright):
+    im = canvas(5, 5)
+    px = im.load()
+    k = 1.0 if bright else 0.55
+    for x in range(5):
+        for y in range(5):
+            r = ((x - 2) ** 2 + (y - 2) ** 2) ** 0.5
+            if r < 0.5:
+                px[x, y] = (250, 255, 200, int(255 * k))
+            elif r < 1.5:
+                px[x, y] = (210, 255, 100, int(150 * k))
+            elif r < 2.3:
+                px[x, y] = (170, 255, 60, int(55 * k))
+    return im
+
+
+def heart():
+    im = canvas(5, 4)
+    d = ImageDraw.Draw(im)
+    c = (255, 82, 120, 255)
+    d.point((1, 0), fill=c)
+    d.point((3, 0), fill=c)
+    d.line([0, 1, 4, 1], fill=c)
+    d.line([1, 2, 3, 2], fill=c)
+    d.point((2, 3), fill=c)
+    d.point((1, 1), fill=(255, 170, 190, 255))
+    return im
+
+
 def mirrored(im):
     return im.transpose(Image.FLIP_LEFT_RIGHT)
 
@@ -671,6 +1057,30 @@ def sprites():
     for f in (0, 1):
         out[f"mouse_r{f}"] = mouse(f)
         out[f"mouse_l{f}"] = mirrored(mouse(f))
+    # Новые позы кота — вправо и отражённые влево: cat_walk_r0, cat_walk_l0…
+    poses = []
+    for p in range(4):
+        poses.append(("cat_walk", str(p), cat_walk(p)))
+    for f in (0, 1):
+        poses.append(("cat_groom", str(f), cat_groom(f)))
+        poses.append(("cat_tail", str(f), cat_tail(f)))
+        poses.append(("cat_crouch", str(f), cat_crouch(f)))
+        poses.append(("cat_roll", str(f), cat_roll(f)))
+    for name, fn in (("cat_yawn", cat_yawn), ("cat_stretch", cat_stretch), ("cat_loaf", cat_loaf),
+                     ("cat_loafb", lambda: cat_loaf(True)), ("cat_jump", cat_jump), ("cat_arch", cat_arch),
+                     ("cat_bat", cat_bat), ("cat_sneeze", cat_sneeze)):
+        poses.append((name, "", fn()))
+    for base, f, im in poses:
+        out[f"{base}_r{f}"] = im
+        out[f"{base}_l{f}"] = mirrored(im)
+    # Вещи для сценок
+    for f in (0, 1):
+        out[f"yarn{f}"] = yarn(f)
+        out[f"firefly{f}"] = firefly(f == 0)
+    out["petal"] = petal()
+    out["fluff"] = fluff()
+    out["leaf"] = leaf()
+    out["heart"] = heart()
     return out
 
 
@@ -723,6 +1133,13 @@ def main():
         "\n// Кончик поднятой лапы, в полуклетках: [0] — кот смотрит вправо, [1] — влево\n"
         f"static const int16_t PAW_TIP[2][2] = {{{{{h2(PAW_TIP[0])}, {h2(PAW_TIP[1])}}}, "
         f"{{{h2(26 - PAW_TIP[0])}, {h2(PAW_TIP[1])}}}}};\n"
+        "\n// Нос сидящего кота, лапы в прыжке и лапа у земли, в полуклетках; [0] — вправо, [1] — влево\n"
+        f"static const int16_t NOSE_AT[2][2] = {{{{{h2(NOSE_AT[0])}, {h2(NOSE_AT[1])}}}, "
+        f"{{{h2(26 - NOSE_AT[0])}, {h2(NOSE_AT[1])}}}}};\n"
+        f"static const int16_t JUMP_TIP[2][2] = {{{{{h2(JUMP_TIP[0])}, {h2(JUMP_TIP[1])}}}, "
+        f"{{{h2(26 - JUMP_TIP[0])}, {h2(JUMP_TIP[1])}}}}};\n"
+        f"static const int16_t BAT_TIP[2][2] = {{{{{h2(BAT_TIP[0])}, {h2(BAT_TIP[1])}}}, "
+        f"{{{h2(26 - BAT_TIP[0])}, {h2(BAT_TIP[1])}}}}};\n"
         "\n// Где стоит миска (кулич, блины) у морды кота: середина её низа, в\n"
         "// полуклетках; [0] — вправо, [1] — влево\n"
         f"static const int16_t BOWL_AT[2][2] = {{{{{h2(BOWL_AT[0])}, {h2(BOWL_AT[1])}}}, "

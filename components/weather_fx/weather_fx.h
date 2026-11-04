@@ -136,6 +136,13 @@ class WeatherFx : public Component {
       this->next_met_ = millis();
   }
 
+  /// Сверкнуть зарницей сейчас (кот насторожился). Только когда зарницам
+  /// сейчас бывать — душной летней ночью
+  void flash_heat_lightning() {
+    if (this->hl_mode_ && !this->hl_n_)
+      this->next_hl_ = millis();
+  }
+
   /// Какое созвездие сейчас на экране (для отладки), пустая строка — никакое
   const char *constellation() const { return this->con_on_ ? this->con_name_ : ""; }
 

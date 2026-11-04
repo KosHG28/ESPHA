@@ -1,5 +1,6 @@
 #include "critters.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 
@@ -31,7 +32,9 @@ static const float BLACK_SPEED = 0.26f;  // чёрный кот бежит чу�
 static const float BIRD_SPEED = 0.20f;
 static const float SNAIL_SPEED = 0.016f;
 static const float SNOWMAN_SPEED = 0.04f;
-static const uint32_t SLEEP_MS = 120000;  // кот спит 2 минуты
+// Ночью кот спит: «Недолго» — минуту, «Подольше» — две, «Долго» — четыре;
+// не на странице часов — не больше минуты
+static const uint32_t SLEEP_MS[3] = {60000, 120000, 240000};
 static const uint32_t OWL_MS = 20000;     // сова сидит 20 секунд
 static const uint32_t PUMPKIN_MS = 120000;  // тыква стоит 2 минуты
 static const float BUTTERFLY_SPEED = 0.06f;
@@ -41,12 +44,26 @@ static const int MOUSE_LEAD = 60;        // на сколько мышь впе�
 static const int OFF_L = -CAT_W - 10, OFF_R = 476;  // за краем экрана
 static const int CENTER_X = 233 - CAT_W / 2;
 static const uint32_t MEOW_MS = 1600;  // сколько кот сидит и мяукает после касания
+// Лёжа кот ниже: почти не заслоняет надписи над ним
+static const int CAT_GROUND_LIE = 448;
+static const float WALK_SPEED = 0.075f;  // шагом, px/мс
+static const int SPOT_DX = 40;           // на сколько кот отходит от середины
+// Как часто гости приходят сами, минуты: «Редко», «Иногда», «Часто», «Очень часто»
+static const uint16_t NEXT_MIN[4][2] = {{60, 180}, {30, 60}, {10, 20}, {3, 6}};
+// Сколько кот пробегает насквозь, а не заходит, из 100: «Недолго», «Подольше», «Долго»
+static const int RUN_PCT[3] = {50, 25, 15};
+// Сколько длится занятие, мс (сидит, лежит и дремлет — по-разному, идёт —
+// пока не дойдёт): по порядку Act
+static const uint16_t ACT_MS[] = {0, 4000, 4800, 3600, 11000, 25000, 3600, 8000, 3600,
+                                  0, 2600, 4300, 4800, 4600,  6200,  4200, 4200};
 // Сколько кот сидит посередине: просто так, ловя снежинку, глядя в небо, у
 // принтера, у миски, у кулича, над блинами, провожая чёрного кота, в жару,
 // смущаясь в «Романтике», обидевшись и «почёсываясь»
 static const uint32_t SIT_MS[12] = {3000, 4200, 4300, 6000, 5200, 5000, 5200, 4600, 6500, 4200, 7000, 3200};
 
 int Critters::rnd_(int lo, int hi) { return lo + (int) (random_uint32() % (uint32_t) (hi - lo)); }
+
+static inline float fx_sq_(float v) { return v * v; }
 
 static void tick_cb(lv_timer_t *t) { static_cast<Critters *>(lv_timer_get_user_data(t))->tick(); }
 
@@ -57,7 +74,23 @@ void Sprite::set(const lv_image_dsc_t *s, int k) {
   this->k = k;
   if (s == nullptr || this->obj == nullptr || k < 1)
     return;
-  const int sw = s->header.w, sh = s->header.h, w = sw * k, h = sh * k;
+  const int sw = s->header.w, sh = s->header.h;
+  // Где на кадре рисунок: прозрачные поля не нужны
+  const uint8_t *scol = s->data, *salp = s->data + (size_t) sw * sh * 2;
+  int x0 = sw, y0 = sh, x1 = -1, y1 = -1;
+  for (int y = 0; y < sh; y++) {
+    for (int x = 0; x < sw; x++) {
+      if (salp[y * sw + x]) {
+        x0 = std::min(x0, x);
+        x1 = std::max(x1, x);
+        y0 = std::min(y0, y);
+        y1 = y;
+      }
+    }
+  }
+  if (x1 < 0)
+    x0 = y0 = x1 = y1 = 0;  // пустой — одна прозрачная клетка
+  const int cw = x1 - x0 + 1, ch = y1 - y0 + 1, w = cw * k, h = ch * k;
   const size_t need = (size_t) w * h * 3;
   const int n = this->cur ^ 1;
   if (this->cap[n] < need) {
@@ -74,12 +107,12 @@ void Sprite::set(const lv_image_dsc_t *s, int k) {
   // (байт на пиксель). Строку клеток растягиваем по горизонтали, потом
   // копируем её k раз вниз
   uint8_t *col = this->buf[n], *alp = col + (size_t) w * h * 2;
-  const uint8_t *scol = s->data, *salp = s->data + (size_t) sw * sh * 2;
-  for (int y = 0; y < sh; y++) {
+  for (int y = 0; y < ch; y++) {
     uint8_t *row = col + (size_t) y * k * w * 2;
     uint8_t *arow = alp + (size_t) y * k * w;
-    for (int x = 0; x < sw; x++) {
-      const uint8_t c0 = scol[(y * sw + x) * 2], c1 = scol[(y * sw + x) * 2 + 1], a = salp[y * sw + x];
+    for (int x = 0; x < cw; x++) {
+      const int i0 = (y + y0) * sw + x + x0;
+      const uint8_t c0 = scol[i0 * 2], c1 = scol[i0 * 2 + 1], a = salp[i0];
       for (int i = 0; i < k; i++) {
         row[(x * k + i) * 2] = c0;
         row[(x * k + i) * 2 + 1] = c1;
@@ -102,6 +135,8 @@ void Sprite::set(const lv_image_dsc_t *s, int k) {
   lv_image_cache_drop(&d);
   lv_image_set_src(this->obj, &d);
   this->cur = n;
+  this->ox = x0 * k;
+  this->oy = y0 * k;
 }
 
 void Sprite::show(bool v) {
@@ -119,8 +154,8 @@ void Critters::bind(lv_obj_t *img, lv_obj_t *zzz, lv_obj_t *hat, lv_obj_t *item)
   this->hat_.obj = hat;
   this->item_.obj = item;
 
-  // Первый гость — через 20–60 минут после запуска
-  this->next_ = millis() + rnd_(20, 60) * 60000u;
+  // Первый гость — как обычно, по настройке «Гости приходят»
+  this->next_ = millis() + this->interval_();
   // Кадр — в таймере LVGL, в одном проходе с перерисовкой экрана (как у
   // погодного фона): движение ровное, без лишних и пропущенных шагов
   lv_timer_create(tick_cb, 33, this);
@@ -143,59 +178,60 @@ void Critters::place_(const lv_image_dsc_t *img, int x, int y, int k) {
   this->hat_.show(false);
 }
 
+enum At { AT_HAT, AT_HEAD, AT_BACK, AT_NECK };
+
+// Что сейчас на коте и куда это надевается (at): в дождь — зонтик, в праздник
+// — своя вещь: пилотка, корона, шлем космонавта, ранец, шапка Деда Мороза или
+// колпак; в мороз — шарф кончиком назад (какой стороной смотрит кот на кадре
+// img — по точке шеи). nullptr — ничего
+const lv_image_dsc_t *Critters::prop_(const lv_image_dsc_t *img, int *at) const {
+  *at = AT_HAT;
+  if (this->weather_ == 1)
+    return &spr_cat_umbrella;
+  switch (this->holiday_) {
+    case HOL_FEB23:
+    case HOL_VICTORY:
+      return &spr_cat_pilotka;
+    case HOL_CAT_DAY:
+      return &spr_cat_crown;
+    case HOL_COSMOS:
+      *at = AT_HEAD;
+      return &spr_cat_helmet;
+    case HOL_SEPT1:
+      *at = AT_BACK;
+      return &spr_cat_backpack;
+    default:
+      break;
+  }
+  if (this->new_year_ || this->holiday_ == HOL_NEW_YEAR || this->holiday_ == HOL_CHRISTMAS)
+    return &spr_cat_santa;
+  if (this->birthday_ || this->holiday_ == HOL_BIRTHDAY || this->holiday_ == HOL_MAR8 ||
+      this->holiday_ == HOL_CHILDREN || this->holiday_ == HOL_RUSSIA)
+    return &spr_cat_hat;
+  if (this->climate_ != 2)
+    return nullptr;
+  bool left = false;
+  for (const auto &c : CAT_ANCHORS)
+    if (c.img == img)
+      left = c.neck_x < 26;
+  *at = AT_NECK;
+  return left ? &spr_cat_scarf_l : &spr_cat_scarf_r;
+}
+
 void Critters::place_cat_(const lv_image_dsc_t *img, int x, int y) {
   this->img_.set(img, K_CAT);
   this->img_.pos(x, y);
   if (!this->hat_.obj)
     return;
-  // На коте: в дождь — зонтик, в праздник — своя вещь: пилотка, корона,
-  // шлем космонавта, ранец, шапка Деда Мороза или колпак; в мороз — шарф
-  enum At { AT_HAT, AT_HEAD, AT_BACK, AT_NECK };
-  const lv_image_dsc_t *prop = nullptr;
-  At at = AT_HAT;
-  if (this->weather_ == 1) {
-    prop = &spr_cat_umbrella;
-  } else {
-    switch (this->holiday_) {
-      case HOL_FEB23:
-      case HOL_VICTORY:
-        prop = &spr_cat_pilotka;
-        break;
-      case HOL_CAT_DAY:
-        prop = &spr_cat_crown;
-        break;
-      case HOL_COSMOS:
-        prop = &spr_cat_helmet;
-        at = AT_HEAD;
-        break;
-      case HOL_SEPT1:
-        prop = &spr_cat_backpack;
-        at = AT_BACK;
-        break;
-      default:
-        if (this->new_year_ || this->holiday_ == HOL_NEW_YEAR || this->holiday_ == HOL_CHRISTMAS)
-          prop = &spr_cat_santa;
-        else if (this->birthday_ || this->holiday_ == HOL_BIRTHDAY || this->holiday_ == HOL_MAR8 ||
-                 this->holiday_ == HOL_CHILDREN || this->holiday_ == HOL_RUSSIA)
-          prop = &spr_cat_hat;
-        break;
-    }
-    if (prop == nullptr && this->climate_ == 2) {
-      // Шарф кончиком назад: какой стороной смотрит кот — по точке шеи
-      bool left = false;
-      for (const auto &c : CAT_ANCHORS)
-        if (c.img == img)
-          left = c.neck_x < 26;
-      prop = left ? &spr_cat_scarf_l : &spr_cat_scarf_r;
-      at = AT_NECK;
-    }
-  }
+  int at;
+  const lv_image_dsc_t *prop = this->prop_(img, &at);
   const CatAnchor *a = nullptr;
   if (prop)
     for (const auto &c : CAT_ANCHORS)
       if (c.img == img)
         a = &c;
   if (!a) {
+    // Вещи нет — или на этом кадре её некуда надеть (кот валяется на спине)
     this->hat_.show(false);
     return;
   }
@@ -231,6 +267,29 @@ void Critters::say_(const char *text) {
   }
   lv_label_set_text(this->zzz_, text);
   lv_obj_set_pos(this->zzz_, (int) this->x_ + CAT_W / 2 - 40, (int) this->y_ - 48);
+  lv_obj_clear_flag(this->zzz_, LV_OBJ_FLAG_HIDDEN);
+}
+
+void Critters::hush_() {
+  // Убрать надпись — и «мяу», и «z z z»
+  if (this->zzz_)
+    lv_obj_add_flag(this->zzz_, LV_OBJ_FLAG_HIDDEN);
+  this->said_ = nullptr;
+  this->zzz_f_ = -1;
+}
+
+void Critters::snore_(uint32_t t) {
+  // «z», «z z», «z z z» по кругу, чуть поднимаясь
+  if (!this->zzz_)
+    return;
+  static const char *Z[3] = {"z", "z z", "z z z"};
+  const int f = (t / 800) % 3;
+  if (f == this->zzz_f_)
+    return;
+  this->zzz_f_ = f;
+  this->said_ = nullptr;
+  lv_label_set_text(this->zzz_, Z[f]);
+  lv_obj_set_pos(this->zzz_, (int) this->x_ + 19 * K_CAT, (int) this->y_ - 20 - f * 5);
   lv_obj_clear_flag(this->zzz_, LV_OBJ_FLAG_HIDDEN);
 }
 
@@ -293,7 +352,7 @@ void Critters::kittens_frame_(uint32_t now) {
     else
       img = blink ? &spr_kit_white_blink : &spr_kit_white;
     k.set(img, K_KIT);
-    lv_obj_set_pos(k.obj, KX[i], KY - hop);
+    k.pos(KX[i], KY - hop);
   }
 }
 
@@ -310,8 +369,28 @@ void Critters::stop_() {
   this->hat_.show(false);
   this->item_.show(false);
   this->said_ = nullptr;
-  // Следующий — через 1–3 часа, в праздник кот заходит чаще: раз в 30–60 минут
-  this->next_ = millis() + (this->festive_ ? rnd_(30, 60) : rnd_(60, 180)) * 60000u;
+  // Следующий — по настройке «Гости приходят», в праздник — хотя бы раз в
+  // 30–60 минут
+  this->next_ = millis() + this->interval_();
+}
+
+uint32_t Critters::interval_() const {
+  const uint16_t *m = NEXT_MIN[this->freq_];
+  uint32_t ms = rnd_(m[0], m[1] + 1) * 60000u;
+  if (this->festive_)
+    ms = std::min(ms, (uint32_t) rnd_(30, 61) * 60000u);
+  return ms;
+}
+
+void Critters::set_prefs(int freq, int stay) {
+  freq = std::min(std::max(freq, 0), 3);
+  this->stay_ = std::min(std::max(stay, 0), 2);
+  if (freq == this->freq_)
+    return;
+  // Сменили, как часто приходят гости, — следующий по новой настройке
+  this->freq_ = freq;
+  if (this->show_ == SHOW_NONE)
+    this->next_ = millis() + this->interval_();
 }
 
 void Critters::start_cat() {
@@ -337,7 +416,7 @@ void Critters::start_cat() {
     this->start(SHOW_CAT_VISIT);
     this->variant_ = VAR_STARS;
   } else {
-    this->start(rnd_(0, 2) ? SHOW_CAT_RUN : SHOW_CAT_VISIT);
+    this->start(rnd_(0, 100) < RUN_PCT[this->stay_] ? SHOW_CAT_RUN : SHOW_CAT_VISIT);
   }
 }
 
@@ -385,6 +464,12 @@ void Critters::poke() {
     return;
   if (this->show_ == SHOW_CAT_SLEEP)
     this->right_ = rnd_(0, 2);  // проснулся — убежит в случайную сторону
+  if (this->show_ == SHOW_CAT_VISIT && this->stage_ == 1) {
+    // Лежал или крутился за хвостом — садится как обычно
+    if (this->nplan_ && this->plan_[this->iplan_] == ACT_SPIN)
+      this->right_ = this->spin_r_;
+    this->y_ = this->ground_y_(false) - CAT_H;
+  }
   this->show_ = SHOW_CAT_VISIT;
   this->stage_ = 3;
   this->stage_t0_ = millis();
@@ -457,6 +542,10 @@ void Critters::start(Show show) {
   }
   if (show != SHOW_CAT_SLEEP && show != SHOW_OWL && show != SHOW_PUMPKIN)
     this->x_ = this->right_ ? OFF_L : OFF_R;
+  // Надолго кот чаще приходит шагом, не спеша
+  this->walk_ = this->stay_ > 0 && rnd_(0, 10) < 6;
+  this->came_right_ = this->right_;
+  this->nplan_ = this->iplan_ = 0;
   this->img_.show(true);
 }
 
@@ -464,6 +553,13 @@ const lv_image_dsc_t *Critters::run_frame_(int f) const {
   static const lv_image_dsc_t *R[4] = {&spr_cat_run_r0, &spr_cat_run_r1, &spr_cat_run_r2, &spr_cat_run_r3};
   static const lv_image_dsc_t *L[4] = {&spr_cat_run_l0, &spr_cat_run_l1, &spr_cat_run_l2, &spr_cat_run_l3};
   // 1 апреля кот бегает задом наперёд
+  const bool face_right = this->holiday_ == HOL_APRIL1 ? !this->right_ : this->right_;
+  return face_right ? R[f] : L[f];
+}
+
+const lv_image_dsc_t *Critters::walk_frame_(int f) const {
+  static const lv_image_dsc_t *R[4] = {&spr_cat_walk_r0, &spr_cat_walk_r1, &spr_cat_walk_r2, &spr_cat_walk_r3};
+  static const lv_image_dsc_t *L[4] = {&spr_cat_walk_l0, &spr_cat_walk_l1, &spr_cat_walk_l2, &spr_cat_walk_l3};
   const bool face_right = this->holiday_ == HOL_APRIL1 ? !this->right_ : this->right_;
   return face_right ? R[f] : L[f];
 }
@@ -630,6 +726,437 @@ void Critters::sit_(uint32_t st) {
   this->place_cat_(img, (int) this->x_, (int) this->y_);
 }
 
+// ---- Визит: из чего он складывается ----
+
+void Critters::item_at_(const lv_image_dsc_t *img, int k, int cx, int cy) {
+  // Вещь рядом с котом — серединой в точку (cx, cy)
+  if (!this->item_.obj)
+    return;
+  this->item_.set(img, k);
+  this->item_.pos(cx - this->item_.w() / 2, cy - this->item_.h() / 2);
+  this->item_.show(true);
+}
+
+int Critters::ground_y_(bool lying) const {
+  // Где земля под котом (низ кадра): у края круга — выше, чтобы кот не
+  // обрезался. Лёжа кот ниже и почти не заслоняет надписи над ним
+  auto bottom = [](float x) {
+    const float d = x - 233.0f;
+    return 233.0f + sqrtf(std::max(0.0f, 233.0f * 233.0f - d * d));
+  };
+  const float b = std::min(bottom(this->x_ + 2 * K_CAT), bottom(this->x_ + 25 * K_CAT)) - 4.0f;
+  return (int) std::min((float) (lying ? CAT_GROUND_LIE : CAT_GROUND), b);
+}
+
+int Critters::reactions_(Act *out) const {
+  // На что на небе кот приходит посмотреть: лепестки, пух, листья, ночью —
+  // светлячки и зарницы, гало и радуга
+  int n = 0;
+  if (this->sky_ & SKY_PETALS)
+    out[n++] = ACT_PETAL;
+  if (this->sky_ & SKY_FLUFF)
+    out[n++] = ACT_FLUFF;
+  if ((this->sky_ & SKY_LEAVES) && this->weather_ != 1)
+    out[n++] = ACT_LEAF;
+  if ((this->sky_ & SKY_FIREFLIES) && this->night_)
+    out[n++] = ACT_FIREFLY;
+  if ((this->sky_ & SKY_HEAT_LIGHTNING) && this->night_)
+    out[n++] = ACT_FLASH;
+  if (this->sky_ & (SKY_HALO | SKY_RAINBOW))
+    out[n++] = ACT_GAZE;
+  return n;
+}
+
+Critters::Act Critters::pick_act_(Act prev) const {
+  // Чем заняться дальше — по погоде и времени суток, не то же, что сейчас.
+  // В жару — только лежать; в дождь (под зонтиком) не играет и не валяется,
+  // как и в снег; с праздничной вещью не валяется на спине; ночью больше
+  // лежит и дремлет; вздремнуть днём — только если кот гостит долго
+  struct W {
+    Act a;
+    int w;
+  } w[20];
+  int n = 0;
+  auto add = [&](Act a, int k) {
+    if (a != prev && n < 20)
+      w[n++] = {a, k};
+  };
+  const bool night = this->night_, rain = this->weather_ == 1, snow = this->weather_ == 2;
+  int at;
+  const bool prop = this->prop_(&spr_cat_sit_r, &at) != nullptr;
+  if (this->climate_ == 1) {
+    add(ACT_LOAF, 3);
+    add(ACT_YAWN, 1);
+    add(ACT_NAP, 2);
+  } else {
+    add(ACT_SIT, 2);
+    add(ACT_GROOM, 3);
+    add(ACT_YAWN, night ? 3 : 2);
+    add(ACT_LOAF, night ? 4 : 3);
+    add(ACT_TAIL, night ? 1 : 2);
+    add(ACT_WALK, night ? 1 : 2);
+    if ((night || this->stay_ == 2) && !rain && !snow)
+      add(ACT_NAP, night ? 3 : 1);
+    if (!night && !rain) {
+      add(ACT_PLAY, 3);
+      add(ACT_SPIN, 1);
+      if (!prop && !snow)
+        add(ACT_ROLL, 2);
+    }
+    Act r[6];
+    const int nr = this->reactions_(r);
+    for (int i = 0; i < nr; i++)
+      add(r[i], 2);
+  }
+  int sum = 0;
+  for (int i = 0; i < n; i++)
+    sum += w[i].w;
+  if (sum <= 0)
+    return ACT_SIT;
+  int k = rnd_(0, sum);
+  for (int i = 0; i < n; i++) {
+    if (k < w[i].w)
+      return w[i].a;
+    k -= w[i].w;
+  }
+  return ACT_SIT;
+}
+
+void Critters::plan_visit_() {
+  // Сначала — сценка (миска, кулич, снежинка…) или то, на что кот пришёл
+  // посмотреть на небе; потом, если кот гостит подольше, — ещё несколько
+  // занятий. Обиделся, смутился или провожает чёрного кота — сразу уходит;
+  // не на странице часов — тоже
+  this->nplan_ = 0;
+  this->iplan_ = 0;
+  const Variant v = this->variant_;
+  if (v != VAR_PLAIN) {
+    this->plan_[this->nplan_++] = ACT_SCENE;
+  } else {
+    Act r[6];
+    const int nr = this->reactions_(r);
+    this->plan_[this->nplan_++] = nr && rnd_(0, 100) < 85 ? r[rnd_(0, nr)] : this->pick_act_(ACT_SCENE);
+  }
+  if (this->page_ != 0 || v == VAR_ROMANCE || v == VAR_RUDE || v == VAR_SCRATCH || v == VAR_BLACK)
+    return;
+  const int extra = this->stay_ == 0 ? 0 : (this->stay_ == 1 ? rnd_(2, 5) : rnd_(5, 9));
+  for (int i = 0; i < extra && this->nplan_ < NACT; i++) {
+    const Act a = this->pick_act_(this->plan_[this->nplan_ - 1]);
+    this->plan_[this->nplan_++] = a;
+  }
+}
+
+void Critters::begin_act_(uint32_t now) {
+  this->stage_t0_ = now;
+  this->act_seed_ = rnd_(0, 1000);
+  this->flash_sent_ = false;
+  this->item_.show(false);
+  this->hush_();
+  const Act a = this->plan_[this->iplan_];
+  this->act_ms_ = ACT_MS[a];
+  if (a == ACT_SIT) {
+    this->act_ms_ = rnd_(3000, 5000);
+  } else if (a == ACT_LOAF) {
+    this->act_ms_ = rnd_(8000, 15000);
+  } else if (a == ACT_NAP) {
+    this->act_ms_ = this->stay_ == 2 ? rnd_(25000, 45000) : rnd_(15000, 25000);
+  } else if (a == ACT_SPIN) {
+    this->spin_r_ = this->right_;
+  } else if (a == ACT_WALK) {
+    // На шаг в сторону или обратно к середине
+    const float opts[3] = {(float) (CENTER_X - SPOT_DX), (float) CENTER_X, (float) (CENTER_X + SPOT_DX)};
+    int i = rnd_(0, 3);
+    if (std::fabs(opts[i] - this->x_) < 10)
+      i = (i + 1 + rnd_(0, 2)) % 3;
+    this->tx_ = opts[i];
+    this->right_ = this->tx_ > this->x_;
+  }
+}
+
+void Critters::leave_(uint32_t now) {
+  // Разворачивается и уходит туда, откуда пришёл
+  this->say_(nullptr);
+  this->hush_();
+  this->item_.show(false);
+  this->right_ = !this->came_right_;
+  this->y_ = CAT_GROUND - CAT_H;
+  this->stage_ = 2;
+  this->stage_t0_ = now;
+}
+
+bool Critters::act_(Act a, uint32_t st, uint32_t dt) {
+  const bool r = this->right_;
+  const int ri = r ? 0 : 1;
+  const float dir = r ? 1.0f : -1.0f;
+  auto pick = [r](const lv_image_dsc_t &right, const lv_image_dsc_t &left) { return r ? &right : &left; };
+  // Точка кадра в полуклетках — на экран
+  auto px = [this](int hx) { return (int) this->x_ + hx * K_CAT / 2; };
+  auto py = [this](int hy) { return (int) this->y_ + hy * K_CAT / 2; };
+  const lv_image_dsc_t *sit = pick(spr_cat_sit_r, spr_cat_sit_l), *blink = pick(spr_cat_blink_r, spr_cat_blink_l);
+  const lv_image_dsc_t *look = pick(spr_cat_look_r, spr_cat_look_l), *paw = pick(spr_cat_paw_r, spr_cat_paw_l);
+  const lv_image_dsc_t *img = sit;
+  bool lying = false;
+  if (st >= this->act_ms_ && a != ACT_WALK)
+    return false;
+  switch (a) {
+    case ACT_SIT:
+      // Сидит, иногда поглядывает вверх, моргает
+      if ((this->act_seed_ & 1) && st > 1200 && st < 2300)
+        img = look;
+      if (st % 1700 > 1550)
+        img = blink;
+      break;
+    case ACT_GROOM: {
+      // Лижет лапу, потом трёт ею мордочку
+      const lv_image_dsc_t *lick = pick(spr_cat_groom_r0, spr_cat_groom_l0);
+      if (st < 2000)
+        img = (st / 260) % 2 ? paw : lick;
+      else if (st < 3800)
+        img = (st / 320) % 2 ? pick(spr_cat_groom_r1, spr_cat_groom_l1) : lick;
+      else if (st > 4200 && st < 4350)
+        img = blink;
+      break;
+    }
+    case ACT_YAWN:
+      // Сладко зевает и потягивается
+      if (st > 400 && st < 1600)
+        img = pick(spr_cat_yawn_r, spr_cat_yawn_l);
+      else if (st >= 1600 && st < 1750)
+        img = blink;
+      else if (st >= 1750 && st < 3200)
+        img = pick(spr_cat_stretch_r, spr_cat_stretch_l);
+      break;
+    case ACT_LOAF: {
+      // Лежит «буханкой», жмурится и мурчит — над головой всплывает сердечко
+      lying = true;
+      img = st % 2600 > 2420 ? pick(spr_cat_loafb_r, spr_cat_loafb_l) : pick(spr_cat_loaf_r, spr_cat_loaf_l);
+      this->say_(st > 2500 && st < 5000 ? "мур" : nullptr);
+      if (st > 2500 && st < 4100) {
+        const int hx = px(r ? 38 : 14), hy = py(10);
+        this->item_at_(&spr_heart, K_MOUSE, hx + (int) (4 * sinf(st * 0.008f)), hy - (int) ((st - 2500) * 0.04f));
+      } else {
+        this->item_.show(false);
+      }
+      break;
+    }
+    case ACT_NAP:
+      // Дремлет: «z z z»
+      lying = true;
+      img = &spr_cat_sleep;
+      break;
+    case ACT_TAIL:
+      // Хвост трубой покачивается
+      img = (st / 380) % 2 ? pick(spr_cat_tail_r1, spr_cat_tail_l1) : pick(spr_cat_tail_r0, spr_cat_tail_l0);
+      break;
+    case ACT_PLAY: {
+      // Клубок скатывается по краю круга к коту — кот припал к земле, бьёт
+      // лапой; клубок откатывается вверх по краю и скатывается обратно;
+      // второй удар — укатился совсем
+      const int tipx = px(BAT_TIP[ri][0]), gy = py(BAT_TIP[ri][1]);
+      float bx = -1;  // где клубок: на сколько впереди лапы
+      if (st < 1400)
+        bx = 6 + 114.0f * (1.0f - st / 1400.0f);
+      else if (st < 2400)
+        bx = 6 + 36.0f * (1.0f - fx_sq_(1.0f - (st - 1400) / 1000.0f));
+      else if (st < 2900)
+        bx = 42;
+      else if (st < 3900)
+        bx = 42 - 36.0f * fx_sq_((st - 2900) / 1000.0f);
+      else if (st < 5600)
+        bx = 6 + 260.0f * (st > 4400 ? st - 4400 : 0) / 1200.0f;
+      if (bx >= 0 && this->item_.obj) {
+        const lv_image_dsc_t *ball = ((int) (bx / 7) % 2) ? &spr_yarn1 : &spr_yarn0;
+        this->item_.set(ball, K_MOUSE);
+        // Клубок лежит на краю круга: у края земля выше
+        const float bxx = tipx + dir * bx, d = bxx - 233.0f;
+        const float edge = 233.0f + sqrtf(std::max(0.0f, 233.0f * 233.0f - d * d)) - 4.0f;
+        this->item_at_(ball, K_MOUSE, (int) bxx, (int) std::min((float) gy, edge) - this->item_.h() / 2);
+      } else {
+        this->item_.show(false);
+      }
+      const lv_image_dsc_t *crouch =
+          (st / 220) % 2 ? pick(spr_cat_crouch_r1, spr_cat_crouch_l1) : pick(spr_cat_crouch_r0, spr_cat_crouch_l0);
+      if ((st >= 1400 && st < 1700) || (st >= 4300 && st < 4700))
+        img = pick(spr_cat_bat_r, spr_cat_bat_l);
+      else if (st < 5000)
+        img = crouch;
+      else if (st > 7400 && st < 7550)
+        img = blink;
+      this->say_(st > 5800 && st < 7000 ? "мяу!" : nullptr);
+      break;
+    }
+    case ACT_ROLL:
+      // Валяется на спине, болтая лапами
+      if (st < 3000) {
+        lying = true;
+        img = (st / 240) % 2 ? pick(spr_cat_roll_r1, spr_cat_roll_l1) : pick(spr_cat_roll_r0, spr_cat_roll_l0);
+      } else if (st > 3200 && st < 3350) {
+        img = blink;
+      }
+      break;
+    case ACT_WALK: {
+      // Неспешно переходит на другое место и поворачивается к середине
+      const float step = WALK_SPEED * dt;
+      if (std::fabs(this->tx_ - this->x_) <= step) {
+        this->x_ = this->tx_;
+        this->right_ = this->x_ <= CENTER_X;
+        return false;
+      }
+      this->x_ += (this->tx_ > this->x_ ? 1.0f : -1.0f) * step;
+      img = this->walk_frame_((st / 130) % 4);
+      break;
+    }
+    case ACT_SPIN:
+      // Ловит свой хвост — кружится на месте, потом «уф»
+      if (st < 2000) {
+        this->right_ = (st / 150) % 2 ? !this->spin_r_ : this->spin_r_;
+        img = this->run_frame_((st / 75) % 4);
+      } else {
+        this->right_ = this->spin_r_;
+        img = st < 2150 ? (this->right_ ? &spr_cat_blink_r : &spr_cat_blink_l)
+                        : (this->right_ ? &spr_cat_sit_r : &spr_cat_sit_l);
+      }
+      this->say_(st > 2050 && st < 2600 ? "уф" : nullptr);
+      break;
+    case ACT_PETAL: {
+      // Лепесток, кружась, опускается прямо на лапу: кот следит за ним,
+      // ловит — мурчит, лепесток соскальзывает на землю
+      const int tx = px(PAW_TIP[ri][0]), ty = py(PAW_TIP[ri][1]), gy = py(32) - 8;
+      if (st > 200 && st < 1900) {
+        const float k = (st - 200) / 1700.0f;
+        this->item_at_(&spr_petal, K_MOUSE, tx + (int) (22.0f * sinf(k * 8.0f) * (1.0f - k)),
+                       ty - (int) (190.0f * (1.0f - k)));
+      } else if (st >= 1900 && st < 2900) {
+        this->item_at_(&spr_petal, K_MOUSE, tx, ty - 2);
+      } else if (st >= 2900 && st < 3500) {
+        const float k = (st - 2900) / 600.0f;
+        this->item_at_(&spr_petal, K_MOUSE, tx + (int) (dir * 10 * k), ty + (int) ((gy - ty) * k));
+      } else {
+        this->item_.show(false);
+      }
+      if (st > 200 && st < 1850)
+        img = look;
+      else if (st >= 1850 && st < 2900)
+        img = paw;
+      else if (st > 3700 && st < 3850)
+        img = blink;
+      this->say_(st > 2000 && st < 3400 ? "мур" : nullptr);
+      break;
+    }
+    case ACT_FLUFF: {
+      // Пушинка подлетает к самому носу — кот косится на неё и… чихает!
+      // Пушинку сдувает, кот отмахивается лапой
+      const int nx = px(NOSE_AT[ri][0]), ny = py(NOSE_AT[ri][1]);
+      if (st > 200 && st < 2200) {
+        const float k = (st - 200) / 2000.0f;
+        this->item_at_(&spr_fluff, K_MOUSE, nx + (int) (dir * 46 * (1.0f - k) + 10.0f * sinf(k * 6.0f) * (1.0f - k)),
+                       ny - (int) (150.0f * (1.0f - k)));
+      } else if (st >= 2200 && st < 3400) {
+        const float k = (st - 2200) / 1200.0f;
+        this->item_at_(&spr_fluff, K_MOUSE, nx + (int) (dir * 170 * k), ny - (int) (130.0f * k * (0.5f + k)));
+      } else {
+        this->item_.show(false);
+      }
+      if (st > 200 && st < 2150)
+        img = look;
+      else if (st >= 2150 && st < 2650)
+        img = pick(spr_cat_sneeze_r, spr_cat_sneeze_l);
+      else if (st >= 3000 && st < 3700)
+        img = (st / 200) % 2 ? paw : sit;
+      else if (st > 4300 && st < 4450)
+        img = blink;
+      this->say_(st > 2250 && st < 3500 ? "апчхи!" : nullptr);
+      break;
+    }
+    case ACT_LEAF: {
+      // Лист, кружась, падает перед котом — кот припадает к земле, прыгает,
+      // ловит его в воздухе и прижимает лапой: «ам!»
+      const int jx = px(JUMP_TIP[ri][0]), jy = py(JUMP_TIP[ri][1]);
+      const int bx = px(BAT_TIP[ri][0]), by = py(BAT_TIP[ri][1]) - 8;
+      if (st < 2000) {
+        const float k = st / 2000.0f;
+        this->item_at_(&spr_leaf, K_MOUSE, jx + (int) (26.0f * sinf(k * 7.0f) * (1.0f - k)),
+                       jy - (int) (170.0f * (1.0f - k)));
+      } else if (st < 2450) {
+        this->item_at_(&spr_leaf, K_MOUSE, jx, jy);
+      } else if (st < 3500) {
+        this->item_at_(&spr_leaf, K_MOUSE, bx, by);
+      } else {
+        this->item_.show(false);
+      }
+      if (st < 2000)
+        img = (st / 200) % 2 ? pick(spr_cat_crouch_r1, spr_cat_crouch_l1) : pick(spr_cat_crouch_r0, spr_cat_crouch_l0);
+      else if (st < 2450)
+        img = pick(spr_cat_jump_r, spr_cat_jump_l);
+      else if (st < 3500)
+        img = pick(spr_cat_bat_r, spr_cat_bat_l);
+      else if (st > 3900 && st < 4050)
+        img = blink;
+      this->say_(st > 2500 && st < 3500 ? "ам!" : nullptr);
+      break;
+    }
+    case ACT_FIREFLY: {
+      // Светлячок кружит у головы, мерцая; кот следит за ним, прыгает — не
+      // поймал: светлячок улетает вверх. «Ой»
+      const int hx = px(r ? 31 : 21), hy = py(9);
+      const bool bright = (st / 280) % 3 != 2;
+      const lv_image_dsc_t *ff = bright ? &spr_firefly0 : &spr_firefly1;
+      if (st < 3900) {
+        const float ang = st * 0.0032f;
+        this->item_at_(ff, K_MOUSE, hx + (int) (dir * 12 + 58.0f * cosf(ang)),
+                       hy - 44 + (int) (22.0f * sinf(ang * 1.3f)));
+      } else if (st < 5600) {
+        const float ang = 3900 * 0.0032f, t = st - 3900;
+        this->item_at_(ff, K_MOUSE, hx + (int) (dir * 12 + 58.0f * cosf(ang) + dir * 0.08f * t),
+                       hy - 44 + (int) (22.0f * sinf(ang * 1.3f) - 0.14f * t));
+      } else {
+        this->item_.show(false);
+      }
+      if (st < 3800)
+        img = (st / 900) % 3 == 2 ? sit : look;
+      else if (st < 4250)
+        img = pick(spr_cat_jump_r, spr_cat_jump_l);
+      else if (st > 5700 && st < 5850)
+        img = blink;
+      this->say_(st > 4400 && st < 5400 ? "ой" : nullptr);
+      break;
+    }
+    case ACT_FLASH:
+      // Насторожился — у горизонта сверкнула зарница: шерсть дыбом, спина
+      // дугой; потом успокаивается
+      if (st > 600 && !this->flash_sent_) {
+        this->flash_sent_ = true;
+        this->flash_req_ = true;
+      }
+      if (st < 650)
+        img = look;
+      else if (st < 2000)
+        img = pick(spr_cat_arch_r, spr_cat_arch_l);
+      else if ((st > 2600 && st < 2750) || (st > 3400 && st < 3550))
+        img = blink;
+      this->say_(st > 700 && st < 1900 ? "!" : (st > 2800 && st < 3700 ? "мяу?" : nullptr));
+      break;
+    case ACT_GAZE:
+      // Любуется небом: гало — «ох…», радуга — «ух ты!»
+      if (st > 300 && st < 3300)
+        img = look;
+      else if (st > 3600 && st < 3750)
+        img = blink;
+      this->say_(st > 500 && st < 2800 ? ((this->sky_ & SKY_RAINBOW) ? "ух ты!" : "ох…") : nullptr);
+      break;
+    default:
+      return false;
+  }
+  if (a != ACT_WALK)
+    this->y_ = this->ground_y_(lying) - CAT_H;
+  else
+    this->y_ = this->ground_y_(false) - CAT_H;
+  this->place_cat_(img, (int) this->x_, (int) this->y_);
+  if (a == ACT_NAP)
+    this->snore_(st);
+  return true;
+}
+
 void Critters::frame(bool can_show, bool night, bool winter) {
   if (!this->img_.obj)
     return;
@@ -658,10 +1185,11 @@ void Critters::frame(bool can_show, bool night, bool winter) {
       r = rnd_(0, 70);  // в праздник и в дождь приходит только кот
     if (night && r < 50) {
       s = SHOW_CAT_SLEEP;
-    } else if (r < 70) {
+    } else if (r < 80) {
+      // Кот — самый частый гость
       this->start_cat();
       return;
-    } else if (r < 85) {
+    } else if (r < 90) {
       // Ночью вместо птицы — сова, летом днём — иногда бабочка
       const bool summer = this->month_ >= 6 && this->month_ <= 8;
       s = night ? SHOW_OWL : (summer && rnd_(0, 2) ? SHOW_BUTTERFLY : SHOW_BIRD);
@@ -703,23 +1231,35 @@ void Critters::frame(bool can_show, bool night, bool winter) {
     case SHOW_CAT_VISIT: {
       const uint32_t st = now - this->stage_t0_;
       if (this->stage_ == 0) {
-        // Бежит до середины
-        this->x_ += dir * CAT_SPEED * dt;
-        this->place_cat_(this->run_frame_((t / 90) % 4), (int) this->x_, (int) this->y_);
+        // Приходит до середины — бегом или шагом
+        this->x_ += dir * (this->walk_ ? WALK_SPEED : CAT_SPEED) * dt;
+        const lv_image_dsc_t *img = this->walk_ ? this->walk_frame_((t / 130) % 4) : this->run_frame_((t / 90) % 4);
+        this->place_cat_(img, (int) this->x_, (int) this->y_);
         if ((this->right_ && this->x_ >= CENTER_X) || (!this->right_ && this->x_ <= CENTER_X)) {
           this->x_ = CENTER_X;
           this->stage_ = 1;
-          this->stage_t0_ = now;
+          this->plan_visit_();
+          this->begin_act_(now);
         }
       } else if (this->stage_ == 1) {
-        this->sit_(st);
-        if (st > SIT_MS[this->variant_]) {
+        // Занят: сценка или очередное занятие. Ушли с часов — закругляется
+        const Act a = this->plan_[this->iplan_];
+        bool done;
+        if (a == ACT_SCENE) {
+          this->sit_(st);
+          done = st > SIT_MS[this->variant_];
+        } else {
+          done = !this->act_(a, st, dt);
+          if (this->page_ != 0 && st > 1500)
+            done = true;
+        }
+        if (done) {
           this->say_(nullptr);
           this->item_.show(false);
-          // Разворачивается и убегает обратно
-          this->right_ = !this->right_;
-          this->stage_ = 2;
-          this->stage_t0_ = now;
+          if (++this->iplan_ >= this->nplan_ || this->page_ != 0)
+            this->leave_(now);
+          else
+            this->begin_act_(now);
         }
       } else if (this->stage_ == 3) {
         // Заметил касание: сидит, смотрит, моргает, над ним «мяу!»
@@ -730,12 +1270,16 @@ void Critters::frame(bool can_show, bool night, bool winter) {
         if (st > MEOW_MS) {
           // И бежит дальше, куда бежал
           this->say_(nullptr);
+          this->walk_ = false;
           this->stage_ = 2;
           this->stage_t0_ = now;
         }
       } else {
-        this->x_ += (this->right_ ? 1.0f : -1.0f) * CAT_SPEED * 1.2f * dt;
-        this->place_cat_(this->run_frame_((st / 80) % 4), (int) this->x_, (int) this->y_);
+        // Уходит — бегом или шагом
+        const float v = this->walk_ ? WALK_SPEED * 1.1f : CAT_SPEED * 1.2f;
+        this->x_ += (this->right_ ? 1.0f : -1.0f) * v * dt;
+        const lv_image_dsc_t *img = this->walk_ ? this->walk_frame_((st / 120) % 4) : this->run_frame_((st / 80) % 4);
+        this->place_cat_(img, (int) this->x_, (int) this->y_);
         if (off_screen())
           this->stop_();
       }
@@ -822,18 +1366,8 @@ void Critters::frame(bool can_show, bool night, bool winter) {
     }
     case SHOW_CAT_SLEEP: {
       this->place_cat_(&spr_cat_sleep, (int) this->x_, (int) this->y_);
-      if (this->zzz_) {
-        // «z», «z z», «z z z» по кругу, чуть поднимаясь
-        static const char *Z[3] = {"z", "z z", "z z z"};
-        int f = (t / 800) % 3;
-        if (f != this->zzz_f_) {
-          this->zzz_f_ = f;
-          lv_label_set_text(this->zzz_, Z[f]);
-          lv_obj_set_pos(this->zzz_, (int) this->x_ + 19 * K_CAT, (int) this->y_ - 20 - f * 5);
-          lv_obj_clear_flag(this->zzz_, LV_OBJ_FLAG_HIDDEN);
-        }
-      }
-      if (t > SLEEP_MS)
+      this->snore_(t);
+      if (t > (this->page_ ? SLEEP_MS[0] : SLEEP_MS[this->stay_]))
         this->stop_();
       break;
     }

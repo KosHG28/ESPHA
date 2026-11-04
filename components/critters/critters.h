@@ -26,11 +26,24 @@ enum Show : uint8_t {
   SHOW_BLACK_CAT,  ///< пятница, 13-е: перед котом пробегает чёрный кот
 };
 
+/// Что сейчас на небе — для сценок кота (packages/weather.yaml)
+enum SkyBits : uint8_t {
+  SKY_PETALS = 1,           ///< кружатся лепестки яблонь
+  SKY_FLUFF = 2,            ///< летит тополиный пух
+  SKY_LEAVES = 4,           ///< листопад
+  SKY_FIREFLIES = 8,        ///< светлячки
+  SKY_HEAT_LIGHTNING = 16,  ///< зарницы
+  SKY_HALO = 32,            ///< гало
+  SKY_RAINBOW = 64,         ///< радуга
+};
+
 /// Картинка LVGL, увеличенная «по пикселям»: каждая клетка спрайта — квадрат
 /// k×k. Спрайты хранятся в прошивке маленькими, а увеличенный кадр
 /// собирается в памяти при смене кадра (раз в 70–330 мс) — сама отрисовка
 /// идёт по быстрому пути LVGL, без масштабирования на каждом кадре. Буферов
-/// два: LVGL ещё может рисовать старый кадр, когда собирается новый
+/// два: LVGL ещё может рисовать старый кадр, когда собирается новый. Кадр
+/// обрезается по рисунку (ox, oy — где обрезанный угол): прозрачные поля не
+/// попадают ни в память, ни в смешивание с экраном при каждой перерисовке
 struct Sprite {
   lv_obj_t *obj{nullptr};
   const lv_image_dsc_t *src{nullptr};
@@ -39,12 +52,15 @@ struct Sprite {
   uint8_t *buf[2]{nullptr, nullptr};
   size_t cap[2]{0, 0};
   int cur{0};
+  int ox{0}, oy{0};
 
   void set(const lv_image_dsc_t *s, int k);
+  /// Размер кадра целиком, как нарисован (без обрезки)
   int w() const { return this->src ? this->src->header.w * this->k : 0; }
   int h() const { return this->src ? this->src->header.h * this->k : 0; }
   void show(bool v);
-  void pos(int x, int y) { lv_obj_set_pos(this->obj, x, y); }
+  /// Левый верхний угол кадра целиком
+  void pos(int x, int y) { lv_obj_set_pos(this->obj, x + this->ox, y + this->oy); }
 };
 
 class Critters : public Component {
@@ -79,6 +95,26 @@ class Critters : public Component {
     this->meteor_req_ = false;
     return r;
   }
+
+  /// Что на небе (SkyBits): лепестки, пух, листья, светлячки, зарницы, гало,
+  /// радуга — кот приходит на это посмотреть
+  void set_sky(uint8_t sky) { this->sky_ = sky; }
+
+  /// Кот насторожился — пусть у горизонта сверкнёт зарница. Флаг сбрасывается
+  bool take_flash() {
+    bool r = this->flash_req_;
+    this->flash_req_ = false;
+    return r;
+  }
+
+  /// Настройки из Home Assistant: как часто гости приходят сами (0 — редко,
+  /// 1 — иногда, 2 — часто, 3 — очень часто) и сколько кот гостит (0 —
+  /// недолго, 1 — подольше, 2 — долго)
+  void set_prefs(int freq, int stay);
+
+  /// Какая страница на экране (0 — часы): надолго кот остаётся только на
+  /// часах, на других страницах — пробежит или ненадолго присядет
+  void set_page(int page) { this->page_ = page; }
 
   /// Праздник: кот приходит чаще и в праздничной шапке
   void set_festive(bool festive);
@@ -131,7 +167,7 @@ class Critters : public Component {
     this->winter_in_ = winter;
   }
 
-  /// Один кадр. Раз в 1–3 часа гость приходит сам
+  /// Один кадр. Гость приходит сам — как часто, задаёт set_prefs
   void frame(bool can_show, bool night, bool winter);
   void tick() { this->frame(this->can_show_, this->night_, this->winter_in_); }
 
@@ -155,13 +191,49 @@ class Critters : public Component {
     VAR_SCRATCH,   ///< застукали — делает вид, что чесался
   };
 
+  /// Чем кот занят во время визита: сценка варианта (variant_) или одно из
+  /// занятий — визит складывается из нескольких
+  enum Act : uint8_t {
+    ACT_SCENE,    ///< сценка: миска, кулич, снежинка, принтер…
+    ACT_SIT,      ///< сидит, оглядывается, моргает
+    ACT_GROOM,    ///< умывается
+    ACT_YAWN,     ///< зевает и потягивается
+    ACT_LOAF,     ///< лежит «буханкой» и мурчит
+    ACT_NAP,      ///< дремлет
+    ACT_TAIL,     ///< сидит, хвост трубой покачивается
+    ACT_PLAY,     ///< гоняет клубок
+    ACT_ROLL,     ///< валяется на спине
+    ACT_WALK,     ///< переходит на другое место
+    ACT_SPIN,     ///< ловит свой хвост
+    ACT_PETAL,    ///< ловит лапой лепесток
+    ACT_FLUFF,    ///< чихает от пушинки
+    ACT_LEAF,     ///< прыгает за листом
+    ACT_FIREFLY,  ///< ловит светлячка
+    ACT_FLASH,    ///< пугается зарницы
+    ACT_GAZE,     ///< любуется гало или радугой
+  };
+  static const int NACT = 10;  ///< занятий за визит, не больше
+
   void stop_();
   void place_(const lv_image_dsc_t *img, int x, int y, int k);
   void place_cat_(const lv_image_dsc_t *img, int x, int y);
+  const lv_image_dsc_t *prop_(const lv_image_dsc_t *img, int *at) const;
   void say_(const char *text);
+  void hush_();
+  void snore_(uint32_t t);
   void sit_(uint32_t st);
   void item_at_bowl_(const lv_image_dsc_t *img);
+  void item_at_(const lv_image_dsc_t *img, int k, int cx, int cy);
   const lv_image_dsc_t *run_frame_(int f) const;
+  const lv_image_dsc_t *walk_frame_(int f) const;
+  uint32_t interval_() const;
+  int ground_y_(bool lying) const;
+  int reactions_(Act *out) const;
+  Act pick_act_(Act prev) const;
+  void plan_visit_();
+  void begin_act_(uint32_t now);
+  bool act_(Act a, uint32_t st, uint32_t dt);
+  void leave_(uint32_t now);
   static int rnd_(int lo, int hi);
 
   void kittens_frame_(uint32_t now);
@@ -176,6 +248,9 @@ class Critters : public Component {
   lv_obj_t *zzz_{nullptr};
   const char *said_{nullptr};
   bool festive_{false}, stars_{false}, meteor_req_{false}, meteor_sent_{false};
+  bool flash_req_{false}, flash_sent_{false};
+  uint8_t sky_{0};
+  int freq_{2}, stay_{1}, page_{0};
   int weather_{0};
   int month_{0}, day_{0};
   int holiday_{0};
@@ -190,9 +265,20 @@ class Critters : public Component {
   uint32_t next_{0};     ///< когда следующий гость сам по себе
   float x_{0}, y_{0};
   float bx_{0};          ///< чёрный кот: где он
-  int stage_{0};         ///< для «визита»: 0 бежит, 1 сидит, 2 убегает, 3 «мяу»
+  int stage_{0};         ///< для «визита»: 0 приходит, 1 занят, 2 уходит, 3 «мяу»
   uint32_t stage_t0_{0};
   int zzz_f_{-1};        ///< что сейчас написано над котом
+  bool walk_{false};     ///< приходит и уходит шагом, а не бегом
+  bool came_right_{true};  ///< пришёл слева направо — уйдёт обратно
+  // Визит: занятия по порядку, какое сейчас; для занятия — его длительность,
+  // случайное число (у каждого раза свои мелочи), куда идёт, куда смотрел
+  // до того, как закрутился за хвостом
+  Act plan_[NACT]{};
+  int nplan_{0}, iplan_{0};
+  uint32_t act_ms_{0};
+  int act_seed_{0};
+  float tx_{0};
+  bool spin_r_{true};
 };
 
 }  // namespace critters

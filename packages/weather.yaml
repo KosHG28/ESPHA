@@ -548,6 +548,28 @@ interval:
           // Часы убраны (ожидание) или вид «Небо» — небо на весь круг
           p.full = id(clock_hidden) || id(clock_style).active_index().value_or(0) == 0;
           id(wfx)->set_params(p);
-          // Кот смотрит в небо — пусть пролетит метеор
+          // Что на небе — кот приходит на это посмотреть (packages/critters.yaml)
+          {
+            uint8_t sky = 0;
+            if (p.mode == 10)
+              sky |= critters::SKY_PETALS;
+            if (p.mode == 11)
+              sky |= critters::SKY_FLUFF;
+            if (p.mode == 5 || p.mode == 9)
+              sky |= critters::SKY_LEAVES;
+            if (p.fireflies)
+              sky |= critters::SKY_FIREFLIES;
+            if (p.heat_lightning)
+              sky |= critters::SKY_HEAT_LIGHTNING;
+            if (p.halo)
+              sky |= critters::SKY_HALO;
+            if (p.rainbow)
+              sky |= critters::SKY_RAINBOW;
+            id(crit)->set_sky(sky);
+          }
+          // Кот смотрит в небо — пусть пролетит метеор; насторожился — пусть
+          // сверкнёт зарница
           if (id(crit)->take_meteor())
             id(wfx)->launch_meteor();
+          if (id(crit)->take_flash())
+            id(wfx)->flash_heat_lightning();
