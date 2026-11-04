@@ -464,9 +464,9 @@ void Critters::poke() {
     return;
   if (this->show_ == SHOW_CAT_SLEEP)
     this->right_ = rnd_(0, 2);  // проснулся — убежит в случайную сторону
-  if (this->show_ == SHOW_CAT_VISIT && this->stage_ == 1) {
-    // Лежал или крутился за хвостом — садится как обычно
-    if (this->nplan_ && this->plan_[this->iplan_] == ACT_SPIN)
+  if (this->show_ == SHOW_CAT_SLEEP || (this->show_ == SHOW_CAT_VISIT && this->stage_ == 1)) {
+    // Спал, лежал или крутился за хвостом — садится как обычно
+    if (this->show_ == SHOW_CAT_VISIT && this->nplan_ && this->plan_[this->iplan_] == ACT_SPIN)
       this->right_ = this->spin_r_;
     this->y_ = this->ground_y_(false) - CAT_H;
   }
@@ -532,8 +532,9 @@ void Critters::start(Show show) {
       this->y_ = CAT_GROUND - CAT_H;
       break;
     case SHOW_CAT_SLEEP:
+      // Спит лёжа, ниже — почти не заслоняет надписи над ним
       this->x_ = CENTER_X;
-      this->y_ = CAT_GROUND - CAT_H;
+      this->y_ = CAT_GROUND_LIE - CAT_H;
       break;
     default:
       // Кот и погоня за мышкой
