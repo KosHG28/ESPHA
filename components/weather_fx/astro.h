@@ -178,6 +178,71 @@ inline int moon_event(uint32_t utc, float *red = nullptr) {
   return dist < 362000.0 ? HOL_SUPERMOON : HOL_FULL_MOON;
 }
 
+/// Наклон эклиптики к экватору, градусы
+inline double obliquity(double jd) { return 23.439291 - 0.0130042 * (jd - 2451545.0) / 36525.0; }
+
+/// Местное звёздное время, градусы. lon — долгота, восточная — плюс
+inline double local_sidereal(double jd, double lon) {
+  return wrap360(280.46061837 + 360.98564736629 * (jd - 2451545.0) + lon);
+}
+
+/// Прямое восхождение и склонение (градусы) по эклиптическим долготе и
+/// широте
+inline void ecl_to_equ(double jd, double lon, double lat, double &ra, double &dec) {
+  const double e = obliquity(jd);
+  const double sl = deg_sin(lon), cl = deg_cos(lon), sb = deg_sin(lat), cb = deg_cos(lat);
+  const double se = deg_sin(e), ce = deg_cos(e);
+  ra = wrap360(atan2(sl * ce * cb - sb * se, cl * cb) * (180.0 / ASTRO_PI));
+  dec = asin(sb * ce + cb * se * sl) * (180.0 / ASTRO_PI);
+}
+
+/// Путь светила по небу дома за сутки и где оно сейчас (всё в градусах):
+/// часовой угол (−180…180; минус — ещё не дошло до юга), высота над
+/// горизонтом, часовой угол восхода и захода (180 — не заходит, 0 — не
+/// восходит) и высота в полдень светила — когда оно на юге
+struct SkyPath {
+  double ha, alt, ha_set, alt_top;
+};
+
+/// h0 — высота центра светила в миг восхода: у Солнца −0,833° (рефракция и
+/// полудиск), у Луны +0,125° (ещё и параллакс — она близко)
+inline SkyPath sky_path(double ra, double dec, double lst, double lat, double h0) {
+  SkyPath s;
+  double ha = wrap360(lst - ra);
+  if (ha > 180.0)
+    ha -= 360.0;
+  s.ha = ha;
+  const double sp = deg_sin(lat), cp = deg_cos(lat), sd = deg_sin(dec), cd = deg_cos(dec);
+  s.alt = asin(sp * sd + cp * cd * deg_cos(ha)) * (180.0 / ASTRO_PI);
+  const double c = (deg_sin(h0) - sp * sd) / (cp * cd);
+  s.ha_set = c <= -1.0 ? 180.0 : (c >= 1.0 ? 0.0 : acos(c) * (180.0 / ASTRO_PI));
+  s.alt_top = 90.0 - std::fabs(lat - dec);
+  return s;
+}
+
+/// Солнце на небе дома
+inline SkyPath sun_path(uint32_t utc, double lat, double lon) {
+  const double jd = julian_day(utc);
+  double ra, dec;
+  ecl_to_equ(jd, sun_longitude(jd), 0.0, ra, dec);
+  return sky_path(ra, dec, local_sidereal(jd, lon), lat, -0.833);
+}
+
+/// Луна на небе дома; phase — сколько прошло от новолуния, 0..1
+/// (0,5 — полнолуние), lit — какая доля диска освещена
+inline SkyPath moon_path(uint32_t utc, double lat, double lon, float *phase = nullptr, float *lit = nullptr) {
+  const double jd = julian_day(utc);
+  double ml, mb, dist, ra, dec;
+  moon_position(jd, ml, mb, dist);
+  ecl_to_equ(jd, ml, mb, ra, dec);
+  const double el = wrap360(ml - sun_longitude(jd));
+  if (phase)
+    *phase = (float) (el / 360.0);
+  if (lit)
+    *lit = (float) ((1.0 - deg_cos(el)) * 0.5);
+  return sky_path(ra, dec, local_sidereal(jd, lon), lat, 0.125);
+}
+
 /// Солнцестояние или равноденствие между моментами t0 и t1 (секунды Unix):
 /// 0 — нет, 1 — весеннее равноденствие, 2 — летнее солнцестояние,
 /// 3 — осеннее равноденствие, 4 — зимнее солнцестояние

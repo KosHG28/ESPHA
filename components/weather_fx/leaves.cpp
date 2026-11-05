@@ -247,24 +247,37 @@ void WeatherFx::leaves_apply_(const Params &p, bool relayout) {
   const int cnt = std::min(std::max(p.count, 0), ND);
   // Листопад (обычные и кленовые вперемешку) или кленовые листья 1 сентября
   const int n = (p.mode == 5 || p.mode == 9) ? std::min(cnt, NLF) : 0;
-  this->leaf_maple_only_ = p.mode == 9;
+  if (n)
+    this->leaf_maple_only_ = p.mode == 9;
   // Памяти на картинки не нашлось — без листьев
   const bool ok = !n || this->leaf_sprites_();
   if (!relayout && ok)
     return;
-  for (auto &s : this->lfs_)
-    this->mark_(s, false, 0, 0, 1, 1);
-  this->nlf_ = ok ? n : 0;
+  if (!ok) {
+    for (auto &s : this->lfs_)
+      this->mark_(s, false, 0, 0, 1, 1);
+    memset(this->lflife_, 0, sizeof(this->lflife_));
+  }
+  // Листопад начался или стал сильнее — недостающие листья прилетают
+  // сверху, стих — лишние долетают, ложатся и больше не появляются
+  this->lf_want_ = ok ? n : 0;
+  const int want = this->lf_want_;
+  this->nlf_ = fx_relife(
+      this->lflife_, NLF, [want](int i) { return i < want; },
+      [this](int i) {
+        this->mark_(this->lfs_[i], false, 0, 0, 1, 1);
+        this->leaf_respawn_(i, true);
+      });
   if (!this->nlf_)
     this->leaf_free_();
-  for (int i = 0; i < this->nlf_; i++)
-    this->leaf_respawn_(i, true);
 }
 
-void WeatherFx::leaf_respawn_(int i, bool anywhere) {
+void WeatherFx::leaf_respawn_(int i, bool enter) {
   const bool big = i % 2;
   this->lfx_[i] = rnd_(20, 446);
-  this->lfy_[i] = anywhere ? rnd_(-30, 400) : -24 - rnd_(0, 60);
+  // Над экраном; листопад только начался — над краем круга вразброс, чтобы
+  // листья прилетали один за другим и первые показались сразу
+  this->lfy_[i] = enter ? fx_top(this->lfx_[i]) - 12 - rnd_(0, 200) : -24 - rnd_(0, 60);
   this->lfv_[i] = big ? 1.1f + (i % 3) * 0.2f : 0.6f + (i % 3) * 0.15f;
   this->lfph_[i] = rnd_(0, 628) / 100.0f;
   this->lfrot_[i] = rnd_(0, 628) / 100.0f;
@@ -280,6 +293,8 @@ void WeatherFx::leaf_respawn_(int i, bool anywhere) {
 void WeatherFx::leaves_frame_(float wind) {
   const float k = this->k_;
   for (int i = 0; i < this->nlf_; i++) {
+    if (this->lflife_[i] == LIFE_OFF)
+      continue;
     const bool big = i % 2;
     if (this->lfrest_[i] > 0) {
       // Лежит на краю: подождать, потом растаять за ~0,8 с ступенями по
@@ -295,7 +310,11 @@ void WeatherFx::leaves_frame_(float wind) {
       }
       if (this->lfrest_[i] <= 0) {
         this->mark_(this->lfs_[i], false, 0, 0, 1, 1);
-        this->leaf_respawn_(i, false);
+        // Листопад стих — этот лист больше не прилетает
+        if (this->lflife_[i] == LIFE_END)
+          this->lflife_[i] = LIFE_OFF;
+        else
+          this->leaf_respawn_(i, false);
       }
       continue;
     }
@@ -353,6 +372,11 @@ void WeatherFx::leaves_frame_(float wind) {
     this->lfidx_[i] = (uint16_t) idx;
     this->mark_(this->lfs_[i], this->visible_(x1, y1, n, n) && !this->excluded_(x1, y1, n, n), x1, y1, n, n);
   }
+  // Последний лист растаял — картинки больше не нужны
+  const int was = this->nlf_;
+  this->nlf_ = fx_life_top(this->lflife_, this->nlf_);
+  if (was && !this->nlf_ && !this->lf_want_)
+    this->leaf_free_();
 }
 
 void WeatherFx::leaves_paint_(lv_layer_t *layer, const lv_area_t &oc, const lv_area_t &clip) {

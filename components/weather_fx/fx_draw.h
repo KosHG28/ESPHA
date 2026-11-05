@@ -32,8 +32,39 @@ static inline float fx_bottom(float x) {
   return FX_CY + sqrtf(std::max(0.0f, FX_R * FX_R - d * d));
 }
 
+// Верхний край круга над точкой x: выше него частицу не видно
+static inline float fx_top(float x) { return 2.0f * FX_CY - fx_bottom(x); }
+
 static inline bool fx_hit(const lv_area_t &a, const lv_area_t &clip) {
   return a.x1 <= clip.x2 && a.x2 >= clip.x1 && a.y1 <= clip.y2 && a.y2 >= clip.y1;
+}
+
+// Частицы осадков при смене погоды (WeatherFx::Life): места, которые теперь
+// нужны (want(i)) и были свободны, занимают новые частицы — spawn(i) пускает
+// их с края; лишние долетают последний раз. Возвращает, до какого места
+// заняты (последнее занятое + 1)
+template <typename W, typename S>
+static inline int fx_relife(uint8_t *life, int cap, W want, S spawn) {
+  int top = 0;
+  for (int i = 0; i < cap; i++) {
+    if (want(i)) {
+      if (life[i] == WeatherFx::LIFE_OFF)
+        spawn(i);
+      life[i] = WeatherFx::LIFE_ON;
+    } else if (life[i] == WeatherFx::LIFE_ON) {
+      life[i] = WeatherFx::LIFE_END;
+    }
+    if (life[i] != WeatherFx::LIFE_OFF)
+      top = i + 1;
+  }
+  return top;
+}
+
+// Сколько мест занято, если последние освободились
+static inline int fx_life_top(const uint8_t *life, int n) {
+  while (n > 0 && life[n - 1] == WeatherFx::LIFE_OFF)
+    n--;
+  return n;
 }
 
 // Буфер картинки нужного размера: маска A8 (цвет — при рисовании) или

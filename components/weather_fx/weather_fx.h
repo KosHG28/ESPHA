@@ -93,7 +93,8 @@ struct FxSheet {
 /// Небо (звёзды, созвездие, метеоры, солнце), затем молнию и облака слой
 /// рисует в своей отрисовке, осадки и гирлянду — после неё, поверх.
 /// Дождь и град — в rain.cpp, солнце — в sun.cpp, облака и молния — в
-/// clouds.cpp, созвездия и планеты — в sky.cpp, иней и сосульки — в
+/// clouds.cpp, созвездия, планеты, где сейчас на небе солнце и луна и
+/// сумерки — в sky.cpp, иней и сосульки — в
 /// frost.cpp, праздничное (звезда, ракета, яйца, «матрица») — в holiday.cpp,
 /// лепестки, пух и зарницы — в seasons.cpp, гало — в halo.cpp, прочие редкие
 /// гости неба (метеор, змей, марево, зарево, светлячки, самолёт) — в
@@ -148,6 +149,10 @@ class WeatherFx : public Component {
 
   float get_setup_priority() const override { return setup_priority::LATE; }
 
+  /// Частица осадков: её нет; падает и появится снова; долетает последний
+  /// раз — погода стихла или сменилась
+  enum Life : uint8_t { LIFE_OFF = 0, LIFE_ON, LIFE_END };
+
  protected:
   static const int ND = 32;   // сила осадков (Params::count), не больше
   static const int NF = 16;   // снежинки
@@ -167,7 +172,9 @@ class WeatherFx : public Component {
   static const int NPUFF = 6;    // клубов дыма за ракетой
   static const int NPUFF_R = 7;  // размеров клуба: радиус 4…10 px
   static const int RK_NB = 16;   // курсов ракеты: 0…−30° через 2°
-  // Луна — слева от строки погоды, в стороне от созвездия и цифр
+  // Луна, когда её место на небе неизвестно (нет времени или места, или
+  // проверка полнолуния, когда она под горизонтом), — слева от строки
+  // погоды, в стороне от созвездия и цифр
   static constexpr int MOON_X = 84, MOON_Y = 150, MOON_R = 15;
 
   /// Что сейчас нарисовано для частицы: прямоугольник относительно холста
@@ -176,7 +183,7 @@ class WeatherFx : public Component {
     bool on;
   };
 
-  void apply_(const Params &p, bool relayout);
+  void apply_(const Params &p, bool relayout, bool restar);
   float wind_(const Params &p, uint32_t now);
   void flakes_(float wind, float ks);
   void clouds_();
@@ -187,6 +194,9 @@ class WeatherFx : public Component {
   void bolt_light_(uint8_t opa, bool lit, bool sky);
   void sky_flash_paint_(lv_layer_t *layer, const lv_area_t &clip);
   void stars_(uint32_t now);
+  void stars_show_();
+  bool star_hidden_(int i) const;
+  int star_tw_(int i) const;
   void lightning_(uint32_t now);
   void end_strike_();
   void sky_(const Params &p);
@@ -205,8 +215,15 @@ class WeatherFx : public Component {
   void kite_(uint32_t now, float wind);
   void kite_stop_();
   void kite_paint_(lv_layer_t *layer, const lv_area_t &oc, const lv_area_t &clip);
-  void moon_(uint32_t utc, int force);
+  void moon_(const Params &p);
+  void moon_hide_();
   void planets_(double jd, float lst, float sphi, float cphi);
+  // Солнце и луна по настоящему небу, сумерки (sky.cpp)
+  void ephem_(const Params &p);
+  bool dome_(const SkyPath &s, bool moon, float *x, float *y) const;
+  void twilight_();
+  void con_box_(int *x1, int *y1, int *x2, int *y2) const;
+  bool cap_place_(const lv_area_t &fig, int *x, int *y) const;
   void build_frost_();
   void free_frost_();
   void frost_sparks_(uint32_t now);
@@ -254,7 +271,6 @@ class WeatherFx : public Component {
   /// Перенести частицу: отметить к перерисовке старое и новое место
   void mark_(Spot &s, bool on, int x, int y, int w, int h);
   void invalidate_(const lv_area_t &a);
-  void hide_all_();
   bool excluded_(int x, int y, int w, int h) const;
 
   static int rnd_(int lo, int hi);
@@ -336,8 +352,29 @@ class WeatherFx : public Component {
   // Картинка луны (moon.cpp) и при какой яркости экрана нарисована
   FxSprite moon_spr_{};
   bool moon_dim_{false};
+  // Где луна сейчас (середина); бледная ли, дневная; насколько видна у
+  // горизонта (0..1) и как там пожелтела (0…8); под какие дневной вид и
+  // желтизну нарисована картинка
+  int moon_x_{MOON_X}, moon_y_{MOON_Y};
+  bool moon_day_{false}, moon_day_drawn_{false};
+  float moon_fade_{1};
+  int moon_low_{0}, moon_low_drawn_{0};
   void moon_sprite_();
   void moon_paint_(lv_layer_t *layer, int cx, int cy);
+  // Солнце и Луна на небе дома (sky.cpp): посчитаны ли (время и место
+  // известны) и на какой момент; путь каждого по небу, фаза Луны и какая
+  // доля её диска освещена
+  bool eph_ok_{false};
+  uint32_t eph_utc_{0};
+  SkyPath sun_path_{}, moon_path_{};
+  float moon_ph_now_{0}, moon_lit_{0};
+  // Сумерки: насколько проступили (0…16) планеты, яркие звёзды, остальные
+  // звёзды и созвездие с пунктиром и подписью
+  uint8_t tw_q_[4]{16, 16, 16, 16};
+  // Подпись созвездия: половина ширины надписи; нашлось ли ей место, где её
+  // ничто не закрывает (cap_place_)
+  int cap_half_{0};
+  bool cap_ok_{true};
   int kite_mode_{0};
 
   // Движение считается по реально прошедшему времени: k_ — во сколько раз
@@ -360,6 +397,7 @@ class WeatherFx : public Component {
   float fx_[NF]{}, fy_[NF]{}, fph_[NF]{};
   Spot fs_[NF]{};
   uint8_t fidx_[NF]{};
+  uint8_t flife_[NF]{};  // Life
   // Картинки: дальние и ближние, для какого набора, при какой яркости
   FxSheet sign_sheet_[2]{};
   int sign_set_{-1};
@@ -439,6 +477,7 @@ class WeatherFx : public Component {
   // какой стороной к нам и прозрачность; картинки — дальние и ближние
   static const int NSEA = 16;
   int sea_kind_{0}, nsea_{0};
+  uint8_t sealife_[NSEA]{};  // Life
   float sea_x_[NSEA]{}, sea_y_[NSEA]{}, sea_v_[NSEA]{}, sea_ph_[NSEA]{}, sea_rot_[NSEA]{}, sea_spin_[NSEA]{};
   float sea_flip_[NSEA]{}, sea_flipw_[NSEA]{}, sea_rest_[NSEA]{};
   uint16_t sea_idx_[NSEA]{};
@@ -449,7 +488,7 @@ class WeatherFx : public Component {
   void seasons_apply_(const Params &p, bool relayout);
   void seasons_frame_(float wind);
   void seasons_paint_(lv_layer_t *layer, const lv_area_t &oc, const lv_area_t &clip);
-  void sea_respawn_(int i, bool anywhere);
+  void sea_respawn_(int i, bool enter);
   void sea_render_(int sz, int idx);
   // Зарницы (seasons.cpp): как часто (Params::heat_lightning); вспышка — где (середина у нижнего
   // края), сколько в ней вспышек, какая яркость сейчас (−1 — темно), когда
@@ -466,10 +505,12 @@ class WeatherFx : public Component {
   void hl_(uint32_t now);
   void hl_paint_(lv_layer_t *layer, const lv_area_t &oc, const lv_area_t &clip);
   // Гало (halo.cpp): какое просили (Params::halo) и какое видно сейчас
-  // (0 нет, 1 у луны, 2 у солнца) — в «шапке» или на всё небо; кольцо
-  // (маска A8) и его радиус, ложные солнца — справа и слева
+  // (0 нет, 1 у луны, 2 у солнца) — в «шапке» или на всё небо и вокруг
+  // какого места; кольцо (маска A8) и его радиус, ложные солнца — справа и
+  // слева
   int halo_mode_{0}, halo_on_{0};
   bool halo_full_{false};
+  int halo_x_{0}, halo_y_{0};
   float halo_r_{0};
   FxSprite halo_ring_{}, halo_dog_[2]{};
   Spot halo_spot_{}, dog_spot_[2]{};
@@ -536,12 +577,21 @@ class WeatherFx : public Component {
   void stars_layout_();
   void star_mark_(int i, bool on);
   void stars_paint_(lv_layer_t *layer, const lv_area_t &oc, const lv_area_t &clip);
-  void con_star_paint_(lv_layer_t *layer, int x, int y, int sz);
+  void con_star_paint_(lv_layer_t *layer, int x, int y, int sz, lv_opa_t opa);
   // Облака (clouds.cpp): левый край; маски тела и света и сколько их строк
   // уже нарисовано; цветные картинки — обычная и во вспышке молнии; под
   // какие цвета собрана каждая и какие нужны сейчас (0 — ни под какие); где
   // нарисованы; подсвечены ли сейчас молнией
   float cx_[NC]{};
+  // Облако: нет его, плывёт, приплывает слева или уплывает вправо (быстрее
+  // обычного) — облачность сменилась
+  uint8_t cl_st_[NC]{};
+  bool cl_on_() const {
+    for (uint8_t st : this->cl_st_)
+      if (st)
+        return true;
+    return false;
+  }
   FxSprite cloud_body_[NC]{}, cloud_light_[NC]{}, cloud_img_[NC]{}, cloud_flash_[NC]{};
   int cloud_rows_[NC]{};
   int cloud_look_[NC]{}, cloud_want_{0};
@@ -559,7 +609,7 @@ class WeatherFx : public Component {
   void rain_paint_(lv_layer_t *layer, const lv_area_t &oc, const lv_area_t &clip);
   void rain_hide_();
   void streaks_(float wind);
-  void respawn_streak_(int i, float tan_a, bool anywhere);
+  void respawn_streak_(int i, float tan_a, bool enter);
   void streak_sprites_(int q);
   void splash_(float x, float y, int kind, float wind);
   void splashes_();
@@ -572,6 +622,7 @@ class WeatherFx : public Component {
   int nrs_{0};
   float rx_[NRS]{}, ry_[NRS]{}, rv_[NRS]{};
   uint8_t rkind_[NRS]{};
+  uint8_t rlife_[NRS]{};  // Life: есть ли струя и появится ли снова
   float rgy_[NRS]{};     // нижний край круга под струёй: ниже её не видно
   bool rland_[NRS]{};    // голова уже коснулась края (брызги были)
   float rfar_k_[NRS]{};  // дальние пучки: сколько кадров копится до шага
@@ -592,9 +643,12 @@ class WeatherFx : public Component {
 
   // ---- Снег и сугроб (snow.cpp) ----
   static const int NSN = 24;   // снежинок и стаек дальних точек
+  // Места слоёв снега: с 0 — стайки дальних, с SN_MID0 — хлопья, с SN_NEAR0
+  // — кристаллы
+  static const int SN_MID0 = 12, SN_NEAR0 = 20;
   static const int NSROT = 8;  // поворотов кристалла в пределах 60°
   void snow_apply_(const Params &p, bool relayout);
-  void snow_respawn_(int i, bool anywhere);
+  void snow_respawn_(int i, bool enter);
   void snow_hide_();
   void snow_frame_(float wind);
   void snow_paint_(lv_layer_t *layer, const lv_area_t &oc, const lv_area_t &clip);
@@ -608,6 +662,7 @@ class WeatherFx : public Component {
   float snx_[NSN]{}, sny_[NSN]{}, snv_[NSN]{}, snph_[NSN]{}, snrot_[NSN]{}, snw_[NSN]{}, snacc_[NSN]{};
   int16_t snpx_[NSN]{}, snpy_[NSN]{};
   uint8_t snk_[NSN]{};
+  uint8_t snlife_[NSN]{};  // Life
   uint8_t snow_tick_{0};
   Spot sns_[NSN]{};
   FxSprite sn_dot_{}, sn_flake_{}, sn_cry_[2][NSROT]{};
@@ -625,14 +680,15 @@ class WeatherFx : public Component {
   void leaf_frame_(int idx);
   void leaf_free_();
   void leaves_apply_(const Params &p, bool relayout);
-  void leaf_respawn_(int i, bool anywhere);
+  void leaf_respawn_(int i, bool enter);
   void leaves_frame_(float wind);
   void leaves_paint_(lv_layer_t *layer, const lv_area_t &oc, const lv_area_t &clip);
   // Листья: где, скорость падения (px за 50 мс), фаза покачивания, поворот
   // и скорость кружения, фаза и скорость переворота, сколько ещё лежать на
   // краю (мс, 0 — летит), какая картинка и изнанкой ли, непрозрачность, где
   // нарисованы
-  int nlf_{0};
+  int nlf_{0}, lf_want_{0};  // сколько мест занято и сколько листьев нужно
+  uint8_t lflife_[NLF]{};    // Life
   bool leaf_maple_only_{false};
   float lfx_[NLF]{}, lfy_[NLF]{}, lfv_[NLF]{}, lfph_[NLF]{}, lfrot_[NLF]{}, lfspin_[NLF]{};
   float lfflip_[NLF]{}, lfflipw_[NLF]{}, lfrest_[NLF]{};
@@ -699,6 +755,18 @@ class WeatherFx : public Component {
   FxSprite sun_core_{}, sun_cor_{}, sun_sky_{};
   int sun_sky_rows_{0};  // сколько строк маски длинных лучей уже нарисовано
   void sun_sky_step_();
+  // Где солнце сейчас (середина), насколько оно видно у горизонта (0..1) и
+  // как покраснело (0…16); при какой красноте нарисован диск. Маска длинных
+  // лучей нарисована под место (sun_sky_x_, sun_sky_y_) — когда солнце
+  // уходит от него на несколько пикселей, рисуется заново; sun_sky_q_ — при
+  // какой прозрачности и красноте лучи сейчас на экране
+  int sun_x_{0}, sun_y_{0};
+  float sun_fade_{1};
+  int sun_red_{0}, sun_core_red_{-1};
+  int sun_sky_x_{0}, sun_sky_y_{0}, sun_sky_q_{-1};
+  int sun_sky_redo_{466};  // сколько строк маски уже нарисовано заново под новое место
+  void sun_target_(int *x, int *y, float *fade, int *red) const;
+  void sun_move_();
 
   // Радуга (rainbow.cpp): картинка, яркость 0..1 (идёт к rainbow_on_) и
   // когда она менялась

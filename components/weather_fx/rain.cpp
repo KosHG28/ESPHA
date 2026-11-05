@@ -218,7 +218,8 @@ void WeatherFx::rain_hide_() {
 
 void WeatherFx::rain_apply_(const Params &p, bool relayout) {
   const int cnt = std::min(std::max(p.count, 0), ND);
-  this->hail_ = p.mode == 4;
+  const bool hail = p.mode == 4, swap = hail != this->hail_ && this->nrs_;
+  this->hail_ = hail;
   // В мокром снеге дождь вдвое слабее
   this->nd_ = (p.mode == 1 || p.mode == 4) ? cnt : (p.mode == 3 ? cnt / 2 : 0);
   const int pal = p.dim ? 1 : 0;
@@ -238,30 +239,40 @@ void WeatherFx::rain_apply_(const Params &p, bool relayout) {
     this->streak_sprites_(0);
   // Слой погоды виден, только если на нём что-то есть — теперь и дождь
   this->update_root_();
-  if (!relayout)
+  if (!relayout && !swap)
     return;
 
-  // Новая погода — всё с чистого листа: струи сразу по всему экрану
-  this->rain_hide_();
-  this->nrs_ = nrs;
-  for (int i = 0; i < nrs; i++) {
-    // Слои вперемешку: из каждых 10 — 4 пучка дальних, 3 пучка средних и
-    // 3 ближние струи; рисунки пучков чередуются
-    const int m = i % 10, v = i + i / 10;
-    this->rkind_[i] = (uint8_t) (this->hail_ ? 6 : (m < 4 ? v % 3 : (m < 7 ? 3 + v % 3 : 6 + v % 2)));
-    this->respawn_streak_(i, this->tan_a_, true);
+  // Град сменился дождём или дождь градом — у прежних струй другие картинки
+  if (swap) {
+    this->rain_hide_();
+    memset(this->rlife_, 0, sizeof(this->rlife_));
+    this->nrs_ = 0;
   }
+  // Погода сменилась: недостающие струи начинают падать сверху одна за
+  // другой, лишние долетают до края и больше не появляются. Слои
+  // вперемешку: из каждых 10 — 4 пучка дальних, 3 пучка средних и 3 ближние
+  // струи; рисунки пучков чередуются
+  this->nrs_ = fx_relife(
+      this->rlife_, NRS, [nrs](int i) { return i < nrs; },
+      [this](int i) {
+        const int m = i % 10, v = i + i / 10;
+        this->rkind_[i] = (uint8_t) (this->hail_ ? 6 : (m < 4 ? v % 3 : (m < 7 ? 3 + v % 3 : 6 + v % 2)));
+        this->rfar_k_[i] = 0;
+        this->respawn_streak_(i, this->tan_a_, true);
+      });
+  this->update_root_();
 }
 
-void WeatherFx::respawn_streak_(int i, float tan_a, bool anywhere) {
+void WeatherFx::respawn_streak_(int i, float tan_a, bool enter) {
   const RainLayer &l = LAYERS[KIND_LAYER[this->rkind_[i]]];
   this->rv_[i] = l.v0 + (l.v1 - l.v0) * rnd_(0, 101) / 100.0f;
   this->rland_[i] = false;
   if (this->hail_)
     this->rv_[i] *= 0.85f;
-  // Новая струя — над экраном (или где угодно — при смене погоды). Чтобы
-  // снос ветром не уносил струи за край, они начинаются против ветра
-  const float y = anywhere ? rnd_(-60, 440) : -rnd_(0, 60);
+  // Новая струя — над экраном. Дождь только начался или усилился — струи
+  // вразброс выше, чтобы подходили одна за другой, а не стеной. Чтобы снос
+  // ветром не уносил струи за край, они начинаются против ветра
+  const float y = enter ? -rnd_(0, 480) : -rnd_(0, 60);
   this->ry_[i] = y;
   this->rx_[i] = rnd_(10, 456) - tan_a * (FX_CY - y) * 0.9f;
 }
@@ -278,6 +289,8 @@ void WeatherFx::streaks_(float wind) {
   // кадрах, половина — на нечётных, чтобы кадры были ровными
   this->rain_tick_ ^= 1;
   for (int i = 0; i < this->nrs_; i++) {
+    if (this->rlife_[i] == LIFE_OFF)
+      continue;
     const int kind = this->rkind_[i];
     float k = this->k_;
     if (!this->hail_ && KIND_LAYER[kind] == 0) {
@@ -309,8 +322,15 @@ void WeatherFx::streaks_(float wind) {
       int top = 10000;
       for (int m = 0; m < n; m++)
         top = std::min(top, (int) r[m].y1);
-      if (this->hail_ || top > g || this->rx_[i] < -50 || this->rx_[i] > 516)
+      if (this->hail_ || top > g || this->rx_[i] < -50 || this->rx_[i] > 516) {
+        // Дождь стихает — эта струя больше не появляется
+        if (this->rlife_[i] == LIFE_END) {
+          this->rlife_[i] = LIFE_OFF;
+          this->mark_(this->rs_[i], false, 0, 0, 1, 1);
+          continue;
+        }
         this->respawn_streak_(i, this->tan_a_, false);
+      }
     }
     // Участок к перерисовке — общий на весь пучок
     const FxSprite *spr[4];
@@ -324,6 +344,7 @@ void WeatherFx::streaks_(float wind) {
     this->mark_(this->rs_[i], spr[0]->buf && this->visible_(u.x1, u.y1, w, h) && !this->excluded_(u.x1, u.y1, w, h),
                 u.x1, u.y1, w, h);
   }
+  this->nrs_ = fx_life_top(this->rlife_, this->nrs_);
 }
 
 int WeatherFx::streak_parts_(int i, const FxSprite **spr, lv_area_t *rect, lv_opa_t *opa) const {

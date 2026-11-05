@@ -64,6 +64,27 @@ void WeatherFx::stars_layout_() {
   }
 }
 
+// Звезду i закрывает луна или её ореол — звезды не видно
+bool WeatherFx::star_hidden_(int i) const {
+  if (!this->moon_spot_.on)
+    return false;
+  const lv_area_t &m = this->moon_spot_.a;
+  const int x = this->stx_[i] + 1, y = this->sty_[i] + 1;
+  return x >= m.x1 - 3 && x <= m.x2 + 3 && y >= m.y1 - 3 && y <= m.y2 + 3;
+}
+
+// Насколько звезда i проступила в сумерки (0…16): яркие — раньше
+int WeatherFx::star_tw_(int i) const { return this->tw_q_[this->stbig_[i] ? 1 : 2]; }
+
+// Какие звёзды сейчас видны: не за луной и уже проступили в сумерки
+void WeatherFx::stars_show_() {
+  const bool on = this->stars_on_ && !this->bats_on_;
+  if (on)
+    this->star_sprites_();
+  for (int i = 0; i < NST; i++)
+    this->star_mark_(i, on && i < this->nst_ && this->star_tw_(i) > 0 && !this->star_hidden_(i));
+}
+
 // Прямоугольник звезды i на небе (относительно слоя)
 void WeatherFx::star_mark_(int i, bool on) {
   const FxSprite &s = this->st_spr_[this->stbig_[i] ? 1 : 0];
@@ -81,16 +102,17 @@ void WeatherFx::stars_paint_(lv_layer_t *layer, const lv_area_t &oc, const lv_ar
     const lv_area_t a = {s.a.x1 + oc.x1, s.a.y1 + oc.y1, s.a.x2 + oc.x1, s.a.y2 + oc.y1};
     if (!fx_hit(a, clip))
       continue;
-    fx_draw(layer, this->st_spr_[this->stbig_[i] ? 1 : 0], a, (lv_opa_t) (this->stopa_[i] * pal / 255),
+    fx_draw(layer, this->st_spr_[this->stbig_[i] ? 1 : 0], a,
+            (lv_opa_t) (this->stopa_[i] * pal * this->star_tw_(i) / (255 * 16)),
             lv_color_hex(STAR_TINT[this->sttint_[i]]));
   }
 }
 
 // Звезда созвездия размера sz (4–10 px) с серединой в (x, y), экранные
 // координаты
-void WeatherFx::con_star_paint_(lv_layer_t *layer, int x, int y, int sz) {
+void WeatherFx::con_star_paint_(lv_layer_t *layer, int x, int y, int sz, lv_opa_t opa) {
   const FxSprite &s = this->con_spr_[std::min(3, std::max(0, (sz - 4) / 2))];
-  fx_draw(layer, s, fx_sprite_area(s, x, y), LV_OPA_COVER, lv_color_hex(this->dim_ ? 0xFFF6DC : 0xE6DCC2));
+  fx_draw(layer, s, fx_sprite_area(s, x, y), opa, lv_color_hex(this->dim_ ? 0xFFF6DC : 0xE6DCC2));
 }
 
 }  // namespace weather_fx

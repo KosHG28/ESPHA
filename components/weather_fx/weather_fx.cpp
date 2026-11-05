@@ -212,16 +212,6 @@ void WeatherFx::mark_(Spot &s, bool on, int x, int y, int w, int h) {
   s.on = on;
 }
 
-void WeatherFx::hide_all_() {
-  this->rain_hide_();
-  for (auto &s : this->fs_)
-    this->mark_(s, false, 0, 0, 1, 1);
-  for (auto &s : this->sts_)
-    this->mark_(s, false, 0, 0, 1, 1);
-  this->mark_(this->met_spot_, false, 0, 0, 1, 1);
-  this->met_on_ = false;
-}
-
 void WeatherFx::paint_back(lv_layer_t *layer) {
   lv_area_t oc;
   lv_obj_get_coords(this->back_, &oc);
@@ -254,10 +244,11 @@ void WeatherFx::paint_back(lv_layer_t *layer) {
   // Радуга (rainbow.cpp)
   this->rainbow_paint_(layer, oc, clip);
 
-  // Луна в текущей фазе (moon.cpp). В полнолуние крупнее, в суперлуние —
-  // ещё крупнее, в затмение наливается красным
+  // Луна в текущей фазе на своём месте в небе (moon.cpp). В полнолуние
+  // крупнее, в суперлуние — ещё крупнее, в затмение наливается красным,
+  // днём — бледная
   if (place(this->moon_spot_) && this->moon_phase_ >= 0)
-    this->moon_paint_(layer, MOON_X + oc.x1, MOON_Y + oc.y1);
+    this->moon_paint_(layer, this->moon_x_ + oc.x1, this->moon_y_ + oc.y1);
 
   // Мерцающие звёзды (stars.cpp)
   this->stars_paint_(layer, oc, clip);
@@ -327,7 +318,7 @@ void WeatherFx::paint_front(lv_layer_t *layer) {
   this->garland_paint_(layer, oc, clip);
 }
 
-void WeatherFx::apply_(const Params &p, bool relayout) {
+void WeatherFx::apply_(const Params &p, bool relayout, bool restar) {
   const bool dim = p.dim;
   const int cnt = std::min(std::max(p.count, 0), ND);
   // Сменилась палитра — перерисовать всё: луна, солнце и созвездие
@@ -337,12 +328,34 @@ void WeatherFx::apply_(const Params &p, bool relayout) {
     lv_obj_invalidate(this->paint_);
   }
   this->dim_ = dim;
-  const bool signs = p.mode == 2 || (p.mode >= 5 && p.mode <= 9);
+  // Снег — в snow.cpp, листья — в leaves.cpp, картинками всплывает и
+  // падает остальное: сердечки, цветы, шарики (signs.cpp). Набор знаков
+  // (fset_) меняется, только когда нужен другой: пока последние знаки
+  // долетают, они остаются прежними
   static const int SET_OF_MODE[10] = {0, 0, 0, 0, 0, 1, 2, 3, 4, 5};
-  this->fset_ = p.mode >= 0 && p.mode <= 9 ? SET_OF_MODE[p.mode] : 0;
-  // Снег — в snow.cpp, листья — в leaves.cpp, знаками шрифта всплывает и
-  // падает остальное: сердечки, цветы, шарики
-  this->nf_ = signs && this->fset_ >= 2 && this->fset_ <= 4 ? std::min(cnt, NF) : 0;
+  const int set = p.mode >= 6 && p.mode <= 8 ? SET_OF_MODE[p.mode] : -1;
+  const int nf_want = set > 0 ? std::min(cnt, NF) : 0;
+  if (relayout && set > 0 && set != this->fset_) {
+    // Другие знаки — прежние (у них другие картинки) убрать сразу
+    for (auto &s : this->fs_)
+      this->mark_(s, false, 0, 0, 1, 1);
+    memset(this->flife_, 0, sizeof(this->flife_));
+    this->nf_ = 0;
+    this->fset_ = set;
+  }
+  if (relayout) {
+    // Недостающие знаки появляются из-за края — сердечки и шарики снизу,
+    // цветы сверху — один за другим, лишние долетают до края
+    const bool rise = this->fset_ == 2 || this->fset_ == 4;
+    this->nf_ = fx_relife(
+        this->flife_, NF, [nf_want](int i) { return i < nf_want; },
+        [this, rise](int i) {
+          this->mark_(this->fs_[i], false, 0, 0, 1, 1);
+          this->fx_[i] = rnd_(30, 430);
+          this->fy_[i] = rise ? fx_bottom(this->fx_[i]) + 20 + rnd_(0, 300) : fx_top(this->fx_[i]) - 20 - rnd_(0, 300);
+          this->fph_[i] = rnd_(0, 628) / 100.0f;
+        });
+  }
 
   // Праздник: что рисовать сверх погоды
   const int hol = p.holiday;
@@ -378,12 +391,10 @@ void WeatherFx::apply_(const Params &p, bool relayout) {
     this->end_strike_();
   this->frost_on_ = p.frost;
   this->update_root_();
-  // Луна — вместе со звёздами; фазу задаёт moon_()
-  if (!this->stars_on_) {
-    this->mark_(this->moon_spot_, false, 0, 0, 1, 1);
-    this->moon_phase_ = -1;
-    fx_sprite_free(this->moon_spr_);
-  }
+  // Луна — ночью вместе со звёздами, днём (бледная) — вместе с солнцем;
+  // где она и какая — решает moon_()
+  if (!this->stars_on_ && !this->sun_on_)
+    this->moon_hide_();
   // Салют кончился или змей больше не летает — убрать с экрана
   if (!this->fw_on_)
     this->fireworks_stop_();
@@ -409,17 +420,16 @@ void WeatherFx::apply_(const Params &p, bool relayout) {
   // Картинки сердечек, цветов, шариков и летучих мышей (signs.cpp)
   this->signs_apply_();
 
-  if (relayout) {
-    // Новая погода — всё с чистого листа
-    this->hide_all_();
-    for (int i = 0; i < NF; i++) {
-      this->fx_[i] = rnd_(30, 430);
-      this->fy_[i] = rnd_(0, 440);
-      this->fph_[i] = rnd_(0, 628) / 100.0f;
-    }
+  if (restar) {
+    // Звёзды зажглись или часы ушли и вернулись — звёзды и метеор заново
+    for (auto &s : this->sts_)
+      this->mark_(s, false, 0, 0, 1, 1);
+    this->mark_(this->met_spot_, false, 0, 0, 1, 1);
+    this->met_on_ = false;
     // Звёзды — в верхней половине круга, вокруг и выше времени, но не на
     // месте созвездия. Без часов — по всему кругу, кроме погоды слева,
-    // созвездия справа с подписью и строки планет
+    // созвездия справа с подписью и строки планет. Звёзды, которые закроет
+    // луна, гаснут, пока она рядом (stars_show_)
     this->nst_ = this->full_ ? NST : 12;
     for (int i = 0; i < this->nst_; i++) {
       int x, y;
@@ -427,8 +437,7 @@ void WeatherFx::apply_(const Params &p, bool relayout) {
       do {
         x = rnd_(30, 436);
         y = this->full_ ? rnd_(30, 440) : rnd_(30, 220);
-        bad = (x - 233) * (x - 233) + (y - 233) * (y - 233) > 215 * 215 ||
-              (std::abs(x - MOON_X) < MOON_R + 12 && std::abs(y - MOON_Y) < MOON_R + 12);
+        bad = (x - 233) * (x - 233) + (y - 233) * (y - 233) > 215 * 215;
         if (this->full_)
           bad = bad || (x < 182 && y > 192 && y < 274) ||                // погода на улице
                 (x > 182 && x < 424 && y > 70 && y < 370) ||            // созвездие и подпись
@@ -442,20 +451,16 @@ void WeatherFx::apply_(const Params &p, bool relayout) {
     }
     // Оттенки звёзд и яркие с лучиками (stars.cpp)
     this->stars_layout_();
-  } else {
+  }
+  if (!relayout && !restar) {
     // Поменялись яркость, солнце или гирлянда — перерисовать слой целиком,
     // это разовая перерисовка
     lv_obj_invalidate(this->back_);
     lv_obj_invalidate(this->paint_);
   }
-  if (this->stars_on_ && !this->bats_on_) {
-    this->star_sprites_();
-    for (int i = 0; i < NST; i++)
-      this->star_mark_(i, i < this->nst_);
-  } else {
-    for (auto &s : this->sts_)
-      this->mark_(s, false, 0, 0, 1, 1);
-  }
+  // Звёзды: сколько проступило в сумерки (sky.cpp), какие не за луной
+  this->twilight_();
+  this->stars_show_();
   // Дождь и град: струи, брызги, их картинки и цвета
   this->rain_apply_(p, relayout);
   // Снег и сугроб, листопад
@@ -463,9 +468,6 @@ void WeatherFx::apply_(const Params &p, bool relayout) {
   this->leaves_apply_(p, relayout);
   // Лепестки яблонь и тополиный пух (seasons.cpp)
   this->seasons_apply_(p, relayout);
-  // Лишние падающие знаки — убрать
-  for (int i = this->nf_; i < NF; i++)
-    this->mark_(this->fs_[i], false, 0, 0, 1, 1);
 
   // Созвездие и планеты гаснут вместе со звёздами (sky.cpp); иней и
   // сосульки (frost.cpp)
@@ -536,6 +538,8 @@ void WeatherFx::flakes_(float wind, float ks) {
   // глубина. У каждого свой ритм покачивания. Мелкие медленные, их двигаем
   // только на редких тиках (ks > 0)
   for (int i = 0; i < this->nf_; i++) {
+    if (this->flife_[i] == LIFE_OFF)
+      continue;
     const bool big = i % 2;
     const float k = big ? this->k_ : ks;
     if (k <= 0)
@@ -546,6 +550,12 @@ void WeatherFx::flakes_(float wind, float ks) {
       this->fph_[i] += k * ((big ? 0.06f : 0.05f) + i * 0.003f);
       this->fx_[i] = wrap_x(this->fx_[i] + k * (cosf(this->fph_[i]) * (big ? 0.9f : 0.6f) + wind * 0.5f));
       if (this->fy_[i] < -30) {
+        // Всплыло за верхний край — снова снизу; праздник кончился — всё
+        if (this->flife_[i] == LIFE_END) {
+          this->flife_[i] = LIFE_OFF;
+          this->mark_(this->fs_[i], false, 0, 0, 1, 1);
+          continue;
+        }
         this->fy_[i] = 490 + rnd_(0, 40);
         this->fx_[i] = rnd_(30, 430);
       }
@@ -560,12 +570,22 @@ void WeatherFx::flakes_(float wind, float ks) {
       // тут же отбрасывала его наверх — после первого раза сердечки и
       // шарики больше не появлялись
       if (this->fy_[i] > 470) {
+        if (this->flife_[i] == LIFE_END) {
+          this->flife_[i] = LIFE_OFF;
+          this->mark_(this->fs_[i], false, 0, 0, 1, 1);
+          continue;
+        }
         this->fy_[i] = -30 - rnd_(0, 40);
         this->fx_[i] = rnd_(30, 430);
       }
     }
     this->sign_mark_(i);
   }
+  // Последние знаки долетели — их картинки больше не нужны
+  const int was = this->nf_;
+  this->nf_ = fx_life_top(this->flife_, this->nf_);
+  if (was && !this->nf_)
+    this->signs_apply_();
 }
 
 void WeatherFx::stars_(uint32_t now) {
@@ -587,10 +607,10 @@ void WeatherFx::stars_(uint32_t now) {
 }
 
 void WeatherFx::update_root_() {
-  show_(this->root_, this->nd_ || this->nf_ || this->nsn_ || this->nlf_ || this->cover_spot_.on || this->ncl_ ||
-                         this->storm_ || this->stars_on_ || this->sun_on_ || this->gar_on_ || this->fw_on_ ||
-                         this->kite_mode_ || this->rainbow_on_ || this->rb_level_ > 0 || this->frost_on_ ||
-                         this->extras_drawn_());
+  show_(this->root_, this->nd_ || this->nrs_ || this->nf_ || this->nsn_ || this->nlf_ || this->cover_spot_.on ||
+                         this->ncl_ || this->cl_on_() || this->storm_ || this->stars_on_ || this->sun_on_ ||
+                         this->gar_on_ || this->fw_on_ || this->kite_mode_ || this->rainbow_on_ ||
+                         this->rb_level_ > 0 || this->frost_on_ || this->extras_drawn_());
 }
 
 void WeatherFx::bats_() {
@@ -625,22 +645,30 @@ void WeatherFx::frame(const Params &p) {
                   ((p.frost ? 1 : 0) << 22) | ((std::min(std::max(p.holiday, 0), 31)) << 23) |
                   ((p.night ? 1 : 0) << 28) | ((p.fireflies ? 1 : 0) << 29) | ((p.matrix ? 1 : 0) << 30);
   this->fw_pal_ = p.fw_palette;
+  // Где сейчас Солнце и Луна на небе дома (sky.cpp)
+  this->ephem_(p);
   // Гало появляется и уходит само (halo_): ему нужны солнце или луна
   this->halo_mode_ = p.halo;
+  bool refull = false;
   if (p.full != this->full_) {
-    // Часы ушли или вернулись: небо — заново под весь круг или под «шапку»
+    // Часы ушли или вернулись: небо — заново под весь круг или под «шапку»;
+    // осадки идут дальше как шли
     this->full_ = p.full;
     this->sky_full_();
-    this->applied_ = -1;
+    refull = true;
   }
-  if (sig != this->applied_) {
-    // Если поменялись только яркость, солнце, гирлянда или праздник —
-    // перекрашиваем, но осадки не перемешиваем
+  if (sig != this->applied_ || refull) {
+    // Сменилась погода — осадки и облака меняются плавно (rain_apply_ и
+    // остальные); если поменялись только яркость, солнце, гирлянда или
+    // праздник — перекрашиваем, осадки не трогаем. Звёзды раскладываются
+    // заново, только когда зажглись или часы ушли и вернулись
     const int keep = ~((1 << 13) | (1 << 16) | (1 << 17) | (1 << 18) | (3 << 19) | (1 << 21) | (1 << 22) |
                        (31 << 23) | (1 << 28) | (1 << 29) | (1 << 30));
-    const bool relayout = this->applied_ < 0 || (sig & keep) != (this->applied_ & keep);
+    const bool first = this->applied_ < 0;
+    const bool relayout = first || (sig & keep) != (this->applied_ & keep);
+    const bool restar = first || refull || (p.stars && !this->stars_on_);
     this->applied_ = sig;
-    this->apply_(p, relayout);
+    this->apply_(p, relayout, restar);
   }
 
   // Зарево, марево и самолёт меняются без перестройки погоды
@@ -672,9 +700,9 @@ void WeatherFx::frame(const Params &p) {
     this->update_root_();
   }
 
-  const bool any = this->nd_ || this->nf_ || this->nsn_ || this->nlf_ || this->cover_ > 0 || this->ncl_ ||
-                   this->storm_ || this->stars_on_ || this->sun_on_ || this->gar_on_ || this->fw_on_ ||
-                   this->kite_mode_ || this->rainbow_on_ || this->rb_level_ > 0 || this->frost_on_ ||
+  const bool any = this->nd_ || this->nrs_ || this->nf_ || this->nsn_ || this->nlf_ || this->cover_ > 0 || this->ncl_ ||
+                   this->cl_on_() || this->storm_ || this->stars_on_ || this->sun_on_ || this->gar_on_ ||
+                   this->fw_on_ || this->kite_mode_ || this->rainbow_on_ || this->rb_level_ > 0 || this->frost_on_ ||
                    this->extras_drawn_();
   if (!any || !p.active) {
     this->end_strike_();
@@ -698,8 +726,10 @@ void WeatherFx::frame(const Params &p) {
   }
   const float wind = this->wind_(p, now);
   this->render_budget_ = 2;
+  // Луна — раньше созвездия и звёзд: они уступают ей место
+  this->moon_(p);
+  this->twilight_();
   this->sky_(p);
-  this->moon_(p.utc, p.moon_force);
   this->stars_(now);
   this->bstar_(now);
   this->bats_();

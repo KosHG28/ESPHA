@@ -5,11 +5,11 @@
 // Внутренний край кольца резкий, наружу оно тает. Слева и справа от солнца
 // на кольце — «ложные солнца» (паргелии): яркие пятна, красноватые со
 // стороны солнца, с белёсым хвостом наружу. Когда часы на экране, солнце —
-// в «шапке» круга, и кольцу там тесно: видно одно ложное солнце справа.
+// в «шапке» круга, и кольцу там тесно: видно одно ложное солнце — с той
+// стороны, где больше неба.
 //
-// Всё неподвижно: кольцо — маска A8, ложные солнца — картинки RGB565A8;
-// рисуются, когда гало появилось, и перерисовываются, только если то, что
-// лежит под ними, само меняется.
+// Кольцо — маска A8, ложные солнца — картинки RGB565A8; рисуются, когда гало
+// появилось, и только переносятся вслед за солнцем или луной.
 #include "fx_draw.h"
 
 namespace esphome {
@@ -18,7 +18,7 @@ namespace weather_fx {
 // Кольцо: радиус по внутреннему краю, px (у солнца — при масштабе 1, когда
 // часы убраны), и как быстро тает наружу
 static const float HALO_MOON_R = 42.0f, HALO_SUN_R = 72.0f, HALO_FADE = 4.5f;
-// Ложное солнце в «шапке» — на таком расстоянии справа от солнца
+// Ложное солнце в «шапке» — на таком расстоянии сбоку от солнца
 static const int DOG_CAP_DX = 58;
 // Картинка ложного солнца и где в ней пятно (со стороны солнца)
 static const int DOG_W = 62, DOG_H = 63, DOG_AX = 23, DOG_AY = 31;
@@ -79,54 +79,65 @@ static void draw_dog(FxSprite &s, int dir) {
 
 void WeatherFx::halo_() {
   // Что видно: кольцо у луны (если она яркая — от трети до двух третей
-  // месяца, или по выбору «Фона погоды»), кольцо и ложные солнца у солнца
-  int want = 0;
+  // месяца, или по выбору «Фона погоды»), кольцо и ложные солнца у солнца.
+  // Луна и солнце идут по небу — гало идёт за ними
+  int want = 0, ax = 0, ay = 0;
   if ((this->halo_mode_ == 1 || this->halo_mode_ == 3) && this->stars_on_ && this->moon_spot_.on &&
-      this->moon_phase_ >= 0 && (this->halo_mode_ == 3 || (this->moon_phase_ > 0.3f && this->moon_phase_ < 0.7f)))
+      this->moon_phase_ >= 0 && (this->halo_mode_ == 3 || (this->moon_phase_ > 0.3f && this->moon_phase_ < 0.7f))) {
     want = 1;
-  else if (this->halo_mode_ == 2 && this->sun_on_ && this->sun_spot_.on)
+    ax = this->moon_x_;
+    ay = this->moon_y_;
+  } else if (this->halo_mode_ == 2 && this->sun_on_ && this->sun_spot_.on) {
     want = 2;
-  if (want == this->halo_on_ && this->full_ == this->halo_full_)
+    ax = this->sun_x_;
+    ay = this->sun_y_;
+  }
+  const bool same = want == this->halo_on_ && this->full_ == this->halo_full_;
+  if (same && (!want || (ax == this->halo_x_ && ay == this->halo_y_)))
     return;
   this->halo_on_ = want;
   this->halo_full_ = this->full_;
-  // Рисунки — заново под то, что видно
-  this->mark_(this->halo_spot_, false, 0, 0, 1, 1);
-  for (auto &d : this->dog_spot_)
-    this->mark_(d, false, 0, 0, 1, 1);
-  fx_sprite_free(this->halo_ring_);
-  for (auto &d : this->halo_dog_)
-    fx_sprite_free(d);
-  auto ring = [this](int cx, int cy, float r) {
-    this->halo_r_ = r;
-    draw_ring(this->halo_ring_, r);
-    if (this->halo_ring_.buf) {
-      const lv_area_t a = fx_sprite_area(this->halo_ring_, cx, cy);
-      this->mark_(this->halo_spot_, true, a.x1, a.y1, a.x2 - a.x1 + 1, a.y2 - a.y1 + 1);
-    }
-  };
-  auto dog = [this](int i, int dir, int x, int y) {
-    draw_dog(this->halo_dog_[i], dir);
-    if (this->halo_dog_[i].buf) {
-      const lv_area_t a = fx_sprite_area(this->halo_dog_[i], x, y);
-      this->mark_(this->dog_spot_[i], true, a.x1, a.y1, a.x2 - a.x1 + 1, a.y2 - a.y1 + 1);
-    }
-  };
-  if (want == 1) {
-    ring(MOON_X, MOON_Y, HALO_MOON_R);
-  } else if (want == 2) {
-    int sx, sy;
-    float k;
-    this->sun_place_(&sx, &sy, &k);
-    if (this->full_) {
-      const float r = HALO_SUN_R * k;
-      ring(sx, sy, r);
-      dog(0, 1, sx + (int) r + 2, sy);
-      dog(1, -1, sx - (int) r - 2, sy);
-    } else {
-      dog(0, 1, sx + DOG_CAP_DX, sy);
+  this->halo_x_ = ax;
+  this->halo_y_ = ay;
+  if (!same) {
+    // Рисунки — заново под то, что видно
+    this->mark_(this->halo_spot_, false, 0, 0, 1, 1);
+    for (auto &d : this->dog_spot_)
+      this->mark_(d, false, 0, 0, 1, 1);
+    fx_sprite_free(this->halo_ring_);
+    for (auto &d : this->halo_dog_)
+      fx_sprite_free(d);
+    if (want == 1) {
+      this->halo_r_ = HALO_MOON_R;
+      draw_ring(this->halo_ring_, HALO_MOON_R);
+    } else if (want == 2) {
+      // Без часов — кольцо и ложные солнца по обе стороны; при часах кольцу
+      // в «шапке» тесно — одно ложное солнце, с той стороны, где есть место
+      int sx, sy;
+      float k;
+      this->sun_place_(&sx, &sy, &k);
+      this->halo_r_ = HALO_SUN_R * k;
+      if (this->full_)
+        draw_ring(this->halo_ring_, this->halo_r_);
+      draw_dog(this->halo_dog_[0], 1);
+      draw_dog(this->halo_dog_[1], -1);
     }
   }
+  // Кольцо и ложные солнца — вокруг светила
+  auto place = [this](Spot &spot, const FxSprite &spr, bool on, int x, int y) {
+    if (!on || !spr.buf) {
+      this->mark_(spot, false, 0, 0, 1, 1);
+      return;
+    }
+    const lv_area_t a = fx_sprite_area(spr, x, y);
+    this->mark_(spot, true, a.x1, a.y1, a.x2 - a.x1 + 1, a.y2 - a.y1 + 1);
+  };
+  const int dr = (int) this->halo_r_ + 2;
+  const bool left = !this->full_ && ax > 233;
+  place(this->halo_spot_, this->halo_ring_, want == 1 || (want == 2 && this->full_), ax, ay);
+  place(this->dog_spot_[0], this->halo_dog_[0], want == 2 && !left, ax + (this->full_ ? dr : DOG_CAP_DX), ay);
+  place(this->dog_spot_[1], this->halo_dog_[1], want == 2 && (this->full_ || left),
+        ax - (this->full_ ? dr : DOG_CAP_DX), ay);
 }
 
 void WeatherFx::halo_paint_(lv_layer_t *layer, const lv_area_t &oc, const lv_area_t &clip) {

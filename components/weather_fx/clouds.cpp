@@ -20,6 +20,12 @@ namespace weather_fx {
 
 // Картинка облака; сколько её строк рисуется за кадр в первый раз
 static const int CW = 200, CH = 74, CLOUD_ROWS = 19;
+// Облако (WeatherFx::cl_st_): нет его, плывёт, приплывает, уплывает
+enum : uint8_t { CL_OFF = 0, CL_ON, CL_IN, CL_OUT };
+// Новое облако приплывает слева до своего места (левый край), потом плывёт
+// как все; приплывает и уплывает со скоростью, px за 50 мс
+static const float CLOUD_HOME[3] = {-50.0f, 100.0f, 250.0f};
+static const float CLOUD_FAST = 1.6f;
 // Облака плывут у верхнего края круга и не задевают строку с погодой (она
 // начинается на 113 px): иначе каждый сдвиг облака перерисовывал бы и её
 static const int CLOUD_Y[3] = {34, 39, 16};
@@ -198,15 +204,26 @@ void WeatherFx::clouds_apply_(bool relayout) {
   const int pal = this->dim_ ? 1 : 0, heavy = (this->ncl_ >= 3 || this->storm_) ? 1 : 0;
   this->cloud_want_ = 1 + pal * 2 + heavy;
   for (int i = 0; i < NC; i++) {
-    const bool on = i < this->ncl_;
+    const bool want = i < this->ncl_;
+    uint8_t &st = this->cl_st_[i];
+    if (relayout) {
+      // Облачность сменилась: новое облако приплывает слева, лишнее
+      // уплывает вправо
+      if (want && st == CL_OFF) {
+        st = CL_IN;
+        this->cx_[i] = (float) (-CW - i * 40);
+      } else if (want && st == CL_OUT) {
+        st = CL_ON;
+      } else if (!want && st != CL_OFF) {
+        st = CL_OUT;
+      }
+    }
     // Новые облака дорисовываются в следующих кадрах (clouds_)
-    if (on)
+    if (want)
       this->cloud_prepare_(i);
     if (!this->storm_)
       fx_sprite_free(this->cloud_flash_[i]);
-    if (relayout)
-      this->cx_[i] = 40 + i * 150 - 90;
-    this->mark_(this->cloud_spot_[i], on && this->cloud_img_[i].buf, (int) this->cx_[i], CLOUD_Y[i], CW, CH);
+    this->mark_(this->cloud_spot_[i], st != CL_OFF && this->cloud_img_[i].buf, (int) this->cx_[i], CLOUD_Y[i], CW, CH);
   }
   if (!this->storm_) {
     this->end_strike_();
@@ -218,11 +235,23 @@ void WeatherFx::clouds_apply_(bool relayout) {
 void WeatherFx::clouds_() {
   // Облака медленно ползут вправо (2–3 px/с), у каждого своя скорость.
   // Сдвигаем только когда меняется целый пиксель: каждый сдвиг перерисовывает
-  // всё облако целиком, поэтому чем медленнее, тем дешевле
-  for (int i = 0; i < this->ncl_; i++) {
-    this->cx_[i] += this->k_ * (0.10f + i * 0.03f);
-    if (this->cx_[i] > 466)
+  // всё облако целиком, поэтому чем медленнее, тем дешевле. Приплывает и
+  // уплывает облако быстрее — за несколько секунд
+  for (int i = 0; i < NC; i++) {
+    uint8_t &st = this->cl_st_[i];
+    if (st == CL_OFF)
+      continue;
+    this->cx_[i] += this->k_ * (st == CL_ON ? 0.10f + i * 0.03f : CLOUD_FAST);
+    if (st == CL_IN && this->cx_[i] >= CLOUD_HOME[i])
+      st = CL_ON;
+    if (this->cx_[i] > 466) {
+      if (st == CL_OUT) {
+        st = CL_OFF;
+        this->mark_(this->cloud_spot_[i], false, 0, 0, 1, 1);
+        continue;
+      }
       this->cx_[i] = -CW;
+    }
     // Облако ещё не нарисовано — дорисовать по очереди с остальными
     // картинками
     if (!this->cloud_img_[i].buf)
@@ -352,7 +381,7 @@ void WeatherFx::bolt_light_(uint8_t opa, bool lit, bool sky) {
   }
   if (lit != this->clouds_lit_) {
     this->clouds_lit_ = lit;
-    for (int i = 0; i < this->ncl_; i++)
+    for (int i = 0; i < NC; i++)
       if (this->cloud_spot_[i].on)
         this->invalidate_(this->cloud_spot_[i].a);
   }
@@ -438,7 +467,7 @@ void WeatherFx::clouds_paint_(lv_layer_t *layer, const lv_area_t &oc, const lv_a
       fx_draw(layer, this->bolt_core_, a, this->bolt_opa_, lv_color_hex(BOLT_C));
     }
   }
-  for (int i = 0; i < this->ncl_; i++) {
+  for (int i = 0; i < NC; i++) {
     if (!this->cloud_spot_[i].on)
       continue;
     const lv_area_t a = screen(this->cloud_spot_[i]);

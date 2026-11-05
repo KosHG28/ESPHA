@@ -147,7 +147,11 @@ void WeatherFx::seasons_apply_(const Params &p, bool relayout) {
   const int kind = p.mode == 10 ? 1 : (p.mode == 11 ? 2 : 0);
   const int n = kind ? std::min(std::max(p.count, 0), NSEA) : 0;
   if (kind != this->sea_kind_) {
-    // Другие картинки — набор заново
+    // Другие картинки — набор заново, прежние лепестки или пух — убрать
+    for (auto &s : this->sea_spot_)
+      this->mark_(s, false, 0, 0, 1, 1);
+    memset(this->sealife_, 0, sizeof(this->sealife_));
+    this->nsea_ = 0;
     for (auto &s : this->sea_sheet_)
       fx_sheet_free(s);
     this->sea_kind_ = kind;
@@ -166,24 +170,37 @@ void WeatherFx::seasons_apply_(const Params &p, bool relayout) {
       }
     }
   }
-  if (!relayout && n == this->nsea_)
+  if (!relayout)
     return;
-  for (auto &s : this->sea_spot_)
-    this->mark_(s, false, 0, 0, 1, 1);
-  this->nsea_ = this->sea_kind_ ? n : 0;
-  for (int i = 0; i < this->nsea_; i++)
-    this->sea_respawn_(i, true);
+  // Начались или стали гуще — недостающие лепестки прилетают сверху, а пух
+  // проступает где угодно; кончились — лепестки долетают, пух тает
+  const int want = this->sea_kind_ ? n : 0;
+  this->nsea_ = fx_relife(
+      this->sealife_, NSEA, [want](int i) { return i < want; },
+      [this](int i) {
+        this->mark_(this->sea_spot_[i], false, 0, 0, 1, 1);
+        this->sea_respawn_(i, true);
+      });
+  if (this->sea_kind_ == 2)
+    for (int i = 0; i < this->nsea_; i++)
+      if (this->sealife_[i] == LIFE_END && this->sea_rest_[i] <= 0)
+        this->sea_rest_[i] = 800;
 }
 
-void WeatherFx::sea_respawn_(int i, bool anywhere) {
+void WeatherFx::sea_respawn_(int i, bool enter) {
   const bool big = i % 2;
   this->sea_x_[i] = rnd_(20, 446);
-  this->sea_y_[i] = anywhere ? rnd_(-20, 420) : -16 - rnd_(0, 50);
+  // Над экраном; только начались — лепестки вразброс выше, чтобы прилетали
+  // один за другим, а пух, который плывёт медленно, проступает сразу по
+  // всему небу
+  const bool fade_in = enter && this->sea_kind_ == 2;
+  this->sea_y_[i] =
+      fade_in ? rnd_(-20, 420) : (enter ? fx_top(this->sea_x_[i]) - 8 - rnd_(0, 200) : -16 - rnd_(0, 50));
   this->sea_ph_[i] = rnd_(0, 628) / 100.0f;
   this->sea_rot_[i] = rnd_(0, 628) / 100.0f;
   this->sea_flip_[i] = rnd_(0, 628) / 100.0f;
   this->sea_rest_[i] = 0;
-  this->sea_opa_[i] = LV_OPA_COVER;
+  this->sea_opa_[i] = fade_in ? 0 : LV_OPA_COVER;
   if (this->sea_kind_ == 1) {
     // Лепесток падает медленнее листа, кружится и кувыркается
     this->sea_v_[i] = big ? 0.55f + (i % 3) * 0.12f : 0.38f + (i % 3) * 0.08f;
@@ -200,6 +217,8 @@ void WeatherFx::sea_respawn_(int i, bool anywhere) {
 void WeatherFx::seasons_frame_(float wind) {
   const float k = this->k_;
   for (int i = 0; i < this->nsea_; i++) {
+    if (this->sealife_[i] == LIFE_OFF)
+      continue;
     const bool big = i % 2;
     const int sz = big ? 1 : 0;
     Spot &sp = this->sea_spot_[i];
@@ -216,9 +235,19 @@ void WeatherFx::seasons_frame_(float wind) {
       }
       if (this->sea_rest_[i] <= 0) {
         this->mark_(sp, false, 0, 0, 1, 1);
-        this->sea_respawn_(i, false);
+        // Кончились — больше не появляется
+        if (this->sealife_[i] == LIFE_END)
+          this->sealife_[i] = LIFE_OFF;
+        else
+          this->sea_respawn_(i, false);
       }
       continue;
+    }
+    // Пух проступает за полторы секунды
+    if (this->sea_opa_[i] < LV_OPA_COVER) {
+      this->sea_opa_[i] = (lv_opa_t) std::min(255, (int) this->sea_opa_[i] + 1 + (int) (this->dt_ms_ * 0.17f));
+      if (sp.on)
+        this->invalidate_(sp.a);
     }
     float x = this->sea_x_[i], y = this->sea_y_[i];
     int idx;
@@ -255,9 +284,12 @@ void WeatherFx::seasons_frame_(float wind) {
       if (y < -20.0f)
         y = -20.0f;
       if (y > fx_bottom(x) + 10.0f) {
-        // Уплыла за нижний край — новая сверху
+        // Уплыла за нижний край — новая сверху; пух кончился — больше нет
         this->mark_(sp, false, 0, 0, 1, 1);
-        this->sea_respawn_(i, false);
+        if (this->sealife_[i] == LIFE_END)
+          this->sealife_[i] = LIFE_OFF;
+        else
+          this->sea_respawn_(i, false);
         continue;
       }
       float ang = fmodf(this->sea_rot_[i], 2 * FX_PI);
@@ -302,6 +334,7 @@ void WeatherFx::seasons_frame_(float wind) {
       this->invalidate_(sp.a);
     this->mark_(sp, this->visible_(a.x1, a.y1, w, hh) && !this->excluded_(a.x1, a.y1, w, hh), a.x1, a.y1, w, hh);
   }
+  this->nsea_ = fx_life_top(this->sealife_, this->nsea_);
 }
 
 void WeatherFx::seasons_paint_(lv_layer_t *layer, const lv_area_t &oc, const lv_area_t &clip) {

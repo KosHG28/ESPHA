@@ -6,6 +6,11 @@
 // большой прямоугольник справа. Пунктир, звёзды и подпись рисует слой
 // погоды. Планеты — по приближённым орбитам JPL: при часах — строкой с
 // цветными точками, без часов — картинками по дуге слева внизу.
+//
+// Здесь же — где сейчас на небе дома Солнце и Луна (их рисуют sun.cpp и
+// moon.cpp): по дуге от восхода слева до захода справа. Луна заходит на
+// место созвездия — оно вписывается рядом. И сумерки: после заката сначала
+// проступают планеты и яркие звёзды, потом остальные и само созвездие.
 #include "fx_draw.h"
 
 #include "planets.h"
@@ -26,6 +31,8 @@ struct SkyBox {
 };
 static const SkyBox BOX_TOP = {233.0f, 82.0f, 280.0f, 60.0f, 233, 24};
 static const SkyBox BOX_FULL = {300.0f, 225.0f, 210.0f, 230.0f, 300, 78};
+// Куда вписывается созвездие сейчас: BOX_TOP или BOX_FULL без той части,
+// где луна (con_box_)
 static SkyBox g_box = BOX_TOP;
 static const int CAP_W = 220;
 // Созвездие видно, если его середина не ниже 25° над горизонтом
@@ -206,14 +213,35 @@ static float best_turn(const float (*pts)[2], const int *sz, int n, float &size)
 void WeatherFx::layout_con_(int idx, const float (*pts)[2], int n) {
   const SkyCon &c = SKY_CONS[idx];
   n = std::min(n, (int) NCS);
-  int sz[NCS], ox[NCS], oy[NCS];
+  int sz[NCS]{}, ox[NCS], oy[NCS];
   for (int i = 0; i < n; i++)
     sz[i] = star_size(SKY_STARS[c.first + i].mag);
   float size;
   fit(pts, sz, n, best_turn(pts, sz, n, size), ox, oy);
+  // Подпись — над фигурой (без часов — сдвигается от луны, cap_place_)
+  const int lh = lv_font_get_line_height(this->font_cap_);
+  int cap_x = g_box.cap_x, cap_y = g_box.cap_y;
+  {
+    lv_point_t ts;
+    lv_text_get_size(&ts, c.name, this->font_cap_, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+    this->cap_half_ = (int) ts.x / 2 + 2;
+  }
+  this->cap_ok_ = true;
+  if (this->full_) {
+    lv_area_t fig = {10000, 10000, -10000, -10000};
+    for (int i = 0; i < n; i++) {
+      fig.x1 = std::min<int32_t>(fig.x1, ox[i] - 10);
+      fig.y1 = std::min<int32_t>(fig.y1, oy[i] - 10);
+      fig.x2 = std::max<int32_t>(fig.x2, ox[i] + 10);
+      fig.y2 = std::max<int32_t>(fig.y2, oy[i] + 10);
+    }
+    this->cap_ok_ = this->cap_place_(fig, &cap_x, &cap_y);
+  }
 
-  // Если фигура та же и почти не повернулась — не перерисовывать
-  bool same = this->con_on_ && this->con_idx_ == idx && this->cn_ == n;
+  // Если фигура та же, почти не повернулась и подпись на месте — не
+  // перерисовывать
+  bool same = this->con_on_ && this->con_idx_ == idx && this->cn_ == n && this->cap_area_.y1 == cap_y &&
+              this->cap_area_.x1 == cap_x - CAP_W / 2;
   for (int i = 0; same && i < n; i++)
     same = std::abs(ox[i] - this->csx_[i]) <= 1 && std::abs(oy[i] - this->csy_[i]) <= 1;
   if (same)
@@ -221,7 +249,7 @@ void WeatherFx::layout_con_(int idx, const float (*pts)[2], int n) {
 
   if (this->con_on_) {
     this->invalidate_(this->con_area_);
-    if (this->con_idx_ != idx)
+    if (this->con_idx_ != idx || this->cap_area_.y1 != cap_y || this->cap_area_.x1 != cap_x - CAP_W / 2)
       this->invalidate_(this->cap_area_);
   }
   this->con_idx_ = idx;
@@ -260,8 +288,7 @@ void WeatherFx::layout_con_(int idx, const float (*pts)[2], int n) {
     }
   }
   this->con_area_ = a;
-  this->cap_area_ = {g_box.cap_x - CAP_W / 2, g_box.cap_y, g_box.cap_x + CAP_W / 2,
-                     g_box.cap_y + lv_font_get_line_height(this->font_cap_)};
+  this->cap_area_ = {cap_x - CAP_W / 2, cap_y, cap_x + CAP_W / 2, cap_y + lh};
   this->con_on_ = true;
   this->invalidate_(this->con_area_);
   this->invalidate_(this->cap_area_);
@@ -336,6 +363,25 @@ void WeatherFx::sky_(const Params &p) {
     this->con_force_ = true;
     return;
   }
+  // Луна зашла на место созвездия или ушла с него — вписать фигуру заново;
+  // наползла на подпись — переставить подпись
+  {
+    int x1, y1, x2, y2;
+    this->con_box_(&x1, &y1, &x2, &y2);
+    const SkyBox &base = this->full_ ? BOX_FULL : BOX_TOP;
+    const float w = (float) (x2 - x1), h = (float) (y2 - y1);
+    const SkyBox nb = {x1 + w / 2, y1 + h / 2, w, h, base.cap_x, base.cap_y};
+    if (nb.cx != g_box.cx || nb.cy != g_box.cy || nb.w != g_box.w || nb.h != g_box.h) {
+      g_box = nb;
+      this->con_force_ = true;
+    }
+    if (this->full_ && this->con_on_ && this->cap_ok_ && this->moon_spot_.on) {
+      const lv_area_t &m = this->moon_spot_.a, &a = this->cap_area_;
+      const int cx = (a.x1 + a.x2) / 2;
+      if (m.x1 - 4 <= cx + this->cap_half_ && m.x2 + 4 >= cx - this->cap_half_ && m.y1 - 4 <= a.y2 && m.y2 + 4 >= a.y1)
+        this->con_force_ = true;
+    }
+  }
   const bool known = p.utc > 1600000000u && !std::isnan(p.lat) && !std::isnan(p.lon);
   const int64_t minute = known ? (int64_t) (p.utc / 60) : -1;
   if (!this->con_force_) {
@@ -358,11 +404,7 @@ void WeatherFx::sky_(const Params &p) {
   }
 
   // Местное звёздное время по часам и долготе
-  const double d = p.utc / 86400.0 + 2440587.5 - 2451545.0;
-  double gmst = fmod(280.46061837 + 360.98564736629 * d + p.lon, 360.0);
-  if (gmst < 0)
-    gmst += 360.0;
-  const float lst = (float) (gmst * M_PI / 180.0);
+  const float lst = (float) (local_sidereal(julian_day(p.utc), p.lon) * M_PI / 180.0);
   const float phi = p.lat * (PI_F / 180.0f), sphi = sinf(phi), cphi = cosf(phi);
   this->planets_(p.utc / 86400.0 + 2440587.5, lst, sphi, cphi);
 
@@ -406,6 +448,176 @@ void WeatherFx::sky_(const Params &p) {
   this->layout_con_(pick, pts, SKY_CONS[pick].n);
 }
 
+// ---- Солнце и луна по настоящему небу, сумерки ----
+
+// Дуги, по которым идут по небу солнце и луна: светило восходит на левом
+// конце дуги, к полудню поднимается на середину, заходит на правом конце.
+// Середина, высота концов («горизонт»), полуширина и высота дуги — у
+// светила, которое на юге стоит низко (10°, как солнце зимой) и высоко (60°,
+// как летом), и у луны. При часах дуга — в «шапке» над строкой погоды; луна
+// идёт чуть ниже солнца — под подписью созвездия. Без часов — над погодой
+// на улице, а подпись созвездия уступает луне место сама
+struct Dome {
+  float cx, yh, a, b_lo, b_hi, mb_lo, mb_hi;
+};
+static const Dome DOME_TOP = {233.0f, 158.0f, 168.0f, 82.0f, 90.0f, 74.0f, 80.0f};
+static const Dome DOME_FULL = {233.0f, 170.0f, 176.0f, 92.0f, 116.0f, 92.0f, 116.0f};
+
+void WeatherFx::ephem_(const Params &p) {
+  if (p.utc < 1600000000u || std::isnan(p.lat) || std::isnan(p.lon)) {
+    this->eph_ok_ = false;
+    return;
+  }
+  // Раз в 5 с: за это время солнце и луна сдвигаются по дуге меньше чем на
+  // пиксель
+  if (this->eph_ok_ && p.utc >= this->eph_utc_ && p.utc - this->eph_utc_ < 5)
+    return;
+  this->eph_ok_ = true;
+  this->eph_utc_ = p.utc;
+  this->sun_path_ = sun_path(p.utc, p.lat, p.lon);
+  this->moon_path_ = moon_path(p.utc, p.lat, p.lon, &this->moon_ph_now_, &this->moon_lit_);
+}
+
+// Где на экране светило с путём s (относительно слоя). Часовой угол от
+// восхода до захода раскладывается по дуге равномерно: у горизонта светило
+// поднимается почти отвесно, в полдень идёт почти вбок — как в жизни. false —
+// оно под горизонтом
+bool WeatherFx::dome_(const SkyPath &s, bool moon, float *x, float *y) const {
+  if (s.ha_set <= 0.0 || std::fabs(s.ha) > s.ha_set)
+    return false;
+  const Dome &d = this->full_ ? DOME_FULL : DOME_TOP;
+  const float th = (float) (s.ha / s.ha_set) * (PI_F / 2.0f);
+  const float lo = moon ? d.mb_lo : d.b_lo, hi = moon ? d.mb_hi : d.b_hi;
+  const float b = lo + (hi - lo) * fx_clamp01(((float) s.alt_top - 10.0f) / 50.0f);
+  *x = d.cx + d.a * sinf(th);
+  *y = d.yh - b * cosf(th);
+  return true;
+}
+
+// Сумерки: на какой высоте Солнца начинают проступать и проступают целиком
+// планеты, яркие звёзды, остальные звёзды и созвездие с пунктиром и
+// подписью. Вечером — по порядку, утром гаснут в обратном
+static const float TW_FROM[4] = {-0.8f, -1.5f, -3.0f, -3.5f};
+static const float TW_TO[4] = {-2.5f, -4.0f, -6.5f, -7.0f};
+
+void WeatherFx::twilight_() {
+  if (!this->stars_on_)
+    return;
+  uint8_t q[4];
+  for (int k = 0; k < 4; k++) {
+    // Время или место неизвестны или солнце высоко, а звёзды есть (проверка
+    // «Ясная ночь» днём) — всё сразу
+    float v = 1.0f;
+    if (this->eph_ok_ && this->sun_path_.alt < 2.0)
+      v = fx_smooth(TW_FROM[k], TW_TO[k], (float) this->sun_path_.alt);
+    q[k] = (uint8_t) lroundf(v * 16.0f);
+  }
+  if (memcmp(q, this->tw_q_, sizeof(q)) == 0)
+    return;
+  if (q[0] != this->tw_q_[0] && this->npl_)
+    this->invalidate_(this->full_ ? PL_AREA_FULL : PL_AREA);
+  if (this->con_on_) {
+    this->invalidate_(this->con_area_);
+    this->invalidate_(this->cap_area_);
+  }
+  memcpy(this->tw_q_, q, sizeof(q));
+  this->stars_show_();
+}
+
+// Куда вписать созвездие: «шапка» над строкой погоды или большой
+// прямоугольник справа — без того, что заслоняет луна. Если луна заходит в
+// прямоугольник, остаётся самая большая его часть слева, справа, сверху или
+// снизу от неё. Край луны берётся с шагом 8 px, чтобы фигура не
+// перестраивалась вслед за ней каждую минуту
+void WeatherFx::con_box_(int *x1, int *y1, int *x2, int *y2) const {
+  const SkyBox &b = this->full_ ? BOX_FULL : BOX_TOP;
+  *x1 = (int) (b.cx - b.w / 2);
+  *x2 = (int) (b.cx + b.w / 2);
+  *y1 = (int) (b.cy - b.h / 2);
+  *y2 = (int) (b.cy + b.h / 2);
+  if (!this->moon_spot_.on)
+    return;
+  const lv_area_t &m = this->moon_spot_.a;
+  const int mx1 = (int) ((m.x1 - 6) & ~7), my1 = (int) ((m.y1 - 6) & ~7);
+  const int mx2 = (int) ((m.x2 + 13) & ~7), my2 = (int) ((m.y2 + 13) & ~7);
+  if (mx1 > *x2 || mx2 < *x1 || my1 > *y2 || my2 < *y1)
+    return;
+  // Части прямоугольника слева, справа, сверху и снизу от луны — самая
+  // большая из тех, куда фигура ещё влезает
+  const int cand[4][4] = {{*x1, *y1, mx1, *y2}, {mx2, *y1, *x2, *y2}, {*x1, *y1, *x2, my1}, {*x1, my2, *x2, *y2}};
+  int best = -1, area = 0;
+  for (int i = 0; i < 4; i++) {
+    const int w = cand[i][2] - cand[i][0], h = cand[i][3] - cand[i][1];
+    if (w >= 60 && h >= 36 && w * h > area) {
+      area = w * h;
+      best = i;
+    }
+  }
+  if (best >= 0) {
+    *x1 = cand[best][0];
+    *y1 = cand[best][1];
+    *x2 = cand[best][2];
+    *y2 = cand[best][3];
+  }
+}
+
+// Где подписать созвездие без часов: луна ходит по всему верху неба. По
+// порядку: на обычном месте; прямо над фигурой; сбоку от луны на обычной
+// высоте; под фигурой. Подпись не заходит на луну, звёзды фигуры, планеты,
+// погоду на улице и за край круга. fig — где фигура, вместе с ореолом звёзд.
+// Возвращает, нашлось ли такое место (если нет — подпись на обычном месте)
+bool WeatherFx::cap_place_(const lv_area_t &fig, int *x, int *y) const {
+  const int lh = lv_font_get_line_height(this->font_cap_), half = this->cap_half_;
+  auto meets = [](int x1, int y1, int x2, int y2, const lv_area_t &b) {
+    return x1 <= b.x2 && x2 >= b.x1 && y1 <= b.y2 && y2 >= b.y1;
+  };
+  auto fits = [&](int cx, int top) {
+    const int x1 = cx - half, x2 = cx + half, y1 = top, y2 = top + lh;
+    // Внутри круга — все четыре угла
+    for (int k = 0; k < 4; k++) {
+      const int px = k & 1 ? x2 : x1, py = k & 2 ? y2 : y1;
+      if ((px - 233) * (px - 233) + (py - 233) * (py - 233) > 224 * 224)
+        return false;
+    }
+    if (this->moon_spot_.on) {
+      const lv_area_t &m = this->moon_spot_.a;
+      if (meets(x1, y1, x2, y2, {m.x1 - 4, m.y1 - 4, m.x2 + 4, m.y2 + 4}))
+        return false;
+    }
+    if (meets(x1, y1, x2, y2, {fig.x1 + 6, fig.y1 + 6, fig.x2 - 6, fig.y2 - 6}))
+      return false;
+    // Планеты — картинка и название справа от неё
+    for (int i = 0; i < std::min(this->npl_, PL_FULL_N); i++) {
+      const lv_image_dsc_t *img = PL_IMG[this->pl_idx_[i]];
+      const int pw = img->header.w, ph = img->header.h, pcx = PL_SLOT[i][0], pcy = PL_SLOT[i][1];
+      if (meets(x1, y1, x2, y2,
+                {pcx - pw / 2, std::min(pcy - ph / 2, pcy - 9), pcx + pw / 2 + 96, std::max(pcy + ph / 2, pcy + 11)}))
+        return false;
+    }
+    // Погода на улице — слева по центру
+    return !meets(x1, y1, x2, y2, {14, 205, 176, 262});
+  };
+  const SkyBox &b = BOX_FULL;
+  const int fcx = (int) (fig.x1 + fig.x2) / 2;
+  int cand[5][2] = {
+      {b.cap_x, b.cap_y}, {fcx, (int) fig.y1 - lh}, {b.cap_x, b.cap_y}, {b.cap_x, b.cap_y}, {fcx, (int) fig.y2 + 2}};
+  if (this->moon_spot_.on) {
+    const lv_area_t &m = this->moon_spot_.a;
+    cand[2][0] = (int) m.x1 - 6 - half;
+    cand[3][0] = (int) m.x2 + 6 + half;
+  }
+  for (const auto &c : cand) {
+    if (std::abs(c[0] - b.cap_x) <= 110 && fits(c[0], c[1])) {
+      *x = c[0];
+      *y = c[1];
+      return true;
+    }
+  }
+  *x = b.cap_x;
+  *y = b.cap_y;
+  return false;
+}
+
 // Часы ушли или вернулись: созвездие и планеты — заново под весь круг или
 // под «шапку»
 void WeatherFx::sky_full_() {
@@ -441,17 +653,20 @@ void WeatherFx::sky_paint_(lv_layer_t *layer, const lv_area_t &oc, const lv_area
   lv_draw_fill_dsc_t fill;
   lv_draw_fill_dsc_init(&fill);
   fill.opa = LV_OPA_COVER;
+  // Сумерки: что насколько проступило (twilight_)
+  auto tw = [this](int k) { return (lv_opa_t) (this->tw_q_[k] * 255 / 16); };
   lv_draw_line_dsc_t ln;
   lv_draw_line_dsc_init(&ln);
-  ln.opa = LV_OPA_COVER;
+  ln.opa = tw(3);
   const bool dim = this->dim_;
 
-  // Созвездие: пунктир, звёзды и подпись
-  if (this->con_on_) {
+  // Созвездие: пунктир, звёзды и подпись. В сумерки сначала проступают его
+  // яркие звёзды, потом остальные, последними — пунктир и подпись
+  if (this->con_on_ && this->tw_q_[1]) {
     if (to_abs(this->con_area_)) {
       ln.width = 2;
       ln.color = lv_color_hex(dim ? 0x6A7FA8 : 0x34435E);
-      for (int i = 0; i < this->ndash_; i++) {
+      for (int i = 0; i < (ln.opa > LV_OPA_MIN ? this->ndash_ : 0); i++) {
         const lv_point_precise_t *d = this->dash_[i];
         lv_area_t b = {(int32_t) std::min(d[0].x, d[1].x) + oc.x1 - 2, (int32_t) std::min(d[0].y, d[1].y) + oc.y1 - 2,
                        (int32_t) std::max(d[0].x, d[1].x) + oc.x1 + 2, (int32_t) std::max(d[0].y, d[1].y) + oc.y1 + 2};
@@ -466,32 +681,34 @@ void WeatherFx::sky_paint_(lv_layer_t *layer, const lv_area_t &oc, const lv_area
         const int x = this->csx_[i] + oc.x1, y = this->csy_[i] + oc.y1;
         lv_area_t a = {x - 10, y - 10, x + 10, y + 10};
         if (fx_hit(a, clip))
-          this->con_star_paint_(layer, x, y, this->csz_[i]);
+          this->con_star_paint_(layer, x, y, this->csz_[i], tw(this->csz_[i] >= 8 ? 1 : 2));
       }
     }
-    if (to_abs(this->cap_area_)) {
+    if (this->tw_q_[3] && to_abs(this->cap_area_)) {
       lv_draw_label_dsc_t lb;
       lv_draw_label_dsc_init(&lb);
       lb.text = this->con_name_;
       lb.font = this->font_cap_;
       lb.color = lv_color_hex(dim ? 0x8898B8 : 0x4C5A74);
       lb.align = LV_TEXT_ALIGN_CENTER;
-      lb.opa = LV_OPA_COVER;
+      lb.opa = tw(3);
       lv_draw_label(layer, &lb, &abs);
     }
   }
 
-  // Без часов — планеты картинками по дуге слева внизу, название справа
-  if (this->npl_ && this->full_) {
+  // Без часов — планеты картинками по дуге слева внизу, название справа.
+  // В сумерки планеты проступают первыми
+  if (this->npl_ && this->full_ && this->tw_q_[0]) {
     lv_area_t pa = {PL_AREA_FULL.x1 + oc.x1, PL_AREA_FULL.y1 + oc.y1, PL_AREA_FULL.x2 + oc.x1, PL_AREA_FULL.y2 + oc.y1};
     if (fx_hit(pa, clip)) {
       lv_draw_image_dsc_t im;
       lv_draw_image_dsc_init(&im);
+      im.opa = tw(0);
       lv_draw_label_dsc_t lb;
       lv_draw_label_dsc_init(&lb);
       lb.font = this->font_cap_;
       lb.color = lv_color_hex(dim ? 0x9AA8C4 : 0x5C6A84);
-      lb.opa = LV_OPA_COVER;
+      lb.opa = tw(0);
       lb.flag = LV_TEXT_FLAG_EXPAND;
       for (int i = 0; i < std::min(this->npl_, PL_FULL_N); i++) {
         const lv_image_dsc_t *img = PL_IMG[this->pl_idx_[i]];
@@ -510,17 +727,17 @@ void WeatherFx::sky_paint_(lv_layer_t *layer, const lv_area_t &oc, const lv_area
   }
 
   // Планеты: цветная точка и название
-  if (this->npl_ && !this->full_) {
+  if (this->npl_ && !this->full_ && this->tw_q_[0]) {
     lv_area_t pa = {PL_AREA.x1 + oc.x1, PL_AREA.y1 + oc.y1, PL_AREA.x2 + oc.x1, PL_AREA.y2 + oc.y1};
     if (fx_hit(pa, clip)) {
       lv_draw_label_dsc_t lb;
       lv_draw_label_dsc_init(&lb);
       lb.font = this->font_cap_;
       lb.color = lv_color_hex(dim ? 0x8898B8 : 0x4C5A74);
-      lb.opa = LV_OPA_COVER;
+      lb.opa = tw(0);
       lb.flag = LV_TEXT_FLAG_EXPAND;  // одной строкой, без переноса
       fill.radius = LV_RADIUS_CIRCLE;
-      fill.opa = LV_OPA_COVER;
+      fill.opa = tw(0);
       const int x0 = 233 - this->npl_ * PL_W / 2;
       for (int i = 0; i < this->npl_; i++) {
         const PlanetEl &pl = PLANETS[this->pl_idx_[i]];

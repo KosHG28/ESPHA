@@ -161,23 +161,39 @@ void WeatherFx::snow_apply_(const Params &p, bool relayout) {
   }
   if (!relayout)
     return;
-  for (auto &s : this->sns_)
-    this->mark_(s, false, 0, 0, 1, 1);
   // Сколько в каждом слое: стаек дальних — три четверти силы, хлопьев —
-  // половина, кристаллов — четверть. Дальние — первыми: рисуются раньше всех
-  const int nfar = c * 3 / 4, nmid = c / 2, nnear = c / 4;
-  this->nsn_ = std::min(NSN, nfar + nmid + nnear);
-  for (int i = 0; i < this->nsn_; i++) {
-    this->snk_[i] = (uint8_t) (i < nfar ? 0 : (i < nfar + nmid ? 1 : 2 + i % 2));
-    this->snow_respawn_(i, true);
-  }
+  // половина, кристаллов — четверть. У каждого слоя свои места: дальние —
+  // первыми (рисуются раньше всех), потом хлопья, потом кристаллы. Снег
+  // начался или усилился — недостающие снежинки начинают падать сверху,
+  // стихает — лишние долетают до земли и больше не появляются
+  const int nfar = std::min(SN_MID0, c * 3 / 4), nmid = std::min(SN_NEAR0 - SN_MID0, c / 2),
+            nnear = std::min(NSN - SN_NEAR0, c / 4);
+  this->nsn_ = fx_relife(
+      this->snlife_, NSN,
+      [nfar, nmid, nnear](int i) {
+        return i < SN_MID0 ? i < nfar : (i < SN_NEAR0 ? i - SN_MID0 < nmid : i - SN_NEAR0 < nnear);
+      },
+      [this](int i) {
+        this->snk_[i] = (uint8_t) (i < SN_MID0 ? 0 : (i < SN_NEAR0 ? 1 : 2 + i % 2));
+        this->mark_(this->sns_[i], false, 0, 0, 1, 1);
+        this->snow_respawn_(i, true);
+      });
 }
 
-void WeatherFx::snow_respawn_(int i, bool anywhere) {
+void WeatherFx::snow_respawn_(int i, bool enter) {
   const SnowLayer &l = SN_LAYERS[std::min<int>(this->snk_[i], 2)];
   this->snv_[i] = l.v0 + (l.v1 - l.v0) * rnd_(0, 101) / 100.0f;
   this->snx_[i] = rnd_(20, 446);
-  this->sny_[i] = anywhere ? rnd_(-30, 440) : -20 - rnd_(0, 60);
+  // Над экраном. Снег только пошёл: дальние стайки — еле заметные точки —
+  // сразу по всему небу, хлопья и кристаллы — у края круга и над ним
+  // вразброс: первые видны сразу, остальные подходят одна за другой
+  const float top = fx_top(this->snx_[i]);
+  if (!enter)
+    this->sny_[i] = -20 - rnd_(0, 60);
+  else if (this->snk_[i] == 0)
+    this->sny_[i] = top + rnd_(0, std::max(1, (int) (fx_bottom(this->snx_[i]) - top) - 30));
+  else
+    this->sny_[i] = top + 40 - rnd_(0, 130);
   this->snph_[i] = rnd_(0, 628) / 100.0f;
   this->snrot_[i] = rnd_(0, 628) / 100.0f;
   // Кристаллы поворачиваются в обе стороны, 8–25° в секунду
@@ -188,12 +204,15 @@ void WeatherFx::snow_respawn_(int i, bool anywhere) {
 void WeatherFx::snow_hide_() {
   for (auto &s : this->sns_)
     this->mark_(s, false, 0, 0, 1, 1);
+  memset(this->snlife_, 0, sizeof(this->snlife_));
   this->nsn_ = 0;
 }
 
 void WeatherFx::snow_frame_(float wind) {
   this->snow_tick_++;
   for (int i = 0; i < this->nsn_; i++) {
+    if (this->snlife_[i] == LIFE_OFF)
+      continue;
     const int kind = this->snk_[i], layer = std::min(kind, 2);
     float k = this->k_;
     if (layer == 0) {
@@ -212,10 +231,14 @@ void WeatherFx::snow_frame_(float wind) {
     this->snx_[i] = wrap_snow(this->snx_[i] + k * (cosf(this->snph_[i]) * l.sway + wind * l.drift));
     if (layer == 2)
       this->snrot_[i] += k * this->snw_[i];
-    // Упала на край круга или на сугроб — снова сверху
+    // Упала на край круга или на сугроб — снова сверху; снег стихает —
+    // больше не появляется
     const float x = this->snx_[i];
     if (this->sny_[i] > fx_bottom(x) - this->cover_ * cover_h(x) + 2.0f) {
-      this->snow_respawn_(i, false);
+      if (this->snlife_[i] == LIFE_END)
+        this->snlife_[i] = LIFE_OFF;
+      else
+        this->snow_respawn_(i, false);
       this->mark_(this->sns_[i], false, 0, 0, 1, 1);
       continue;
     }
@@ -245,6 +268,7 @@ void WeatherFx::snow_frame_(float wind) {
     }
     this->mark_(this->sns_[i], this->visible_(x1, y1, w, h) && !this->excluded_(x1, y1, w, h), x1, y1, w, h);
   }
+  this->nsn_ = fx_life_top(this->snlife_, this->nsn_);
 }
 
 void WeatherFx::snow_paint_(lv_layer_t *layer, const lv_area_t &oc, const lv_area_t &clip) {

@@ -63,7 +63,8 @@ void WeatherFx::meteor_sprite_() {
 }
 
 void WeatherFx::meteor_(uint32_t now) {
-  if (!this->stars_on_) {
+  // В светлые сумерки метеоров не видно
+  if (!this->stars_on_ || this->tw_q_[2] < 8) {
     this->next_met_ = 0;
     return;
   }
